@@ -1,4 +1,4 @@
-// Function to fetch and cache the list of parks
+// Function to fetch and cache park data
 async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuration) {
     const cachedData = localStorage.getItem(cacheKey);
     const cachedExpiry = localStorage.getItem(cacheExpiryKey);
@@ -27,6 +27,27 @@ async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuratio
         throw error;
     }
 }
+// Function to fetch user activations for a callsign
+async function fetchUserActivations(callsign) {
+    const url = `https://api.pota.app/profile/${callsign}`;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch activations for callsign ${callsign}: ${response.statusText}`);
+        }
+        const data = await response.json();
+
+        // Extract the references from recent_activity.activations
+        const activations = data.recent_activity?.activations || [];
+        const activatedReferences = activations.map((activation) => activation.reference);
+        console.log(`User ${callsign} has activated the following parks:`, activatedReferences);
+
+        return activatedReferences; // List of activated park references
+    } catch (error) {
+        console.error("Error fetching activations:", error.message);
+        return [];
+    }
+}
 
 // Function to initialize the map
 function initializeMap(lat, lng) {
@@ -45,27 +66,30 @@ function initializeMap(lat, lng) {
 
     return map;
 }
-// Function to get custom marker color based on activation count
-function getMarkerColor(activations) {
+
+// Function to determine marker color
+function getMarkerColor(activations, userActivated) {
+    if (userActivated) return "orange"; // User activated this park
     if (activations > 10) return "#ff6666"; // Light red
-    if (activations > 0) return "#ffff00"; // Yellow
-    return "#00ff00"; // Vivid green for exactly zero
+    if (activations > 0) return "#90ee90"; // Light green
+    return "#0000ff"; // Vivid blue
 }
 
-// Function to display park data on the map
-function displayParksOnMap(map, parks) {
+// Function to display parks on the map
+function displayParksOnMap(map, parks, userActivatedReferences) {
     parks.forEach((park) => {
-        const { name, id, latitude, longitude, activations } = park;
+        const { name, reference, latitude, longitude, activations } = park;
 
         if (latitude && longitude) {
-            // Determine marker color based on activations
-            const markerColor = getMarkerColor(activations);
+            const userActivated = userActivatedReferences.includes(reference); // Check if user activated this park
+            console.log(`Ref in displayParksOnMap: ${reference}`)
+            const markerColor = getMarkerColor(activations, userActivated);
 
             // Create a custom marker
             const customMarker = L.circleMarker([latitude, longitude], {
                 radius: 8, // Marker size
                 fillColor: markerColor, // Inner color
-                color: "#000", // Border color (black for contrast)
+                color: "#000", // Border color
                 weight: 1,
                 opacity: 1,
                 fillOpacity: 0.8,
@@ -74,8 +98,8 @@ function displayParksOnMap(map, parks) {
             // Add marker to the map with a popup and tooltip
             customMarker
                 .addTo(map)
-                .bindPopup(`<b>${name}</b><br>Identifier: ${id}<br>Activations: ${activations}`)
-                .bindTooltip(`${id}: ${name} (${activations} activations)`, { direction: "top" });
+                .bindPopup(`<b>${name}</b><br>Identifier: ${reference}<br>Activations: ${activations}`)
+                .bindTooltip(`${reference}: ${name} (${activations} activations)`, { direction: "top" });
         }
     });
 }
@@ -91,12 +115,33 @@ async function setupPOTAMap() {
         const parks = await fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuration);
 
         navigator.geolocation.getCurrentPosition(
-            (position) => {
+            async (position) => {
                 const userLat = position.coords.latitude;
                 const userLng = position.coords.longitude;
 
                 const map = initializeMap(userLat, userLng);
-                displayParksOnMap(map, parks);
+
+                // Ensure the Update Map button has an event listener
+                const updateButton = document.getElementById("updateMap");
+                if (updateButton) {
+                    updateButton.addEventListener("click", async () => {
+                        const callsignInput = document.getElementById("callsign");
+                        const callsign = callsignInput ? callsignInput.value.trim() : "";
+                        if (callsign) {
+                            // Fetch user activations and update the map
+                            const userActivatedReferences = await fetchUserActivations(callsign);
+                            displayParksOnMap(map, parks, userActivatedReferences);
+                        } else {
+                            // Clear user-specific activations
+                            displayParksOnMap(map, parks, []);
+                        }
+                    });
+                } else {
+                    console.error("Update Map button not found in the DOM.");
+                }
+
+                // Initial display without user activations
+                displayParksOnMap(map, parks, []);
             },
             (error) => {
                 console.error("Error getting location:", error.message);

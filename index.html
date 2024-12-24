@@ -4,23 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>POTA Map Viewer</title>
-    <link
-            rel="stylesheet"
-            href="https://unpkg.com/leaflet/dist/leaflet.css"
-    />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <style>
         body {
             margin: 0;
             padding: 0;
         }
+        #controls {
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-bottom: 1px solid #ccc;
+        }
         #map {
-            height: 100vh; /* Full height of the viewport */
+            height: calc(100vh - 50px); /* Full height minus the controls */
         }
     </style>
 </head>
 <body>
+<div id="controls">
+    <label for="callsign">Enter your callsign: </label>
+    <input type="text" id="callsign" placeholder="e.g., W1GRD" />
+    <button id="updateMap">Update Map</button>
+</div>
 <div id="map"></div>
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script src="script.js"></script> <!-- Link to your JS file -->
+<script src="scripts.js"></script>
 </body>
 </html>
