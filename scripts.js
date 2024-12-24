@@ -1,3 +1,6 @@
+//TODO Add funtion to upload activation data. Once we have the whole set,
+//we can get the 25 most recent by API
+
 // Function to fetch and cache park data
 async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuration) {
     const cachedData = localStorage.getItem(cacheKey);
@@ -27,26 +30,60 @@ async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuratio
         throw error;
     }
 }
-// Function to fetch user activations for a callsign
-async function fetchUserActivations(callsign) {
-    const url = `https://api.pota.app/profile/${callsign}`;
-    try {
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch activations for callsign ${callsign}: ${response.statusText}`);
+
+// Function to fetch activations for parks currently displayed
+async function fetchActivationsForVisibleParks(callsign, visibleParks) {
+    if (callsign.toUpperCase() === "W1GRD") {
+        try {
+            console.log("Reading activations from /data/w1grd.json...");
+            const response = await fetch("/data/w1grd.json");
+            if (!response.ok) {
+                throw new Error(`Failed to fetch activations from /data/w1grd.json: ${response.statusText}`);
+            }
+            const data = await response.json();
+
+            // Extract references of activated parks
+            const activations = data.activations || [];
+            const activatedReferences = activations.map((activation) => activation.reference);
+
+            console.log(`User ${callsign} has activated these references:`, activatedReferences);
+            return activatedReferences.filter((ref) => visibleParks.includes(ref)); // Only visible parks
+        } catch (error) {
+            console.error("Error reading activations from /data/w1grd.json:", error.message);
+            return [];
         }
-        const data = await response.json();
+    } else {
+        // Default API-based behavior for other callsigns
+        const url = `https://api.pota.app/profile/${callsign}`;
+        try {
+            console.log(`Fetching activations for ${callsign} from API...`);
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch activations for callsign ${callsign}: ${response.statusText}`);
+            }
+            const data = await response.json();
 
-        // Extract the references from recent_activity.activations
-        const activations = data.recent_activity?.activations || [];
-        const activatedReferences = activations.map((activation) => activation.reference);
-        console.log(`User ${callsign} has activated the following parks:`, activatedReferences);
+            // Extract references of activated parks
+            const activations = data.recent_activity?.activations || [];
+            const activatedReferences = activations.map((activation) => activation.reference);
 
-        return activatedReferences; // List of activated park references
-    } catch (error) {
-        console.error("Error fetching activations:", error.message);
-        return [];
+            console.log(`User ${callsign} has activated these references:`, activatedReferences);
+            return activatedReferences.filter((ref) => visibleParks.includes(ref)); // Only visible parks
+        } catch (error) {
+            console.error("Error fetching activations:", error.message);
+            return [];
+        }
     }
+}
+
+
+// Function to filter parks by visible bounds
+function filterParksByBounds(parks, bounds) {
+    return parks.filter((park) => {
+        const { latitude, longitude } = park;
+        if (!latitude || !longitude) return false;
+        return bounds.contains([latitude, longitude]);
+    });
 }
 
 // Function to initialize the map
@@ -69,7 +106,7 @@ function initializeMap(lat, lng) {
 
 // Function to determine marker color
 function getMarkerColor(activations, userActivated) {
-    if (userActivated) return "orange"; // User activated this park
+    if (userActivated) return "#ffa500"; // Orange for user-activated parks
     if (activations > 10) return "#ff6666"; // Light red
     if (activations > 0) return "#90ee90"; // Light green
     return "#0000ff"; // Vivid blue
@@ -82,7 +119,6 @@ function displayParksOnMap(map, parks, userActivatedReferences) {
 
         if (latitude && longitude) {
             const userActivated = userActivatedReferences.includes(reference); // Check if user activated this park
-            console.log(`Ref in displayParksOnMap: ${reference}`)
             const markerColor = getMarkerColor(activations, userActivated);
 
             // Create a custom marker
@@ -121,24 +157,26 @@ async function setupPOTAMap() {
 
                 const map = initializeMap(userLat, userLng);
 
-                // Ensure the Update Map button has an event listener
-                const updateButton = document.getElementById("updateMap");
-                if (updateButton) {
-                    updateButton.addEventListener("click", async () => {
-                        const callsignInput = document.getElementById("callsign");
-                        const callsign = callsignInput ? callsignInput.value.trim() : "";
-                        if (callsign) {
-                            // Fetch user activations and update the map
-                            const userActivatedReferences = await fetchUserActivations(callsign);
-                            displayParksOnMap(map, parks, userActivatedReferences);
-                        } else {
-                            // Clear user-specific activations
-                            displayParksOnMap(map, parks, []);
-                        }
-                    });
-                } else {
-                    console.error("Update Map button not found in the DOM.");
-                }
+                // Event listener for the Update Map button
+                document.getElementById("updateMap").addEventListener("click", async () => {
+                    const callsignInput = document.getElementById("callsign");
+                    const callsign = callsignInput ? callsignInput.value.trim() : "";
+
+                    if (callsign) {
+                        // Get the visible bounds and filter parks
+                        const bounds = map.getBounds();
+                        const visibleParks = filterParksByBounds(parks, bounds).map((park) => park.reference);
+
+                        // Fetch activations for visible parks and update the map
+                        const userActivatedReferences = await fetchActivationsForVisibleParks(
+                            callsign,
+                            visibleParks
+                        );
+                        displayParksOnMap(map, parks, userActivatedReferences);
+                    } else {
+                        displayParksOnMap(map, parks, []); // No user activations
+                    }
+                });
 
                 // Initial display without user activations
                 displayParksOnMap(map, parks, []);
