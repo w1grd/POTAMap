@@ -1,6 +1,5 @@
 // Function to fetch and cache the list of parks
 async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuration) {
-    // Check if data is already cached and still valid
     const cachedData = localStorage.getItem(cacheKey);
     const cachedExpiry = localStorage.getItem(cacheExpiryKey);
 
@@ -9,7 +8,6 @@ async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuratio
         return JSON.parse(cachedData);
     }
 
-    // Fetch new data from the API
     try {
         console.log("Fetching fresh park data from API...");
         const response = await fetch(apiUrl);
@@ -19,7 +17,6 @@ async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuratio
 
         const data = await response.json();
 
-        // Cache the data and expiry timestamp
         localStorage.setItem(cacheKey, JSON.stringify(data));
         localStorage.setItem(cacheExpiryKey, (Date.now() + cacheDuration).toString());
         console.log("Park data fetched and cached successfully.");
@@ -33,7 +30,7 @@ async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuratio
 
 // Function to initialize the map
 function initializeMap(lat, lng) {
-    const map = L.map("map").setView([lat, lng], 10); // Centered at user's location
+    const map = L.map("map").setView([lat, lng], 10);
 
     // Add OpenStreetMap tiles
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -48,18 +45,37 @@ function initializeMap(lat, lng) {
 
     return map;
 }
+// Function to get custom marker color based on activation count
+function getMarkerColor(activations) {
+    if (activations > 10) return "#ff6666"; // Light red
+    if (activations > 0) return "#ffff00"; // Yellow
+    return "#00ff00"; // Vivid green for exactly zero
+}
 
 // Function to display park data on the map
 function displayParksOnMap(map, parks) {
     parks.forEach((park) => {
-        const { name, reference, latitude, longitude } = park;
+        const { name, id, latitude, longitude, activations } = park;
 
         if (latitude && longitude) {
-            // Add marker for each park
-            L.marker([latitude, longitude])
+            // Determine marker color based on activations
+            const markerColor = getMarkerColor(activations);
+
+            // Create a custom marker
+            const customMarker = L.circleMarker([latitude, longitude], {
+                radius: 8, // Marker size
+                fillColor: markerColor, // Inner color
+                color: "#000", // Border color (black for contrast)
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.8,
+            });
+
+            // Add marker to the map with a popup and tooltip
+            customMarker
                 .addTo(map)
-                .bindPopup(`<b>${name}</b><br>Identifier: ${reference}`) // Popup with name and ID
-                .bindTooltip(`${reference}: ${name}`, { direction: "top" }); // Tooltip with ID and name
+                .bindPopup(`<b>${name}</b><br>Identifier: ${id}<br>Activations: ${activations}`)
+                .bindTooltip(`${id}: ${name} (${activations} activations)`, { direction: "top" });
         }
     });
 }
@@ -72,19 +88,14 @@ async function setupPOTAMap() {
     const cacheDuration = 10 * 24 * 60 * 60 * 1000; // 10 days in milliseconds
 
     try {
-        // Fetch and cache the list of parks
         const parks = await fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuration);
 
-        // Use Geolocation API to get user's current position
         navigator.geolocation.getCurrentPosition(
             (position) => {
                 const userLat = position.coords.latitude;
                 const userLng = position.coords.longitude;
 
-                // Initialize the map
                 const map = initializeMap(userLat, userLng);
-
-                // Display parks on the map
                 displayParksOnMap(map, parks);
             },
             (error) => {
