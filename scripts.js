@@ -3,14 +3,24 @@ let activations = [];
 let map; // Leaflet map instance
 let parks = []; // Global variable to store parks data
 
-// Function to initialize the hamburger menu
+/**
+ * Ensures that the DOM is fully loaded before executing scripts.
+ */
+document.addEventListener('DOMContentLoaded', () => {
+    initializeMenu();
+    setupPOTAMap();
+});
+
+/**
+ * Initializes the hamburger menu.
+ */
 function initializeMenu() {
     const menu = document.createElement('div');
     menu.id = 'hamburgerMenu';
     menu.innerHTML = `
         <div id="menuToggle">
             <input type="checkbox" id="menuCheckbox" />
-            <label for="menuCheckbox">
+            <label for="menuCheckbox" aria-label="Toggle Menu">
                 <span></span>
                 <span></span>
                 <span></span>
@@ -35,9 +45,30 @@ function initializeMenu() {
     document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
     document.getElementById('toggleActivations').addEventListener('change', toggleActivations);
     document.getElementById('updateActivations').addEventListener('click', handleUpdateActivations);
+    console.log("Hamburger menu initialized."); // Debugging
 }
 
-// Function to handle updating activations via API
+/**
+ * Creates a debounced version of the provided function.
+ * @param {Function} func - The function to debounce.
+ * @param {number} wait - The delay in milliseconds.
+ * @returns {Function} The debounced function.
+ */
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func.apply(this, args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+/**
+ * Handles updating activations via API.
+ */
 async function handleUpdateActivations() {
     const callsign = prompt('Enter your callsign:');
     if (!callsign) {
@@ -56,6 +87,7 @@ async function handleUpdateActivations() {
 
         // Retrieve existing activations from local storage
         let storedActivations = JSON.parse(localStorage.getItem('activations')) || [];
+        console.log("Stored Activations Before Update:", storedActivations); // Debugging
 
         // Create a map for quick lookup to avoid duplicates
         const activationMap = new Map();
@@ -65,25 +97,30 @@ async function handleUpdateActivations() {
         recentActivations.forEach(act => {
             if (!activationMap.has(act.reference)) {
                 activationMap.set(act.reference, act);
+                console.log(`Added new activation: ${act.reference}`); // Debugging
+            } else {
+                console.log(`Duplicate activation ignored: ${act.reference}`); // Debugging
             }
         });
 
         // Update the global activations array and local storage
         activations = Array.from(activationMap.values());
         localStorage.setItem('activations', JSON.stringify(activations));
-
-        alert('Activations updated successfully!');
         console.log("Updated Activations:", activations); // Debugging
 
+        alert('Activations updated successfully!');
+
         // Refresh the map to reflect updated activations
-        refreshMapActivations();
+        updateActivationsInView();
     } catch (error) {
         console.error('Error updating activations:', error);
         alert('Failed to update activations.');
     }
 }
 
-// Function to handle file upload and append activations
+/**
+ * Handles file upload and appends activations.
+ */
 function handleFileUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -91,37 +128,61 @@ function handleFileUpload(event) {
     const reader = new FileReader();
     reader.onload = (e) => {
         try {
-            const newActivations = JSON.parse(e.target.result);
-            console.log("Uploaded Activations:", newActivations); // Debugging
+            const parsedData = JSON.parse(e.target.result);
+            let newActivations;
 
-            if (!Array.isArray(newActivations)) {
-                throw new Error('Uploaded JSON is not an array of activations.');
+            // Determine the format of the uploaded JSON
+            if (Array.isArray(parsedData)) {
+                newActivations = parsedData;
+                console.log("Uploaded JSON is an array of activations.");
+            } else if (parsedData.activations && Array.isArray(parsedData.activations)) {
+                newActivations = parsedData.activations;
+                console.log("Uploaded JSON contains an 'activations' array.");
+            } else {
+                throw new Error('Uploaded JSON does not contain an array of activations.');
             }
+
+            console.log("Uploaded Activations:", newActivations); // Debugging
 
             // Retrieve existing activations from local storage
             const storedActivations = JSON.parse(localStorage.getItem('activations')) || [];
             console.log("Stored Activations Before Upload:", storedActivations); // Debugging
 
-            // Create a map for quick lookup to avoid duplicates
+            // Create a map for quick lookup to avoid duplicates based on 'reference'
             const activationMap = new Map();
             storedActivations.forEach(act => activationMap.set(act.reference, act));
 
-            // Append new activations, avoiding duplicates
+            // Initialize counters for user feedback
+            let appendedCount = 0;
+            let duplicateCount = 0;
+            let invalidCount = 0;
+
+            // Append new activations, avoiding duplicates and validating entries
             newActivations.forEach(act => {
-                if (!activationMap.has(act.reference)) {
-                    activationMap.set(act.reference, act);
+                if (act.reference && act.name) { // Basic validation
+                    if (!activationMap.has(act.reference)) {
+                        activationMap.set(act.reference, act);
+                        appendedCount++;
+                        console.log(`Appended new activation: ${act.reference}`); // Debugging
+                    } else {
+                        duplicateCount++;
+                        console.log(`Duplicate activation ignored: ${act.reference}`); // Debugging
+                    }
+                } else {
+                    invalidCount++;
+                    console.warn(`Invalid activation entry skipped: ${JSON.stringify(act)}`); // Debugging
                 }
             });
 
             // Update the global activations array and local storage
             activations = Array.from(activationMap.values());
             localStorage.setItem('activations', JSON.stringify(activations));
-
-            alert('Activations appended successfully!');
             console.log("Activations After Upload:", activations); // Debugging
 
+            alert(`Activations appended successfully!\nAppended: ${appendedCount}\nDuplicates: ${duplicateCount}\nInvalid: ${invalidCount}`);
+
             // Refresh the map to reflect new activations
-            refreshMapActivations();
+            updateActivationsInView();
         } catch (err) {
             console.error('Error uploading activations:', err);
             alert('Invalid JSON file or incorrect data format.');
@@ -130,7 +191,11 @@ function handleFileUpload(event) {
     reader.readAsText(file);
 }
 
-// Function to fetch recent activations from the POTA.app API
+/**
+ * Fetches recent activations from the POTA.app API.
+ * @param {string} callsign - The user's callsign.
+ * @returns {Promise<Array>} The list of recent activations.
+ */
 async function fetchRecentActivations(callsign) {
     const url = `https://api.pota.app/profile/${callsign}`;
     try {
@@ -149,12 +214,18 @@ async function fetchRecentActivations(callsign) {
     }
 }
 
-// Function to toggle the display of user's activations
+/**
+ * Toggles the display of user's activations.
+ */
 async function toggleActivations(event) {
     const showActivations = event.target.checked;
+    console.log(`Show My Activations toggled to: ${showActivations}`); // Debugging
     if (!showActivations) {
-        // Hide activations by refreshing the map without user activations
-        refreshMapActivations();
+        // Hide activations by clearing the layer
+        if (map.activationsLayer) {
+            map.activationsLayer.clearLayers();
+            console.log("Cleared activation markers."); // Debugging
+        }
         return;
     }
 
@@ -187,50 +258,137 @@ async function toggleActivations(event) {
         recentActivations.forEach(act => {
             if (!activationMap.has(act.reference)) {
                 activationMap.set(act.reference, act);
+                console.log(`Added activation from toggle fetch: ${act.reference}`); // Debugging
             }
         });
 
         // Update the global activations array and local storage
         activations = Array.from(activationMap.values());
         localStorage.setItem('activations', JSON.stringify(activations));
+        console.log("Activations After Toggle Fetch:", activations); // Debugging
 
         alert('Activations loaded successfully!');
-        console.log("Activations After Toggle Fetch:", activations); // Debugging
     } else {
         // If activations are already loaded, ensure 'activations' variable is up to date
         activations = storedActivations;
+        console.log("Activations are already loaded from local storage."); // Debugging
     }
 
-    // Highlight activations on the map
-    const activatedReferences = activations.map((activation) => activation.reference);
-    console.log("Activated References:", activatedReferences); // Debugging
-    displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
+    // Update the activations on the map based on current view
+    updateActivationsInView();
 }
 
-// Function to refresh the map based on current activations
+/**
+ * Retrieves the current geographical bounds of the map.
+ * @returns {L.LatLngBounds} The current map bounds.
+ */
+function getCurrentMapBounds() {
+    return map.getBounds();
+}
+
+/**
+ * Filters activated parks that are within the current map bounds.
+ * @param {Array} activations - The list of activated parks.
+ * @param {Array} parks - The complete list of parks.
+ * @param {L.LatLngBounds} bounds - The current map bounds.
+ * @returns {Array} List of activated parks within bounds.
+ */
+function getActivatedParksInBounds(activations, parks, bounds) {
+    const filteredParks = activations.filter((activation) => {
+        // Find the corresponding park in the parks list
+        const park = parks.find(p => p.reference === activation.reference);
+        if (park && park.latitude && park.longitude) {
+            const latLng = L.latLng(park.latitude, park.longitude);
+            const isWithin = bounds.contains(latLng);
+            console.log(`Park ${park.reference} (${park.name}) is within bounds: ${isWithin}`); // Debugging
+            return isWithin;
+        }
+        console.warn(`Invalid park data for reference: ${activation.reference}`); // Debugging
+        return false;
+    });
+    console.log("Filtered Activated Parks:", filteredParks); // Debugging
+    return filteredParks;
+}
+
+/**
+ * Updates the map to display activated parks within the current map view.
+ */
+function updateActivationsInView() {
+    if (!map) {
+        console.error("Map instance is not initialized.");
+        return;
+    }
+
+    const bounds = getCurrentMapBounds();
+    console.log("Current Map Bounds:", bounds.toBBoxString()); // Debugging
+
+    // Get all parks within the current bounds
+    const parksInBounds = parks.filter(park => {
+        if (park.latitude && park.longitude) {
+            const latLng = L.latLng(park.latitude, park.longitude);
+            return bounds.contains(latLng);
+        }
+        console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
+        return false;
+    });
+
+    console.log("Parks in Current View:", parksInBounds); // Debugging
+
+    // Clear existing markers
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+        console.log("Cleared existing markers."); // Debugging
+    } else {
+        map.activationsLayer = L.layerGroup().addTo(map);
+        console.log("Created activationsLayer."); // Debugging
+    }
+
+    // Determine which parks are activated by the user within bounds
+    const activatedReferences = activations
+        .filter(act => parksInBounds.some(p => p.reference === act.reference))
+        .map(act => act.reference);
+
+    console.log("Activated References in Current View:", activatedReferences); // Debugging
+
+    // Display all parks in bounds, highlighting activated ones
+    displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
+    console.log("Displayed all parks within current view with highlights."); // Debugging
+}
+
+/**
+ * Refreshes the map activations based on the current state.
+ */
 function refreshMapActivations() {
     // Clear existing markers or layers if necessary
     if (map.activationsLayer) {
-        map.removeLayer(map.activationsLayer);
+        map.activationsLayer.clearLayers();
+        console.log("Cleared existing activation markers."); // Debugging
     }
 
     // Create a new layer group
     map.activationsLayer = L.layerGroup().addTo(map);
-    console.log("Created activationsLayer"); // Debugging
+    console.log("Created activationsLayer."); // Debugging
 
     // Determine which activations to display
     let activatedReferences = [];
     const toggleCheckbox = document.getElementById('toggleActivations');
     if (toggleCheckbox && toggleCheckbox.checked) {
         activatedReferences = activations.map(act => act.reference);
+        console.log("Activated References in Refresh:", activatedReferences); // Debugging
     }
-    console.log("Activated References in Refresh:", activatedReferences); // Debugging
-
     // Display parks with the current activations
     displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
+    console.log("Displayed activated parks (if any) based on refresh."); // Debugging
 }
 
-// Function to fetch and cache park data
+/**
+ * Fetches and caches park data from the API.
+ * @param {string} apiUrl - The API endpoint URL.
+ * @param {string} cacheKey - The local storage key for park data.
+ * @param {string} cacheExpiryKey - The local storage key for cache expiry.
+ * @param {number} cacheDuration - Duration in milliseconds before cache expires.
+ * @returns {Promise<Object|Array>} The fetched park data.
+ */
 async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuration) {
     const cachedData = localStorage.getItem(cacheKey);
     const cachedExpiry = localStorage.getItem(cacheExpiryKey);
@@ -267,7 +425,12 @@ async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuratio
     }
 }
 
-// Function to initialize the map
+/**
+ * Initializes the Leaflet map.
+ * @param {number} lat - Latitude for the map center.
+ * @param {number} lng - Longitude for the map center.
+ * @returns {L.Map} The initialized Leaflet map instance.
+ */
 function initializeMap(lat, lng) {
     const mapInstance = L.map("map").setView([lat, lng], 10);
     console.log("Initialized map at:", lat, lng); // Debugging
@@ -276,57 +439,71 @@ function initializeMap(lat, lng) {
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; OpenStreetMap contributors',
     }).addTo(mapInstance);
+    console.log("Added OpenStreetMap tiles."); // Debugging
 
     // Add marker for user's location
     L.marker([lat, lng])
         .addTo(mapInstance)
         .bindPopup("Your Location")
         .openPopup();
+    console.log("Added user location marker."); // Debugging
 
     return mapInstance;
 }
 
-// Function to display parks on the map
+/**
+ * Displays parks on the map, highlighting user-activated ones.
+ * @param {L.Map} map - The Leaflet map instance.
+ * @param {Array} parks - The complete list of parks.
+ * @param {Array} userActivatedReferences - List of activated park references to highlight.
+ * @param {L.LayerGroup} layerGroup - The layer group to add markers to.
+ */
 function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map.activationsLayer) {
-    console.log("Displaying parks on the map:", parks.length); // Debugging
-    console.log("User Activated References:", userActivatedReferences); // Debugging
+    console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
 
     parks.forEach((park) => {
-        const { name, reference, latitude, longitude, activations } = park;
+        const { reference, name, latitude, longitude, activations } = park;
+        const isUserActivated = userActivatedReferences.includes(reference);
+        const markerColor = getMarkerColor(activations, isUserActivated);
 
-        if (latitude && longitude) {
-            const userActivated = userActivatedReferences.includes(reference); // Check if user activated this park
-            const markerColor = getMarkerColor(activations, userActivated);
-            console.log(`Adding marker for: ${name} (${reference}) with color: ${markerColor}`); // Debugging
+        console.log(`Adding marker for: ${name} (${reference}) with color: ${markerColor}`); // Debugging
 
-            // Create a custom marker
-            const customMarker = L.circleMarker([latitude, longitude], {
-                radius: 8, // Marker size
-                fillColor: markerColor, // Inner color
-                color: "#000", // Border color
-                weight: 1,
-                opacity: 1,
-                fillOpacity: 0.8,
-            });
+        // Create a custom marker
+        const customMarker = L.circleMarker([latitude, longitude], {
+            radius: 6, // Marker size
+            fillColor: markerColor, // Inner color
+            color: "#000", // Border color
+            weight: 1,
+            opacity: 1, // Border opacity
+            fillOpacity: 0.9, // Fill opacity
+        });
 
-            // Add marker to the specified layer group
-            customMarker
-                .addTo(layerGroup)
-                .bindPopup(`<b>${name}</b><br>Identifier: ${reference}<br>Activations: ${activations}`)
-                .bindTooltip(`${reference}: ${name} (${activations} activations)`, { direction: "top" });
-        }
+        // Add marker to the specified layer group
+        customMarker
+            .addTo(layerGroup)
+            .bindPopup(`<b>${name}</b><br>Identifier: ${reference}<br>Activations: ${activations}`)
+            .bindTooltip(`${reference}: ${name} (${activations} activations)`, { direction: "top" });
     });
+
+    console.log("All parks displayed with appropriate highlights."); // Debugging
 }
 
-// Function to determine marker color
+/**
+ * Determines the marker color based on activations and user activation status.
+ * @param {number} activations - The number of activations for the park.
+ * @param {boolean} userActivated - Whether the user has activated the park.
+ * @returns {string} The color code for the marker.
+ */
 function getMarkerColor(activations, userActivated) {
     if (userActivated) return "#ffa500"; // Orange for user-activated parks
-    if (activations > 10) return "#ff6666"; // Light red
-    if (activations > 0) return "#90ee90"; // Light green
-    return "#0000ff"; // Vivid blue
+    if (activations > 10) return "#ff6666"; // Light red for highly active parks
+    if (activations > 0) return "#90ee90"; // Light green for active parks
+    return "#0000ff"; // Vivid blue for inactive parks
 }
 
-// Function to initialize the map and fetch parks
+/**
+ * Initializes the map and fetches parks data.
+ */
 async function setupPOTAMap() {
     const apiUrl = 'https://api.pota.app/program/parks/US';
     const cacheKey = 'pota-parks';
@@ -338,9 +515,17 @@ async function setupPOTAMap() {
         parks = Array.isArray(parksData) ? parksData : (parksData.parks || []);
         console.log("Parks Loaded:", parks); // Debugging
 
-        // Initialize global activations from local storage
+        // Validate activations
         activations = JSON.parse(localStorage.getItem('activations')) || [];
         console.log("Initial Activations:", activations); // Debugging
+
+        // Optional: Validate that activations correspond to existing parks
+        activations.forEach(act => {
+            const exists = parks.some(p => p.reference === act.reference);
+            if (!exists) {
+                console.warn(`Activation reference ${act.reference} does not match any park.`);
+            }
+        });
 
         navigator.geolocation.getCurrentPosition(
             (position) => {
@@ -351,16 +536,26 @@ async function setupPOTAMap() {
 
                 // Create a layer group for activations
                 map.activationsLayer = L.layerGroup().addTo(map);
-                console.log("Created activationsLayer"); // Debugging
+                console.log("Created activationsLayer."); // Debugging
 
-                // Initial display with or without activations based on toggle state
+                // Attach event listener for map view changes with debouncing
+                map.on('moveend', debounce(() => {
+                    console.log("Map moved or zoomed."); // Debugging
+                    updateActivationsInView();
+                }, 300));
+                console.log("Attached moveend event listener with debounce."); // Debugging
+
+                // Initial display based on toggle state
                 const toggleCheckbox = document.getElementById('toggleActivations');
                 if (toggleCheckbox && toggleCheckbox.checked) {
-                    const activatedReferences = activations.map(act => act.reference);
-                    console.log("Initial Activated References:", activatedReferences); // Debugging
-                    displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
+                    updateActivationsInView();
                 } else {
+                    // Display all parks without highlighting activations
+                    if (map.activationsLayer) {
+                        map.activationsLayer.clearLayers();
+                    }
                     displayParksOnMap(map, parks, [], map.activationsLayer);
+                    console.log("Displayed all parks without activated highlights."); // Debugging
                 }
             },
             (error) => {
@@ -373,94 +568,95 @@ async function setupPOTAMap() {
     }
 }
 
-// Add CSS for the hamburger menu
-const style = document.createElement('style');
-style.innerHTML = `
-    /* Hamburger Menu Container */
-    #hamburgerMenu {
-        position: absolute;
-        top: 10px;
-        left: 10px;
-        z-index: 1000;
-    }
+/**
+ * Adds CSS styles for the hamburger menu.
+ */
+(function addHamburgerMenuStyles() {
+    const style = document.createElement('style');
+    style.innerHTML = `
+        /* Hamburger Menu Container */
+        #hamburgerMenu {
+            position: absolute;
+            top: 10px;
+            right: 10px; /* Changed from left: 10px to right: 10px */
+            z-index: 1000;
+        }
 
-    /* Menu Toggle */
-    #menuToggle {
-        display: flex;
-        flex-direction: column;
-        cursor: pointer;
-        user-select: none;
-    }
+        /* Menu Toggle */
+        #menuToggle {
+            display: flex;
+            flex-direction: column;
+            cursor: pointer;
+            user-select: none;
+        }
 
-    /* Hide the checkbox */
-    #menuToggle input[type="checkbox"] {
-        display: none;
-    }
+        /* Hide the checkbox */
+        #menuToggle input[type="checkbox"] {
+            display: none;
+        }
 
-    /* Hamburger Lines within Label */
-    #menuToggle label span {
-        background: #333;
-        height: 3px;
-        margin: 5px 0;
-        width: 25px;
-        transition: all 0.3s ease;
-        display: block;
-    }
+        /* Hamburger Lines within Label */
+        #menuToggle label span {
+            background: #333;
+            height: 3px;
+            margin: 5px 0;
+            width: 25px;
+            transition: all 0.3s ease;
+            display: block;
+        }
 
-    /* Menu Styling */
-    #menu {
-        display: none;
-        list-style: none;
-        padding: 10px;
-        background: #fff;
-        border: 1px solid #ccc;
-        position: absolute;
-        top: 35px;
-        left: 0;
-        width: 200px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    }
+        /* Menu Styling */
+        #menu {
+            display: none;
+            list-style: none;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ccc;
+            position: absolute;
+            top: 35px;
+            right: 0; /* Changed from left: 0 to right: 0 */
+            width: 200px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
 
-    /* Show Menu When Checkbox is Checked */
-    #menuToggle input[type="checkbox"]:checked ~ #menu {
-        display: block;
-    }
+        /* Show Menu When Checkbox is Checked */
+        #menuToggle input[type="checkbox"]:checked ~ #menu {
+            display: block;
+        }
 
-    /* Animate Hamburger to 'X' When Menu is Open */
-    #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(1) {
-        transform: translateY(8px) rotate(45deg);
-    }
+        /* Animate Hamburger to 'X' When Menu is Open */
+        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(1) {
+            transform: translateY(8px) rotate(45deg);
+        }
 
-    #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(2) {
-        opacity: 0;
-    }
+        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(2) {
+            opacity: 0;
+        }
 
-    #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(3) {
-        transform: translateY(-8px) rotate(-45deg);
-    }
+        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(3) {
+            transform: translateY(-8px) rotate(-45deg);
+        }
 
-    /* Style Menu Items */
-    #menu li {
-        margin: 10px 0;
-    }
+        /* Style Menu Items */
+        #menu li {
+            margin: 10px 0;
+        }
 
-    #menu button,
-    #menu label {
-        cursor: pointer;
-        background: none;
-        border: none;
-        font-size: 16px;
-        width: 100%;
-        text-align: left;
-    }
+        #menu button,
+        #menu label {
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-size: 16px;
+            width: 100%;
+            text-align: left;
+        }
 
-    #menu input[type="file"] {
-        display: block;
-        margin-top: 5px;
-    }
-`;
-document.head.appendChild(style);
-
-// Initialize everything
-initializeMenu();
-setupPOTAMap();
+        #menu input[type="file"] {
+            display: block;
+            margin-top: 5px;
+        }
+    `;
+    document.head.appendChild(style);
+    console.log("Hamburger menu styles added and positioned to the right."); // Debugging
+})();
