@@ -1,4 +1,4 @@
-//TODO Add funtion to upload activation data. Once we have the whole set,
+//TODO Add function to upload activation data. Once we have the whole set,
 //we can get the 25 most recent by API
 
 // Function to fetch and cache park data
