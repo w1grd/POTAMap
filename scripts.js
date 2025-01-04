@@ -2,6 +2,8 @@
 let activations = [];
 let map; // Leaflet map instance
 let parks = []; // Global variable to store parks data
+let userLat = null;
+let userLng = null;
 
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
@@ -225,6 +227,7 @@ function parseCSV(csvText) {
     return parsedResult.data;
 }
 
+
 /**
  * Creates a debounced version of the provided function.
  * @param {Function} func - The function to debounce.
@@ -367,8 +370,14 @@ async function handleFileUpload(event) {
     };
     reader.readAsText(file);
 }
+
+/**
+ * Fetches recent activations from the POTA.app API.
+ * @param {string} callsign - The user's callsign.
+ * @returns {Promise<Array>} The list of recent activations.
+ */
 async function fetchRecentActivations(callsign) {
-    const url = `https://api.pota.app/user/activations?all=1`;
+    const url = `https://api.pota.app/user/activations?all=1`; // Corrected API endpoint
     try {
         const response = await fetch(url, {
             credentials: 'include' // Include cookies for authentication
@@ -504,6 +513,8 @@ async function updateActivationsInView() {
     if (!Array.isArray(activations)) {
         console.error("Activations is not an array:", activations);
         activations = []; // Fallback to an empty array
+    } else {
+        console.log("Activations is a valid array with length:", activations.length); // Debugging
     }
 
     const bounds = getCurrentMapBounds();
@@ -663,6 +674,8 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
     if (!Array.isArray(activations)) {
         console.error("Activations is not an array:", activations);
         activations = []; // Fallback to an empty array to prevent further errors
+    } else {
+        console.log("Activations is a valid array with length:", activations.length); // Debugging
     }
 
     parks.forEach((park) => {
@@ -670,7 +683,7 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
         const isUserActivated = userActivatedReferences.includes(reference);
         const markerColor = getMarkerColor(parkActivationCount, isUserActivated);
 
-//        console.log(`Adding marker for: ${name} (${reference}) with color: ${markerColor}`); // Debugging
+        console.log(`Adding marker for: ${name} (${reference}) with color: ${markerColor}`); // Debugging
 
         // Find all activations for this specific park
         const parkActivations = activations.filter(act => act.reference === reference);
@@ -693,12 +706,18 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
             }
         }
 
-        // Create the popup content with the latest activation date
+        // Create the directions link if user location is available
+        const directionsLink = userLat !== null && userLng !== null
+            ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>`
+            : '';
+
+        // Create the popup content with the latest activation date and directions link
         const popupContent = `
             <b>${name}</b><br>
             Identifier: ${reference}<br>
             Activations: ${parkActivationCount}<br>
-            <b>Most Recent Activation:</b> ${latestActivationDate}
+            <b>Most Recent Activation:</b> ${latestActivationDate}<br>
+            ${directionsLink}
         `;
 
         // Create a custom marker
@@ -744,6 +763,9 @@ function getMarkerColor(activations, userActivated) {
     return "#0000ff"; // Vivid blue for inactive parks
 }
 
+/**
+ * Initializes the Leaflet map and loads park data from CSV using IndexedDB.
+ */
 async function setupPOTAMap() {
     const csvUrl = 'https://pota.review/potamap/data/usparks.csv';
     const cacheDuration = 24 * 60 * 60 * 1000; // 1 day in milliseconds
@@ -775,8 +797,9 @@ async function setupPOTAMap() {
         // Initialize the map with user's location
         navigator.geolocation.getCurrentPosition(
             async (position) => {
-                const userLat = position.coords.latitude;
-                const userLng = position.coords.longitude;
+                userLat = position.coords.latitude;
+                userLng = position.coords.longitude;
+                console.log(`User Location: Latitude ${userLat}, Longitude ${userLng}`); // Debugging
 
                 map = initializeMap(userLat, userLng);
 
@@ -815,6 +838,33 @@ async function setupPOTAMap() {
         console.error('Error setting up POTA map:', error.message);
         alert('Failed to set up the POTA map. Please try again later.');
     }
+}
+
+
+/**
+ * Refreshes the map activations based on the current state.
+ */
+function refreshMapActivations() {
+    // Clear existing markers or layers if necessary
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+        console.log("Cleared existing activation markers."); // Debugging
+    }
+
+    // Create a new layer group
+    map.activationsLayer = L.layerGroup().addTo(map);
+    console.log("Created activationsLayer."); // Debugging
+
+    // Determine which activations to display
+    let activatedReferences = [];
+    const toggleCheckbox = document.getElementById('toggleActivations');
+    if (toggleCheckbox && toggleCheckbox.checked) {
+        activatedReferences = activations.map(act => act.reference);
+        console.log("Activated References in Refresh:", activatedReferences); // Debugging
+    }
+    // Display parks with the current activations
+    displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
+    console.log("Displayed activated parks (if any) based on refresh."); // Debugging
 }
 
 /**
