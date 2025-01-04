@@ -56,7 +56,7 @@ function initializeMenu() {
  */
 async function getDatabase() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open('potaDatabase', 2); // Increment version if adding new object stores
+        const request = indexedDB.open('potaDatabase', 3); // Incremented version to add 'parkActivations' store
 
         request.onupgradeneeded = function(event) {
             const db = event.target.result;
@@ -69,6 +69,11 @@ async function getDatabase() {
             // Create object store for parks if it doesn't exist
             if (!db.objectStoreNames.contains('parks')) {
                 db.createObjectStore('parks', { keyPath: 'reference' });
+            }
+
+            // Create object store for park activations if it doesn't exist
+            if (!db.objectStoreNames.contains('parkActivations')) {
+                db.createObjectStore('parkActivations', { keyPath: 'reference' });
             }
         };
 
@@ -154,6 +159,93 @@ async function deleteActivationFromIndexedDB(reference) {
             console.error(`Error deleting activation ${reference} from IndexedDB.`);
             reject('Error deleting activation.');
         };
+    });
+}
+
+/**
+ * Retrieves activations for a specific park from IndexedDB.
+ * @param {string} reference - The park reference code.
+ * @returns {Promise<Array>} Array of activation objects.
+ */
+async function getParkActivationsFromIndexedDB(reference) {
+    const db = await getDatabase();
+    const transaction = db.transaction('parkActivations', 'readonly');
+    const store = transaction.objectStore('parkActivations');
+    return new Promise((resolve, reject) => {
+        const request = store.get(reference);
+        request.onsuccess = () => {
+            if (request.result) {
+                resolve(request.result.activations);
+            } else {
+                resolve(null);
+            }
+        };
+        request.onerror = () => {
+            console.error(`Error retrieving park activations for ${reference} from IndexedDB:`, request.error);
+            reject('Error retrieving park activations from IndexedDB');
+        };
+    });
+}
+
+/**
+ * Saves activations for a specific park to IndexedDB.
+ * @param {string} reference - The park reference code.
+ * @param {Array} activations - Array of activation objects to save.
+ * @returns {Promise<void>}
+ */
+async function saveParkActivationsToIndexedDB(reference, activations) {
+    const db = await getDatabase();
+    const transaction = db.transaction('parkActivations', 'readwrite');
+    const store = transaction.objectStore('parkActivations');
+    return new Promise((resolve, reject) => {
+        const data = { reference, activations };
+        const request = store.put(data);
+        request.onsuccess = () => {
+            console.log(`Park activations for ${reference} saved successfully to IndexedDB.`);
+            resolve();
+        };
+        request.onerror = (event) => {
+            console.error(`Error saving park activations for ${reference} to IndexedDB:`, event.target.error);
+            reject(event.target.error);
+        };
+    });
+}
+
+/**
+ * Fetches activations for a specific park from the POTA API.
+ * @param {string} reference - The park reference code.
+ * @returns {Promise<Array>} Array of activation objects.
+ */
+async function fetchParkActivations(reference) {
+    const url = `https://api.pota.app/park/activations/${reference}?count=all`;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch activations for park ${reference}: ${response.statusText}`);
+        }
+        const data = await response.json();
+        console.log(`Fetched ${data.length} activations for park ${reference} from API.`);
+        return data;
+    } catch (error) {
+        console.error(error);
+        return [];
+    }
+}
+
+/**
+ * Formats a QSO date string from 'YYYYMMDD' to a human-readable date.
+ * @param {string} qsoDate - The QSO date in 'YYYYMMDD' format.
+ * @returns {string} The formatted date.
+ */
+function formatQsoDate(qsoDate) {
+    const year = qsoDate.substring(0, 4);
+    const month = qsoDate.substring(4, 6);
+    const day = qsoDate.substring(6, 8);
+    const date = new Date(`${year}-${month}-${day}`);
+    return date.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
     });
 }
 
@@ -711,13 +803,14 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
             ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>`
             : '';
 
-        // Create the popup content with the latest activation date and directions link
-        const popupContent = `
+        // Create the initial popup content with a placeholder for recent activations
+        let popupContent = `
             <b>${name}</b><br>
             Identifier: ${reference}<br>
             Activations: ${parkActivationCount}<br>
-            <b>Most Recent Activation:</b> ${latestActivationDate}<br>
-            ${directionsLink}
+            <b>My Most Recent Activation:</b> ${latestActivationDate}<br>
+            ${directionsLink}<br>
+            <i>Loading recent activations...</i>
         `;
 
         // Create a custom marker
@@ -745,6 +838,54 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
         customMarker.on('click', function() {
             this.closeTooltip();
         });
+
+        // Add event listener for when the popup is opened
+        (function(marker, reference, name, parkActivationCount, latestActivationDate, directionsLink) {
+            marker.on('popupopen', async function() {
+                try {
+                    // Fetch activations for this park
+                    let parkActivations = await getParkActivationsFromIndexedDB(reference);
+                    if (!parkActivations) {
+                        console.log(`Fetching activations for park ${reference} from API.`);
+                        parkActivations = await fetchParkActivations(reference);
+                        await saveParkActivationsToIndexedDB(reference, parkActivations);
+                    } else {
+                        console.log(`Using cached activations for park ${reference}.`);
+                    }
+
+                    // Get the three most recent activations
+                    const recentActivations = parkActivations
+                        .sort((a, b) => parseInt(b.qso_date) - parseInt(a.qso_date))
+                        .slice(0, 3);
+
+                    // Format the recent activations
+                    let recentActivationsHtml = '';
+                    if (recentActivations.length > 0) {
+                        recentActivationsHtml += '<b>Recent Activations:</b><br>';
+                        recentActivations.forEach(act => {
+                            const dateStr = formatQsoDate(act.qso_date);
+                            recentActivationsHtml += `${act.activeCallsign} on ${dateStr} (${act.totalQSOs} QSOs)<br>`;
+                        });
+                    } else {
+                        recentActivationsHtml += 'No recent activations.';
+                    }
+
+                    // Update the popup content
+                    const updatedPopupContent = `
+                        <b>${name}</b><br>
+                        Identifier: ${reference}<br>
+                        Activations: ${parkActivationCount}<br>
+                        <b>Most Recent Activation:</b> ${latestActivationDate}<br>
+                        ${directionsLink}<br>
+                        ${recentActivationsHtml}
+                    `;
+
+                    marker.setPopupContent(updatedPopupContent);
+                } catch (error) {
+                    console.error(`Error fetching activations for park ${reference}:`, error);
+                }
+            });
+        })(customMarker, reference, name, parkActivationCount, latestActivationDate, directionsLink);
     });
 
     console.log("All parks displayed with appropriate highlights."); // Debugging
