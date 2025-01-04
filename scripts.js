@@ -91,8 +91,14 @@ async function getActivationsFromIndexedDB() {
     const store = transaction.objectStore('activations');
     return new Promise((resolve, reject) => {
         const request = store.getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject('Error retrieving activations from IndexedDB');
+        request.onsuccess = () => {
+            console.log("Retrieved Activations from IndexedDB:", request.result); // Debugging
+            resolve(request.result);
+        };
+        request.onerror = () => {
+            console.error("Error retrieving activations from IndexedDB:", request.error); // Debugging
+            reject('Error retrieving activations from IndexedDB');
+        };
     });
 }
 
@@ -218,7 +224,6 @@ function parseCSV(csvText) {
 
     return parsedResult.data;
 }
-
 
 /**
  * Creates a debounced version of the provided function.
@@ -362,17 +367,16 @@ async function handleFileUpload(event) {
     };
     reader.readAsText(file);
 }
-
-/**
- * Fetches recent activations from the POTA.app API.
- * @param {string} callsign - The user's callsign.
- * @returns {Promise<Array>} The list of recent activations.
- */
 async function fetchRecentActivations(callsign) {
-    const url = `https://api.pota.app/#/profile/${callsign}`;
+    const url = `https://api.pota.app/user/activations?all=1`;
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            credentials: 'include' // Include cookies for authentication
+        });
         if (!response.ok) {
+            if (response.status === 401) { // Unauthorized
+                throw new Error('Authentication required. Please log in to POTA.app.');
+            }
             throw new Error(`Failed to fetch recent activations: ${response.statusText}`);
         }
 
@@ -381,7 +385,7 @@ async function fetchRecentActivations(callsign) {
         return data.recent_activity?.activations || [];
     } catch (error) {
         console.error(error);
-        alert('Error fetching recent activations.');
+        alert(error.message);
         return [];
     }
 }
@@ -490,10 +494,16 @@ function getActivatedParksInBounds(activations, parks, bounds) {
 /**
  * Updates the map to display activated parks within the current map view.
  */
-function updateActivationsInView() {
+async function updateActivationsInView() {
     if (!map) {
         console.error("Map instance is not initialized.");
         return;
+    }
+
+    // Ensure 'activations' is an array
+    if (!Array.isArray(activations)) {
+        console.error("Activations is not an array:", activations);
+        activations = []; // Fallback to an empty array
     }
 
     const bounds = getCurrentMapBounds();
@@ -527,9 +537,9 @@ function updateActivationsInView() {
 
     console.log("Activated References in Current View:", activatedReferences); // Debugging
 
-    // Display all parks in bounds, highlighting activated ones
+    // Display activated parks within current view
     displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
-    console.log("Displayed all parks within current view with highlights."); // Debugging
+    console.log("Displayed activated parks within current view."); // Debugging
 }
 
 /**
@@ -660,7 +670,7 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
         const isUserActivated = userActivatedReferences.includes(reference);
         const markerColor = getMarkerColor(parkActivationCount, isUserActivated);
 
-        console.log(`Adding marker for: ${name} (${reference}) with color: ${markerColor}`); // Debugging
+//        console.log(`Adding marker for: ${name} (${reference}) with color: ${markerColor}`); // Debugging
 
         // Find all activations for this specific park
         const parkActivations = activations.filter(act => act.reference === reference);
@@ -688,7 +698,7 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
             <b>${name}</b><br>
             Identifier: ${reference}<br>
             Activations: ${parkActivationCount}<br>
-            <b>My Most Recent Activation:</b> ${latestActivationDate}
+            <b>Most Recent Activation:</b> ${latestActivationDate}
         `;
 
         // Create a custom marker
@@ -734,16 +744,20 @@ function getMarkerColor(activations, userActivated) {
     return "#0000ff"; // Vivid blue for inactive parks
 }
 
-/**
- * Initializes the Leaflet map and loads park data from CSV using IndexedDB.
- */
 async function setupPOTAMap() {
     const csvUrl = 'https://pota.review/potamap/data/usparks.csv';
     const cacheDuration = 24 * 60 * 60 * 1000; // 1 day in milliseconds
 
     try {
+        // Fetch and cache parks data
         const parksData = await fetchAndCacheParks(csvUrl, cacheDuration);
-        parks = parksData; // Already formatted in fetchAndCacheParks
+        parks = parksData.map(park => ({
+            reference: park.reference,
+            name: park.name,
+            latitude: parseFloat(park.latitude),
+            longitude: parseFloat(park.longitude),
+            activations: parseInt(park.activations, 10) || 0
+        }));
         console.log("Parks Loaded from IndexedDB:", parks); // Debugging
 
         // Retrieve activations from IndexedDB
@@ -758,8 +772,9 @@ async function setupPOTAMap() {
             }
         });
 
+        // Initialize the map with user's location
         navigator.geolocation.getCurrentPosition(
-            (position) => {
+            async (position) => {
                 const userLat = position.coords.latitude;
                 const userLng = position.coords.longitude;
 
@@ -779,11 +794,13 @@ async function setupPOTAMap() {
                 // Initial display based on toggle state
                 const toggleCheckbox = document.getElementById('toggleActivations');
                 if (toggleCheckbox && toggleCheckbox.checked) {
-                    updateActivationsInView();
+                    console.log("Toggle is checked. Displaying activations on load."); // Debugging
+                    await updateActivationsInView(); // Display activations immediately
                 } else {
                     // Display all parks without highlighting activations
                     if (map.activationsLayer) {
                         map.activationsLayer.clearLayers();
+                        console.log("Cleared activationsLayer."); // Debugging
                     }
                     displayParksOnMap(map, parks, [], map.activationsLayer);
                     console.log("Displayed all parks without activated highlights."); // Debugging
