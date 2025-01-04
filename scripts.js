@@ -49,6 +49,25 @@ function initializeMenu() {
 }
 
 /**
+ * Parses CSV text into an array of objects.
+ * @param {string} csvText - The CSV data as a string.
+ * @returns {Array<Object>} Parsed CSV data.
+ */
+function parseCSV(csvText) {
+    const lines = csvText.trim().split('\n');
+    const headers = lines[0].split(',').map(header => header.trim());
+
+    return lines.slice(1).map(line => {
+        const values = line.split(',').map(value => value.trim());
+        const obj = {};
+        headers.forEach((header, index) => {
+            obj[header] = values[index];
+        });
+        return obj;
+    });
+}
+
+/**
  * Creates a debounced version of the provided function.
  * @param {Function} func - The function to debounce.
  * @param {number} wait - The delay in milliseconds.
@@ -382,48 +401,85 @@ function refreshMapActivations() {
 }
 
 /**
- * Fetches and caches park data from the API.
- * @param {string} apiUrl - The API endpoint URL.
+ * Fetches and caches park data from the CSV.
+ * @param {string} csvUrl - The CSV file URL.
  * @param {string} cacheKey - The local storage key for park data.
  * @param {string} cacheExpiryKey - The local storage key for cache expiry.
+ * @param {string} lastModifiedKey - The local storage key for the Last-Modified timestamp.
  * @param {number} cacheDuration - Duration in milliseconds before cache expires.
- * @returns {Promise<Object|Array>} The fetched park data.
+ * @returns {Promise<Array>} The fetched park data.
  */
-async function fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuration) {
+async function fetchAndCacheParks(csvUrl, cacheKey, cacheExpiryKey, lastModifiedKey, cacheDuration) {
     const cachedData = localStorage.getItem(cacheKey);
     const cachedExpiry = localStorage.getItem(cacheExpiryKey);
+    const cachedLastModified = localStorage.getItem(lastModifiedKey);
 
+    // Check if cache is still valid
     if (cachedData && cachedExpiry && Date.now() < parseInt(cachedExpiry, 10)) {
         console.log("Using cached park data.");
         return JSON.parse(cachedData);
     }
 
     try {
-        console.log("Fetching fresh park data from API...");
-        const response = await fetch(apiUrl);
+        console.log("Fetching park data from CSV...");
+        const response = await fetch(csvUrl, {
+            method: 'GET',
+            headers: cachedLastModified ? { 'If-Modified-Since': cachedLastModified } : {}
+        });
+
+        if (response.status === 304) { // Not Modified
+            console.log("CSV not modified since last fetch. Using cached data.");
+            return JSON.parse(cachedData);
+        }
+
         if (!response.ok) {
             throw new Error(`Failed to fetch park data: ${response.statusText}`);
         }
 
-        const data = await response.json();
-        console.log("Fetched Park Data:", data); // Debugging
+        const csvText = await response.text();
+        const parsedData = parseCSV(csvText);
+        console.log("Parsed Park Data:", parsedData); // Debugging
 
-        // Assign parks as per data structure
-        const formattedData = Array.isArray(data) ? data : (data.parks || []);
-        console.log("Formatted Park Data:", formattedData); // Debugging
+        // Attempt to store data
+        try {
+            localStorage.setItem(cacheKey, JSON.stringify(parsedData));
+            const lastModified = response.headers.get('Last-Modified') || Date.now().toString();
+            localStorage.setItem(lastModifiedKey, lastModified);
+            localStorage.setItem(cacheExpiryKey, (Date.now() + cacheDuration).toString());
+            console.log("Park data fetched and cached successfully.");
+        } catch (e) {
+            if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+                console.error("LocalStorage quota exceeded. Attempting to clear and retry.");
+                // Clear existing cache and retry once
+                localStorage.removeItem(cacheKey);
+                localStorage.removeItem(lastModifiedKey);
+                localStorage.removeItem(cacheExpiryKey);
+                try {
+                    localStorage.setItem(cacheKey, JSON.stringify(parsedData));
+                    localStorage.setItem(lastModifiedKey, lastModified);
+                    localStorage.setItem(cacheExpiryKey, (Date.now() + cacheDuration).toString());
+                    console.log("Park data cached after clearing existing cache.");
+                } catch (err) {
+                    console.error("Failed to cache park data even after clearing cache:", err);
+                    alert("Unable to cache park data due to storage limitations.");
+                }
+            } else {
+                throw e;
+            }
+        }
 
-        // Store as an object with 'parks' array if necessary
-        const storageData = Array.isArray(data) ? { parks: data } : data;
-        localStorage.setItem(cacheKey, JSON.stringify(storageData));
-        localStorage.setItem(cacheExpiryKey, (Date.now() + cacheDuration).toString());
-        console.log("Park data fetched and cached successfully.");
-
-        return storageData;
+        return parsedData;
     } catch (error) {
         console.error("Error fetching park data:", error.message);
+        // If fetching fails and cache exists, use cached data
+        if (cachedData) {
+            console.warn("Using cached park data due to fetch error.");
+            return JSON.parse(cachedData);
+        }
         throw error;
     }
 }
+
 
 /**
  * Initializes the Leaflet map.
@@ -502,18 +558,26 @@ function getMarkerColor(activations, userActivated) {
 }
 
 /**
- * Initializes the map and fetches parks data.
+ * Initializes the Leaflet map and loads park data from CSV.
  */
 async function setupPOTAMap() {
-    const apiUrl = 'https://api.pota.app/program/parks/US';
-    const cacheKey = 'pota-parks';
+    const csvUrl = 'https://pota.review/potamap/data/usparks.csv';
+    const cacheKey = 'pota-parks-csv';
     const cacheExpiryKey = `${cacheKey}-expiry`;
-    const cacheDuration = 10 * 24 * 60 * 60 * 1000; // 10 days in milliseconds
+    const lastModifiedKey = `${cacheKey}-lastModified`;
+    const cacheDuration = 24 * 60 * 60 * 1000; // 1 day in milliseconds
 
     try {
-        const parksData = await fetchAndCacheParks(apiUrl, cacheKey, cacheExpiryKey, cacheDuration);
-        parks = Array.isArray(parksData) ? parksData : (parksData.parks || []);
-        console.log("Parks Loaded:", parks); // Debugging
+        const parksData = await fetchAndCacheParks(csvUrl, cacheKey, cacheExpiryKey, lastModifiedKey, cacheDuration);
+        // Assuming CSV has headers: reference, name, latitude, longitude, activations
+        parks = parksData.map(park => ({
+            reference: park.reference,
+            name: park.name,
+            latitude: parseFloat(park.latitude),
+            longitude: parseFloat(park.longitude),
+            activations: parseInt(park.activations, 10) || 0
+        }));
+        console.log("Parks Loaded from CSV:", parks); // Debugging
 
         // Validate activations
         activations = JSON.parse(localStorage.getItem('activations')) || [];
