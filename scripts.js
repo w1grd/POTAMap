@@ -4,6 +4,9 @@ let map; // Leaflet map instance
 let parks = []; // Global variable to store parks data
 let userLat = null;
 let userLng = null;
+// Declare a global variable to store current search results
+let currentSearchResults = [];
+
 
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
@@ -12,7 +15,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeMenu();
     setupPOTAMap();
 });
-
 /**
  * Initializes the hamburger menu.
  */
@@ -35,6 +37,15 @@ function initializeMenu() {
                 <li>
                     <button id="toggleActivations" class="toggle-button">Show My Activations</button>
                 </li>
+                <li id="searchBoxContainer">
+                    <label for="searchBox">Search Parks:</label>
+                    <input type="text" id="searchBox" placeholder="Enter park name, ID, location..." />
+                    <button id="clearSearch" title="Clear Search">&times;</button>
+                </li>
+                <li id="activationSliderContainer">
+                    <label for="activationSlider">Minimum Activations: <span id="sliderValue">0</span></label>
+                    <input type="range" id="activationSlider" min="0" max="100" value="0" />
+                </li>
             </ul>
         </div>
     `;
@@ -46,6 +57,14 @@ function initializeMenu() {
     });
     document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
     document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
+
+    // Add event listeners for the search box
+    document.getElementById('searchBox').addEventListener('input', debounce(handleSearchInput, 300));
+    document.getElementById('clearSearch').addEventListener('click', clearSearchInput);
+
+    // Add event listener for 'Enter' key in the search box
+    document.getElementById('searchBox').addEventListener('keydown', handleSearchEnter);
+
     console.log("Hamburger menu initialized."); // Debugging
 
     // Add enhanced hamburger menu styles for mobile
@@ -53,7 +72,7 @@ function initializeMenu() {
 }
 
 /**
- * Enhances the hamburger menu's responsiveness and touch-friendliness.
+ * Enhances the hamburger menu's responsiveness, touch-friendliness, and styles the activation slider.
  */
 function enhanceHamburgerMenuForMobile() {
     const style = document.createElement('style');
@@ -99,8 +118,9 @@ function enhanceHamburgerMenuForMobile() {
             position: absolute;
             top: 35px;
             right: 0; /* Positioned to the right */
-            width: 200px;
+            width: 220px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
         }
 
         /* Show Menu When Checkbox is Checked */
@@ -123,7 +143,7 @@ function enhanceHamburgerMenuForMobile() {
 
         /* Style Menu Items */
         #menu li {
-            margin: 10px 0;
+            margin: 15px 0;
         }
 
         /* Upload Activations Button */
@@ -132,15 +152,16 @@ function enhanceHamburgerMenuForMobile() {
             background: #007BFF;
             color: #fff;
             border: none;
-            padding: 10px;
+            padding: 12px;
             font-size: 16px;
             width: 100%;
-            border-radius: 4px;
-            transition: background 0.3s ease;
+            border-radius: 6px;
+            transition: background 0.3s ease, transform 0.2s ease;
         }
 
         #uploadActivations:hover {
             background: #0056b3;
+            transform: translateY(-2px);
         }
 
         /* Toggle Activations Button */
@@ -149,11 +170,11 @@ function enhanceHamburgerMenuForMobile() {
             background: #6c757d;
             color: #fff;
             border: none;
-            padding: 10px;
+            padding: 12px;
             font-size: 16px;
             width: 100%;
-            border-radius: 4px;
-            transition: background 0.3s ease;
+            border-radius: 6px;
+            transition: background 0.3s ease, transform 0.2s ease;
         }
 
         .toggle-button.active {
@@ -162,6 +183,82 @@ function enhanceHamburgerMenuForMobile() {
 
         .toggle-button:hover {
             background: #5a6268;
+            transform: translateY(-2px);
+        }
+
+        /* Slider Container */
+        #activationSliderContainer {
+            margin-top: 20px;
+        }
+
+        /* Slider Label */
+        #activationSliderContainer label {
+            display: block;
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        /* Slider Value Display */
+        #sliderValue {
+            font-weight: bold;
+            margin-left: 8px;
+            color: #007BFF;
+        }
+
+        /* Slider Styling */
+        #activationSlider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #d3d3d3;
+            outline: none;
+            transition: background 0.3s ease;
+        }
+
+        #activationSlider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007BFF;
+            cursor: pointer;
+            transition: background 0.3s ease, transform 0.2s ease;
+        }
+
+        #activationSlider::-webkit-slider-thumb:hover {
+            background: #0056b3;
+            transform: scale(1.1);
+        }
+
+        #activationSlider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007BFF;
+            cursor: pointer;
+            transition: background 0.3s ease, transform 0.2s ease;
+        }
+
+        #activationSlider::-moz-range-thumb:hover {
+            background: #0056b3;
+            transform: scale(1.1);
+        }
+
+        #activationSlider::-ms-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007BFF;
+            cursor: pointer;
+            transition: background 0.3s ease, transform 0.2s ease;
+        }
+
+        #activationSlider::-ms-thumb:hover {
+            background: #0056b3;
+            transform: scale(1.1);
         }
 
         /* Responsive Styles for Mobile Devices */
@@ -180,8 +277,8 @@ function enhanceHamburgerMenuForMobile() {
 
             /* Adjust menu width */
             #menu {
-                width: 150px;
-                padding: 8px;
+                width: 180px;
+                padding: 10px;
             }
 
             /* Increase font sizes for better readability */
@@ -212,8 +309,88 @@ function enhanceHamburgerMenuForMobile() {
                 border-radius: 4px;
                 font-size: 16px;
                 z-index: 1001;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }
         }
+/* Search Box Container */
+#searchBoxContainer {
+    margin-top: 20px;
+    position: relative;
+}
+
+/* Search Box Label */
+#searchBoxContainer label {
+    display: block;
+    font-size: 16px;
+    margin-bottom: 8px;
+    color: #333;
+}
+
+/* Search Box Input */
+#searchBox {
+    width: 100%;
+    padding: 10px 40px 10px 12px; /* Padding to accommodate the clear button */
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    outline: none;
+    transition: border-color 0.3s ease;
+}
+
+#searchBox:focus {
+    border-color: #007BFF;
+}
+
+/* Clear Search Button */
+#clearSearch {
+    position: absolute;
+    top: 35px; /* Align with the input box */
+    right: 12px;
+    background: transparent;
+    border: none;
+    font-size: 18px;
+    color: #aaa;
+    cursor: pointer;
+    display: none; /* Hidden by default */
+    transition: color 0.3s ease;
+}
+
+#searchBox:not(:placeholder-shown) + #clearSearch {
+    display: block;
+}
+
+#clearSearch:hover {
+    color: #333;
+}
+
+/* Responsive Styles for Search Box */
+@media (max-width: 600px) {
+    #searchBoxContainer label {
+        font-size: 18px;
+    }
+
+    #searchBox {
+        font-size: 18px;
+    }
+
+    #clearSearch {
+        font-size: 20px;
+    }
+}
+
+@media (min-width: 601px) and (max-width: 1024px) {
+    #searchBoxContainer label {
+        font-size: 16px;
+    }
+
+    #searchBox {
+        font-size: 16px;
+    }
+
+    #clearSearch {
+        font-size: 18px;
+    }
+}
 
         @media (min-width: 601px) and (max-width: 1024px) {
             /* Tablet-specific styles */
@@ -230,8 +407,8 @@ function enhanceHamburgerMenuForMobile() {
 
             /* Adjust menu width */
             #menu {
-                width: 180px;
-                padding: 10px;
+                width: 200px;
+                padding: 12px;
             }
 
             /* Increase font sizes moderately */
@@ -262,6 +439,7 @@ function enhanceHamburgerMenuForMobile() {
                 border-radius: 4px;
                 font-size: 14px;
                 z-index: 1001;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }
         }
 
@@ -306,7 +484,129 @@ function enhanceHamburgerMenuForMobile() {
         }
     `;
     document.head.appendChild(style);
-    console.log("Responsive styles added."); // Debugging
+    console.log("Responsive styles with enhanced slider added."); // Debugging
+
+    // Add styles for the activation slider
+    const sliderStyle = document.createElement('style');
+    sliderStyle.innerHTML = `
+        /* Slider Container */
+        #activationSliderContainer {
+            margin-top: 20px;
+        }
+
+        /* Slider Label */
+        #activationSliderContainer label {
+            display: block;
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        /* Slider Value Display */
+        #sliderValue {
+            font-weight: bold;
+            margin-left: 8px;
+            color: #007BFF;
+        }
+
+        /* Slider Styling */
+        #activationSlider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #d3d3d3;
+            outline: none;
+            transition: background 0.3s ease;
+        }
+
+        #activationSlider:hover {
+            background: #c0c0c0;
+        }
+
+        #activationSlider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007BFF;
+            cursor: pointer;
+            transition: background 0.3s ease, transform 0.2s ease;
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
+
+        #activationSlider::-webkit-slider-thumb:hover {
+            background: #0056b3;
+            transform: scale(1.1);
+        }
+
+        #activationSlider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007BFF;
+            cursor: pointer;
+            transition: background 0.3s ease, transform 0.2s ease;
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
+
+        #activationSlider::-moz-range-thumb:hover {
+            background: #0056b3;
+            transform: scale(1.1);
+        }
+
+        #activationSlider::-ms-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007BFF;
+            cursor: pointer;
+            transition: background 0.3s ease, transform 0.2s ease;
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
+
+        #activationSlider::-ms-thumb:hover {
+            background: #0056b3;
+            transform: scale(1.1);
+        }
+
+        /* Track Styling */
+        #activationSlider::-webkit-slider-runnable-track {
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+        }
+
+        #activationSlider::-moz-range-track {
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+        }
+
+        #activationSlider::-ms-track {
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+            border: none;
+            color: transparent;
+        }
+
+        /* Active Range Styling */
+        #activationSlider::-webkit-slider-thumb:active {
+            transform: scale(1.2);
+        }
+
+        #activationSlider::-moz-range-thumb:active {
+            transform: scale(1.2);
+        }
+
+        #activationSlider::-ms-thumb:active {
+            transform: scale(1.2);
+        }
+    `;
+    document.head.appendChild(sliderStyle);
+    console.log("Activation slider custom styles added."); // Debugging
 }
 
 /**
@@ -694,6 +994,204 @@ async function handleFileUpload(event) {
 }
 
 /**
+ * Handles changes to the activation slider.
+ * @param {Event} event - The input event from the slider.
+ */
+function handleSliderChange(event) {
+    const minActivations = parseInt(event.target.value, 10);
+    document.getElementById('sliderValue').innerText = minActivations;
+    console.log(`Minimum activations set to: ${minActivations}`); // Debugging
+
+    // Update the map based on the new slider value
+    filterParksByActivations(minActivations);
+}
+/**
+ * Handles input in the search box and filters parks based on the query.
+ * @param {Event} event - The input event from the search box.
+ */
+function handleSearchInput(event) {
+    const query = normalizeString(event.target.value);
+    console.log(`Search query received: "${query}"`); // Debugging
+
+    if (query === '') {
+        // If the search box is empty, reset the park display based on current filters
+        currentSearchResults = [];
+        resetParkDisplay();
+        return;
+    }
+
+    // Filter parks based on the search query
+    const filteredParks = parks.filter(park => {
+        return (
+            normalizeString(park.name).includes(query) ||
+            normalizeString(park.reference).includes(query) ||
+            normalizeString(park.location).includes(query) // Ensure 'location' exists
+        );
+    });
+
+    console.log(`Parks matching search: ${filteredParks.length}`); // Debugging
+
+    // Update the global search results
+    currentSearchResults = filteredParks;
+
+    // Update the map to display only the filtered parks
+    updateMapWithFilteredParks(filteredParks);
+}
+
+/**
+ * Handles the 'Enter' key press in the search box to zoom to the searched park(s).
+ * @param {KeyboardEvent} event - The keyboard event triggered by key presses.
+ */
+function handleSearchEnter(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault(); // Prevent form submission or other default actions
+        console.log("'Enter' key pressed in search box."); // Debugging
+
+        if (currentSearchResults.length === 0) {
+            alert('No parks found matching your search criteria.');
+            return;
+        }
+
+        if (currentSearchResults.length === 1) {
+            // If only one park matches, center and zoom to it
+            const park = currentSearchResults[0];
+            zoomToPark(park);
+        } else {
+            // If multiple parks match, fit the map bounds to include all
+            zoomToParks(currentSearchResults);
+        }
+    }
+}
+/**
+ * Zooms the map to a single park's location with increased magnification.
+ * @param {Object} park - The park object to zoom into.
+ */
+function zoomToPark(park) {
+    if (!map) {
+        console.error("Map instance is not initialized.");
+        return;
+    }
+
+    const { latitude, longitude } = park;
+    const zoomLevel = 16; // Adjust zoom level as desired
+
+    map.setView([latitude, longitude], zoomLevel, {
+        animate: true,
+        duration: 1.5 // Duration in seconds for the animation
+    });
+
+    console.log(`Zoomed to park: ${park.name} (${park.reference}) at [${latitude}, ${longitude}].`); // Debugging
+
+    // Optionally, open the popup for the park
+    // Find the corresponding marker and open its popup
+    map.activationsLayer.eachLayer(layer => {
+        if (layer.getLatLng().lat === latitude && layer.getLatLng().lng === longitude) {
+            layer.openPopup();
+        }
+    });
+}
+
+/**
+ * Zooms the map to fit all searched parks within the view.
+ * @param {Array} parks - An array of park objects to include in the view.
+ */
+function zoomToParks(parks) {
+    if (!map) {
+        console.error("Map instance is not initialized.");
+        return;
+    }
+
+    const latLngs = parks.map(park => [park.latitude, park.longitude]);
+
+    if (latLngs.length === 0) {
+        console.warn("No valid park locations to zoom to.");
+        return;
+    }
+
+    const bounds = L.latLngBounds(latLngs);
+    const zoomLevel = 12; // Adjust zoom level as desired when multiple parks are selected
+
+    map.fitBounds(bounds, {
+        padding: [50, 50], // Padding in pixels
+        animate: true,
+        duration: 1.5 // Duration in seconds for the animation
+    });
+
+    console.log(`Zoomed to fit ${parks.length} parks within the view.`); // Debugging
+
+    // Optionally, open popups for all filtered parks
+    parks.forEach(park => {
+        map.activationsLayer.eachLayer(layer => {
+            if (layer.getLatLng().lat === park.latitude && layer.getLatLng().lng === park.longitude) {
+                layer.openPopup();
+            }
+        });
+    });
+}
+
+
+/**
+ * Normalizes a string for consistent comparison.
+ * Converts to lowercase and trims whitespace.
+ * If the input is not a string, returns an empty string.
+ * @param {string} str - The string to normalize.
+ * @returns {string} The normalized string.
+ */
+function normalizeString(str) {
+    return typeof str === 'string' ? str.toLowerCase().trim() : '';
+}
+
+
+
+/**
+ * Filters and displays parks based on the minimum number of activations.
+ * @param {number} minActivations - The minimum number of activations to display.
+ */
+function filterParksByActivations(minActivations) {
+    if (!map) {
+        console.error("Map instance is not initialized.");
+        return;
+    }
+
+    // Get current map bounds
+    const bounds = getCurrentMapBounds();
+    console.log("Current Map Bounds:", bounds.toBBoxString()); // Debugging
+
+    // Get all parks within the current bounds and meeting the activation criteria
+    const parksInBounds = parks.filter(park => {
+        if (park.latitude && park.longitude) {
+            const latLng = L.latLng(park.latitude, park.longitude);
+            return bounds.contains(latLng) && park.activations >= minActivations;
+        }
+        console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
+        return false;
+    });
+
+    console.log("Parks in Current View with Activations >= min:", parksInBounds); // Debugging
+
+    // Clear existing markers
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+        console.log("Cleared existing markers."); // Debugging
+    } else {
+        map.activationsLayer = L.layerGroup().addTo(map);
+        console.log("Created activationsLayer."); // Debugging
+    }
+
+    // Determine which parks are activated by the user within bounds
+    const activatedReferences = activations
+        .filter(act => parksInBounds.some(p => p.reference === act.reference))
+        .map(act => act.reference);
+
+    console.log("Activated References in Filtered View:", activatedReferences); // Debugging
+
+    // Display activated parks within current view based on slider
+    displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
+    console.log("Displayed activated parks within filtered view."); // Debugging
+}
+
+
+/**
  * Toggles the display of user's activations.
  */
 async function toggleActivations() {
@@ -741,6 +1239,7 @@ async function toggleActivations() {
     }
 }
 
+
 /**
  * Displays the callsign(s) of the user's activations near the upper left of the page.
  */
@@ -753,8 +1252,11 @@ function displayCallsign() {
         document.body.appendChild(callsignDiv);
     }
 
-    // Extract unique callsigns from activations
-    const uniqueCallsigns = [...new Set(activations.map(act => act.activeCallsign).filter(cs => cs))];
+    // Extract unique callsigns from activations within the current filter
+    const uniqueCallsigns = [...new Set(activations
+        .filter(act => act.activeCallsign)
+        .map(act => act.activeCallsign.trim())
+    )];
 
     if (uniqueCallsigns.length > 0) {
         callsignDiv.innerHTML = `<strong>Callsign:</strong> ${uniqueCallsigns.join(', ')}`;
@@ -858,6 +1360,67 @@ async function updateActivationsInView() {
     displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
     console.log("Displayed activated parks within current view."); // Debugging
 }
+
+/**
+ * Updates the map to display only the filtered parks based on the search query.
+ * @param {Array} filteredParks - Array of park objects that match the search criteria.
+ */
+function updateMapWithFilteredParks(filteredParks) {
+    if (!map) {
+        console.error("Map instance is not initialized.");
+        return;
+    }
+
+    // Clear existing markers
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+        console.log("Cleared existing markers for filtered search."); // Debugging
+    } else {
+        map.activationsLayer = L.layerGroup().addTo(map);
+        console.log("Created activationsLayer for filtered search."); // Debugging
+    }
+
+    // Determine which parks are activated by the user within filtered parks
+    const activatedReferences = activations
+        .filter(act => filteredParks.some(p => p.reference === act.reference))
+        .map(act => act.reference);
+
+    console.log("Activated References in Filtered Search:", activatedReferences); // Debugging
+
+    // Display the filtered parks on the map
+    displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
+    console.log("Displayed filtered parks on the map."); // Debugging
+}
+/**
+ * Clears the search input and resets the park display.
+ */
+function clearSearchInput() {
+    const searchBox = document.getElementById('searchBox');
+    if (searchBox) {
+        searchBox.value = '';
+        console.log("Search input cleared."); // Debugging
+    }
+
+    // Reset park display based on current activation filters
+    resetParkDisplay();
+}
+/**
+ * Resets the park display on the map based on current activation filters.
+ * This function is called when the search input is cleared.
+ */
+function resetParkDisplay() {
+    const activationSlider = document.getElementById('activationSlider');
+    const minActivations = activationSlider ? parseInt(activationSlider.value, 10) : 0;
+    console.log(`Resetting park display with Minimum Activations: ${minActivations}`); // Debugging
+
+    // Filter parks based on the current activation slider value
+    const parksToDisplay = parks.filter(park => park.activations >= minActivations);
+
+    // Update the map with the filtered parks
+    filterParksByActivations(minActivations);
+}
+
+
 
 /**
  * Refreshes the map activations based on the current state.
@@ -983,9 +1546,9 @@ function initializeMap(lat, lng) {
 }
 
 /**
- * Displays parks on the map, highlighting user-activated ones.
+ * Displays parks on the map, highlighting user-activated ones and filtering based on activation count.
  * @param {L.Map} map - The Leaflet map instance.
- * @param {Array} parks - The complete list of parks.
+ * @param {Array} parks - The complete list of parks to display.
  * @param {Array} userActivatedReferences - List of activated park references to highlight.
  * @param {L.LayerGroup} layerGroup - The layer group to add markers to.
  */
@@ -1128,6 +1691,8 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
 
     console.log("All parks displayed with appropriate highlights."); // Debugging
 }
+
+
 
 /**
  * Refreshes the map activations based on the current state.
