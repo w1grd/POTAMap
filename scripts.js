@@ -37,7 +37,7 @@ function initializeMenu() {
             </label>
             <ul id="menu">
                 <li>
-                    <button id="uploadActivations">Upload Activations File</button>
+                    <button id="uploadActivations" title="Download your activations from your POTA.app Stats page, upper right corner, then upload it here.">Upload Activations File</button>
                     <input type="file" id="fileUpload" accept=".csv, text/csv" style="display:none;" />
                 </li>
                 <li>
@@ -49,6 +49,9 @@ function initializeMenu() {
                     <br/>
                     <button id="clearSearch" title="Clear Search" aria-label="Clear Search">Clear Search</button>
                 </li>
+                <li>
+                <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Review</button>
+            </li>
 <div id="activationSliderContainer">
     <label for="activationSlider">Maximum Activations to Display:</label>
     <input
