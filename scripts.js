@@ -38,9 +38,10 @@ function initializeMenu() {
                     <button id="toggleActivations" class="toggle-button">Show My Activations</button>
                 </li>
                 <li id="searchBoxContainer">
-                    <label for="searchBox">Search Parks:</label>
+                    <!-- <label for="searchBox">Search Parks:</label> -->
                     <input type="text" id="searchBox" placeholder="Enter park name, ID, location..." />
-                    <button id="clearSearch" title="Clear Search">&times;</button>
+                    <br/>
+                    <button id="clearSearch" title="Clear Search" aria-label="Clear Search"><i class="fas fa-times" aria-hidden="true"></i></button>
                 </li>
                 <li id="activationSliderContainer">
                     <label for="activationSlider">Minimum Activations: <span id="sliderValue">0</span></label>
@@ -65,11 +66,151 @@ function initializeMenu() {
     // Add event listener for 'Enter' key in the search box
     document.getElementById('searchBox').addEventListener('keydown', handleSearchEnter);
 
+    // Add event listener for the activation slider
+    document.getElementById('activationSlider').addEventListener('input', handleSliderChange);
+
     console.log("Hamburger menu initialized."); // Debugging
 
     // Add enhanced hamburger menu styles for mobile
     enhanceHamburgerMenuForMobile();
 }
+function enhancePOTAMenuStyles() {
+    const style = document.createElement('style');
+    style.innerHTML = `
+        /* Hamburger Menu Container */
+        #hamburgerMenu {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+        }
+
+        /* Menu Toggle */
+        #menuToggle {
+            display: flex;
+            flex-direction: column;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        /* Hide the checkbox */
+        #menuToggle input[type="checkbox"] {
+            display: none;
+        }
+
+        /* Hamburger Lines */
+        #menuToggle label span {
+            background: #336633; /* Forest green */
+            height: 4px;
+            margin: 4px 0;
+            width: 30px;
+            transition: all 0.3s ease;
+            display: block;
+        }
+
+        /* Menu Styling */
+        #menu {
+            display: none;
+            list-style: none;
+            padding: 10px;
+            background: #f8f8f2; /* Light parchment */
+            border: 2px solid #336633; /* Forest green border */
+            position: absolute;
+            top: 35px;
+            left: 0;
+            width: 260px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        #menuToggle input[type="checkbox"]:checked ~ #menu {
+            display: block;
+        }
+
+        /* Animate Hamburger to "X" */
+        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(1) {
+            transform: translateY(8px) rotate(45deg);
+        }
+
+        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(2) {
+            opacity: 0;
+        }
+
+        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(3) {
+            transform: translateY(-8px) rotate(-45deg);
+        }
+
+        /* Menu Items */
+        #menu li {
+            margin: 10px 0;
+        }
+
+        /* Buttons */
+        button {
+            cursor: pointer;
+            background: #336633; /* Forest green */
+            color: #fff;
+            border: none;
+            padding: 10px;
+            font-size: 16px;
+            width: 100%;
+            border-radius: 6px;
+            transition: background 0.3s ease, transform 0.2s ease;
+        }
+
+        button:hover {
+            background: #264d26; /* Darker green */
+            transform: translateY(-2px);
+        }
+
+        /* Slider Styling */
+        #activationSlider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666); /* Gradient from green to orange to red */
+            outline: none;
+            transition: background 0.3s ease;
+        }
+
+        #activationSlider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #336633; /* Forest green */
+            cursor: pointer;
+        }
+
+        #activationSlider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #336633; /* Forest green */
+            cursor: pointer;
+        }
+
+        /* Responsive Adjustments */
+        @media (max-width: 600px) {
+            #menu {
+                width: 200px;
+            }
+
+            button {
+                font-size: 14px;
+                padding: 8px;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+    console.log("Enhanced POTA menu styles applied.");
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    enhancePOTAMenuStyles();
+});
 
 /**
  * Enhances the hamburger menu's responsiveness, touch-friendliness, and styles the activation slider.
@@ -312,69 +453,78 @@ function enhanceHamburgerMenuForMobile() {
                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }
         }
-/* Search Box Container */
+/* Adjust the search box container to prevent overhang */
 #searchBoxContainer {
-    margin-top: 20px;
-    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Space between the search box and button */
+    overflow: hidden; /* Prevent overflow of child elements */
+    width: 100%; /* Constrain to the width of the parent container */
+    box-sizing: border-box; /* Include padding and border in width */
 }
 
-/* Search Box Label */
-#searchBoxContainer label {
-    display: block;
-    font-size: 16px;
-    margin-bottom: 8px;
-    color: #333;
-}
-
-/* Search Box Input */
+/* Adjust the search box to fit within the container */
 #searchBox {
-    width: 100%;
-    padding: 10px 40px 10px 12px; /* Padding to accommodate the clear button */
+    flex: 1; /* Make the search box take up available space */
+    padding: 10px;
     font-size: 16px;
     border: 1px solid #ccc;
-    border-radius: 6px;
+    border-radius: 4px;
     outline: none;
     transition: border-color 0.3s ease;
-}
-
-#searchBox:focus {
-    border-color: #007BFF;
+    box-sizing: border-box; /* Ensure proper sizing with padding and border */
 }
 
 /* Clear Search Button */
 #clearSearch {
-    position: absolute;
-    top: 35px; /* Align with the input box */
-    right: 12px;
     background: transparent;
     border: none;
-    font-size: 18px;
     color: #aaa;
+    font-size: 18px;
     cursor: pointer;
-    display: none; /* Hidden by default */
-    transition: color 0.3s ease;
-}
-
-#searchBox:not(:placeholder-shown) + #clearSearch {
-    display: block;
+    line-height: 1;
+    padding: 0 8px;
+    border-radius: 50%; /* Round button */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    width: 40px;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 #clearSearch:hover {
     color: #333;
+    background: #f0f0f0;
+}
+
+/* Make the search box and button responsive */
+@media (max-width: 600px) {
+    #searchBox {
+        font-size: 14px;
+    }
+
+    #clearSearch {
+        font-size: 16px;
+        height: 36px;
+        width: 36px;
+    }
+}
+
+#clearSearch:active {
+    transform: translateY(-50%) scale(1.2);
+}
+
+/* Icon Styling */
+#clearSearch i {
+    pointer-events: none; /* Prevent icon from blocking button clicks */
+    color: inherit;
 }
 
 /* Responsive Styles for Search Box */
 @media (max-width: 600px) {
     #searchBoxContainer label {
         font-size: 18px;
-    }
-
-    #searchBox {
-        font-size: 18px;
-    }
-
-    #clearSearch {
-        font-size: 20px;
     }
 }
 
@@ -998,8 +1148,25 @@ async function handleFileUpload(event) {
  * @param {Event} event - The input event from the slider.
  */
 function handleSliderChange(event) {
-    const minActivations = parseInt(event.target.value, 10);
-    document.getElementById('sliderValue').innerText = minActivations;
+    const slider = event.target;
+    if (!slider) {
+        console.error("Activation slider element not found.");
+        return;
+    }
+
+    const minActivations = parseInt(slider.value, 10);
+    if (isNaN(minActivations)) {
+        console.error("Invalid slider value:", slider.value);
+        return;
+    }
+
+    const sliderValueElement = document.getElementById('sliderValue');
+    if (sliderValueElement) {
+        sliderValueElement.innerText = minActivations;
+    } else {
+        console.error("Slider value display element not found.");
+    }
+
     console.log(`Minimum activations set to: ${minActivations}`); // Debugging
 
     // Update the map based on the new slider value
@@ -1024,8 +1191,8 @@ function handleSearchInput(event) {
     const filteredParks = parks.filter(park => {
         return (
             normalizeString(park.name).includes(query) ||
-            normalizeString(park.reference).includes(query) ||
-            normalizeString(park.location).includes(query) // Ensure 'location' exists
+            normalizeString(park.reference).includes(query)
+            // Removed park.location as it's undefined
         );
     });
 
@@ -1063,7 +1230,7 @@ function handleSearchEnter(event) {
     }
 }
 /**
- * Zooms the map to a single park's location with increased magnification.
+ * Zooms the map to a single park's location and increases the zoom level by one.
  * @param {Object} park - The park object to zoom into.
  */
 function zoomToPark(park) {
@@ -1073,9 +1240,11 @@ function zoomToPark(park) {
     }
 
     const { latitude, longitude } = park;
-    const zoomLevel = 16; // Adjust zoom level as desired
+    const currentZoom = map.getZoom();
+    const maxZoom = map.getMaxZoom();
+    const newZoomLevel = Math.min(currentZoom + 1, maxZoom); // Ensure zoom does not exceed maximum
 
-    map.setView([latitude, longitude], zoomLevel, {
+    map.setView([latitude, longitude], newZoomLevel, {
         animate: true,
         duration: 1.5 // Duration in seconds for the animation
     });
@@ -1085,14 +1254,14 @@ function zoomToPark(park) {
     // Optionally, open the popup for the park
     // Find the corresponding marker and open its popup
     map.activationsLayer.eachLayer(layer => {
-        if (layer.getLatLng().lat === latitude && layer.getLatLng().lng === longitude) {
+        const layerLatLng = layer.getLatLng();
+        if (layerLatLng.lat === latitude && layerLatLng.lng === longitude) {
             layer.openPopup();
         }
     });
 }
-
 /**
- * Zooms the map to fit all searched parks within the view.
+ * Zooms the map to fit all searched parks within the view and increases the zoom level by one.
  * @param {Array} parks - An array of park objects to include in the view.
  */
 function zoomToParks(parks) {
@@ -1109,8 +1278,6 @@ function zoomToParks(parks) {
     }
 
     const bounds = L.latLngBounds(latLngs);
-    const zoomLevel = 12; // Adjust zoom level as desired when multiple parks are selected
-
     map.fitBounds(bounds, {
         padding: [50, 50], // Padding in pixels
         animate: true,
@@ -1119,10 +1286,23 @@ function zoomToParks(parks) {
 
     console.log(`Zoomed to fit ${parks.length} parks within the view.`); // Debugging
 
+    // After fitting bounds, increase the zoom level by one
+    map.once('moveend', function() {
+        const currentZoom = map.getZoom();
+        const maxZoom = map.getMaxZoom();
+        const newZoomLevel = Math.min(currentZoom + 1, maxZoom);
+        map.setZoom(newZoomLevel, {
+            animate: true,
+            duration: 1.0 // Duration in seconds for the zoom animation
+        });
+        console.log(`Increased zoom level to ${newZoomLevel}.`); // Debugging
+    });
+
     // Optionally, open popups for all filtered parks
     parks.forEach(park => {
         map.activationsLayer.eachLayer(layer => {
-            if (layer.getLatLng().lat === park.latitude && layer.getLatLng().lng === park.longitude) {
+            const layerLatLng = layer.getLatLng();
+            if (layerLatLng.lat === park.latitude && layerLatLng.lng === park.longitude) {
                 layer.openPopup();
             }
         });
@@ -1404,6 +1584,7 @@ function clearSearchInput() {
     // Reset park display based on current activation filters
     resetParkDisplay();
 }
+
 /**
  * Resets the park display on the map based on current activation filters.
  * This function is called when the search input is cleared.
@@ -1422,31 +1603,6 @@ function resetParkDisplay() {
 
 
 
-/**
- * Refreshes the map activations based on the current state.
- */
-function refreshMapActivations() {
-    // Clear existing markers or layers if necessary
-    if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
-        console.log("Cleared existing activation markers."); // Debugging
-    }
-
-    // Create a new layer group
-    map.activationsLayer = L.layerGroup().addTo(map);
-    console.log("Created activationsLayer."); // Debugging
-
-    // Determine which activations to display
-    let activatedReferences = [];
-    const toggleButton = document.getElementById('toggleActivations');
-    if (toggleButton && toggleButton.classList.contains('active')) {
-        activatedReferences = activations.map(act => act.reference);
-        console.log("Activated References in Refresh:", activatedReferences); // Debugging
-    }
-    // Display parks with the current activations
-    displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
-    console.log("Displayed activated parks (if any) based on refresh."); // Debugging
-}
 
 /**
  * Fetches and caches park data from the CSV using IndexedDB and PapaParse.
@@ -1692,33 +1848,6 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
     console.log("All parks displayed with appropriate highlights."); // Debugging
 }
 
-
-
-/**
- * Refreshes the map activations based on the current state.
- */
-function refreshMapActivations() {
-    // Clear existing markers or layers if necessary
-    if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
-        console.log("Cleared existing activation markers."); // Debugging
-    }
-
-    // Create a new layer group
-    map.activationsLayer = L.layerGroup().addTo(map);
-    console.log("Created activationsLayer."); // Debugging
-
-    // Determine which activations to display
-    let activatedReferences = [];
-    const toggleButton = document.getElementById('toggleActivations');
-    if (toggleButton && toggleButton.classList.contains('active')) {
-        activatedReferences = activations.map(act => act.reference);
-        console.log("Activated References in Refresh:", activatedReferences); // Debugging
-    }
-    // Display parks with the current activations
-    displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
-    console.log("Displayed activated parks (if any) based on refresh."); // Debugging
-}
 
 /**
  * Fetches and caches park data from the CSV using IndexedDB and PapaParse.
