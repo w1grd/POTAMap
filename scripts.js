@@ -100,21 +100,57 @@ function initializeMenu() {
 function enhancePOTAMenuStyles() {
     const style = document.createElement('style');
     style.innerHTML = `
-        /* Hamburger Menu Container */
         #hamburgerMenu {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            z-index: 1000;
-        }
+    position: absolute;
+    top: 10px;
+    right: 10px; /* Keep it positioned to the right */
+    z-index: 1000;
+    width: auto; /* Allow the width to adapt to the content */
+    max-width: 350px; /* Set a reasonable maximum width */
+    min-width: 250px; /* Prevent it from being too narrow */
+    box-sizing: border-box; /* Include padding and border in width calculations */
+    /* background-color: #ffffff;  Add a background color for visibility */
+    border-radius: 8px; /* Slightly rounded corners for aesthetics */
+    /* box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);  Add a subtle shadow */
+    padding: 10px; /* Add padding to give the content breathing room */
+}
 
-        /* Menu Toggle */
-        #menuToggle {
-            display: flex;
-            flex-direction: column;
-            cursor: pointer;
-            user-select: none;
-        }
+#menu {
+    display: none;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    position: absolute;
+    right: 0; /* Ensure alignment with the right edge */
+    width: 200px; /* Adjust width as needed */
+    max-width: 100%; /* Prevent it from overflowing */
+    box-sizing: border-box;
+    background-color: #ffffff;
+    border: 1px solid #ccc; /* Add a border for clarity */
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+#menuToggle {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end; /* Align toggle to the right */
+    cursor: pointer;
+    user-select: none;
+}
+
+#menuToggle input[type="checkbox"]:checked ~ #menu {
+    display: block; /* Show the menu when the checkbox is checked */
+}
+
+#menuToggle label span {
+    background: #333;
+    height: 3px;
+    margin: 4px 0;
+    width: 25px;
+    transition: all 0.3s ease;
+    display: block;
+}
 
         /* Hide the checkbox */
         #menuToggle input[type="checkbox"] {
@@ -299,13 +335,17 @@ document.addEventListener('DOMContentLoaded', () => {
 function enhanceHamburgerMenuForMobile() {
     const style = document.createElement('style');
     style.innerHTML = `
-        /* Hamburger Menu Container */
-        #hamburgerMenu {
-            position: absolute;
-            top: 10px;
-            right: 10px; /* Positioned to the right */
-            z-index: 1000;
-        }
+       @media (max-width: 600px) {
+    #hamburgerMenu {
+        top: 5px;
+        right: 5px;
+        max-width: 200px; /* Reduce the width slightly on small screens */
+    }
+
+    #menu {
+        width: 150px;
+    }
+}
 
         /* Menu Toggle */
         #menuToggle {
