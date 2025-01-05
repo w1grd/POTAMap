@@ -50,10 +50,15 @@ function initializeMenu() {
                     <br/>
                     <button id="clearSearch" title="Clear Search" aria-label="Clear Search">Clear Search</button>
                 </li>
-                <div id="activationSliderContainer">
-                    <label for="activationSlider">Maximum Activations to Display: <span id="sliderValue">All</span></label>
-                    <input type="range" id="activationSlider" min="0" max="51" value="10" />
-                </div>
+<div id="activationSliderContainer">
+    <label for="activationSlider">Maximum Activations to Display:</label>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span>0</span>
+        <input type="range" id="activationSlider" min="0" max="999" value="999" />
+        <span>All</span>
+    </div>
+</div>
+
 
             </ul>
         </div>
@@ -171,34 +176,68 @@ function enhancePOTAMenuStyles() {
             transform: translateY(-2px);
         }
 
-        /* Slider Styling */
-        #activationSlider {
-            -webkit-appearance: none;
-            width: 100%;
-            height: 8px;
-            border-radius: 4px;
-            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666); /* Gradient from green to orange to red */
-            outline: none;
-            transition: background 0.3s ease;
-        }
+/* Container for Slider */
+.sliderWrapper {
+    position: relative;
+    width: 100%;
+}
 
-        #activationSlider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #336633; /* Forest green */
-            cursor: pointer;
-        }
+/* Slider Styling */
+#activationSlider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+    outline: none;
+    transition: background 0.3s ease;
+    position: relative;
+    z-index: 1; /* Ensure it appears above the tooltip */
+}
 
-        #activationSlider::-moz-range-thumb {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #336633; /* Forest green */
-            cursor: pointer;
-        }
+#activationSlider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #336633; /* Forest green */
+    cursor: pointer;
+}
+
+#activationSlider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #336633; /* Forest green */
+    cursor: pointer;
+}
+
+#sliderTooltip {
+    position: absolute;
+    background: #336633;
+    color: #fff;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transform: translate(-50%, -150%);
+    white-space: nowrap;
+    z-index: 9999; /* Ensure it's above other elements */
+    display: none; /* Hidden until interaction */
+}
+
+
+#sliderTooltip::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 6px;
+    border-style: solid;
+    border-color: #336633 transparent transparent transparent;
+}
 
         /* Responsive Adjustments */
         @media (max-width: 600px) {
@@ -1148,32 +1187,24 @@ async function handleFileUpload(event) {
     };
     reader.readAsText(file);
 }
+/**
+ * Handles changes to the activation slider.
+ * @param {Event} event - The input event from the slider.
+ */
 function handleSliderChange(event) {
     const slider = event.target;
     const sliderValue = parseInt(slider.value, 10);
 
-    // Update the displayed slider value
-    const sliderValueElement = document.getElementById('sliderValue');
-    sliderValueElement.innerText = sliderValue === 51 ? "All" : sliderValue.toString();
+    console.log(`Maximum Activations to Display: ${sliderValue === 51 ? 'All' : sliderValue}`); // Debugging
 
-    console.log(`Slider changed: ${sliderValue === 51 ? 'All' : sliderValue}`); // Debugging
-
-    // Apply filtering logic
+    // Apply the filtering logic
     if (sliderValue === 51) {
-        console.log("Displaying all parks.");
+        // Show all parks if "All" is selected
         displayParksOnMap(map, parks, activations.map((act) => act.reference), map.activationsLayer);
     } else {
-        console.log(`Filtering parks with activations <= ${sliderValue}`);
+        // Filter parks based on the maximum activations
         const filteredParks = parks.filter((park) => park.activations <= sliderValue);
-        console.log(`Filtered Parks: ${filteredParks.length}`);
         const activatedReferences = activations.map((act) => act.reference);
-
-        // Clear the map layer and add filtered parks
-        if (map.activationsLayer) {
-            map.activationsLayer.clearLayers(); // Clear existing markers
-            console.log("Cleared previous markers from the map.");
-        }
-
         displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
     }
 }
