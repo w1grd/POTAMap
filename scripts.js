@@ -33,7 +33,8 @@ function initializeMenu() {
                 </li>
                 <li>
                     <label for="fileUpload">Upload Activations File</label>
-                    <input type="file" id="fileUpload" accept="application/json" />
+                    <!-- Updated accept attribute to allow CSV files -->
+                    <input type="file" id="fileUpload" accept=".csv, text/csv" />
                 </li>
                 <li>
                     <label><input type="checkbox" id="toggleActivations" /> Show My Activations</label>
@@ -400,21 +401,11 @@ async function handleFileUpload(event) {
     const reader = new FileReader();
     reader.onload = async (e) => {
         try {
-            const parsedData = JSON.parse(e.target.result);
-            let newActivations;
+            // Parse the CSV file using PapaParse
+            const parsedData = parseCSV(e.target.result);
+            let newActivations = parsedData;
 
-            // Determine the format of the uploaded JSON
-            if (Array.isArray(parsedData)) {
-                newActivations = parsedData;
-                console.log("Uploaded JSON is an array of activations.");
-            } else if (parsedData.activations && Array.isArray(parsedData.activations)) {
-                newActivations = parsedData.activations;
-                console.log("Uploaded JSON contains an 'activations' array.");
-            } else {
-                throw new Error('Uploaded JSON does not contain an array of activations.');
-            }
-
-            console.log("Uploaded Activations:", newActivations); // Debugging
+            console.log("Uploaded Activations from CSV:", newActivations); // Debugging
 
             // Retrieve existing activations from IndexedDB
             const storedActivations = await getActivationsFromIndexedDB();
@@ -431,14 +422,36 @@ async function handleFileUpload(event) {
 
             // Append new activations, avoiding duplicates and validating entries
             newActivations.forEach(act => {
-                if (act.reference && act.name) { // Basic validation
-                    if (!activationMap.has(act.reference)) {
-                        activationMap.set(act.reference, act);
+                // Basic validation: Check for required fields
+                if (act.Reference && act["Park Name"] && act["First QSO Date"] && act.QSOs) {
+                    const reference = act.Reference.trim();
+                    const name = act["Park Name"].trim();
+                    const qso_date = act["First QSO Date"].trim();
+                    const totalQSOs = parseInt(act.QSOs, 10) || 0;
+                    const activationsCount = parseInt(act.Activations, 10) || 0;
+                    const attempts = parseInt(act.Attempts, 10) || 0;
+
+                    // Create the activation object
+                    const activationObject = {
+                        reference: reference,
+                        name: name,
+                        qso_date: qso_date,
+                        activeCallsign: "", // Assign default value or leave empty
+                        totalQSOs: totalQSOs,
+                        qsosCW: 0, // Assign default value
+                        qsosDATA: 0, // Assign default value
+                        qsosPHONE: 0, // Assign default value
+                        attempts: attempts,
+                        activations: activationsCount
+                    };
+
+                    if (!activationMap.has(reference)) {
+                        activationMap.set(reference, activationObject);
                         appendedCount++;
-                        console.log(`Appended new activation: ${act.reference}`); // Debugging
+                        console.log(`Appended new activation: ${reference}`); // Debugging
                     } else {
                         duplicateCount++;
-                        console.log(`Duplicate activation ignored: ${act.reference}`); // Debugging
+                        console.log(`Duplicate activation ignored: ${reference}`); // Debugging
                     }
                 } else {
                     invalidCount++;
@@ -457,7 +470,7 @@ async function handleFileUpload(event) {
             updateActivationsInView();
         } catch (err) {
             console.error('Error uploading activations:', err);
-            alert('Invalid JSON file or incorrect data format.');
+            alert('Invalid CSV file or incorrect data format.');
         }
     };
     reader.readAsText(file);
@@ -784,7 +797,7 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
         if (parkActivations.length > 0) {
             // Extract valid dates from activations
             const validDates = parkActivations
-                .map(act => new Date(act.date))
+                .map(act => new Date(act.qso_date))
                 .filter(date => !isNaN(date)); // Filter out invalid dates
 
             if (validDates.length > 0) {
@@ -803,12 +816,14 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
             ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>`
             : '';
 
+        // Create the POTA.app park page link
+        const potaAppLink = `<a href="https://pota.app/#/park/${reference}" target="_blank" rel="noopener noreferrer"><b>${name} (${reference})</b></a>`;
+
         // Create the initial popup content with a placeholder for recent activations
         let popupContent = `
-            <b>${name}</b><br>
-            Identifier: ${reference}<br>
+            ${potaAppLink}<br>
             Activations: ${parkActivationCount}<br>
-            <b>My Most Recent Activation:</b> ${latestActivationDate}<br>
+            <b>Most Recent Activation:</b> ${latestActivationDate}<br>
             ${directionsLink}<br>
             <i>Loading recent activations...</i>
         `;
@@ -870,10 +885,12 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
                         recentActivationsHtml += 'No recent activations.';
                     }
 
+                    // Create the POTA.app park page link
+                    const updatedPotaAppLink = `<a href="https://pota.app/#/park/${reference}" target="_blank" rel="noopener noreferrer"><b>${name} (${reference})</b></a>`;
+
                     // Update the popup content
                     const updatedPopupContent = `
-                        <b>${name}</b><br>
-                        Identifier: ${reference}<br>
+                        ${updatedPotaAppLink}<br>
                         Activations: ${parkActivationCount}<br>
                         <b>Most Recent Activation:</b> ${latestActivationDate}<br>
                         ${directionsLink}<br>
