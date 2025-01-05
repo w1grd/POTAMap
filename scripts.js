@@ -29,15 +29,11 @@ function initializeMenu() {
             </label>
             <ul id="menu">
                 <li>
-                    <button id="updateActivations">Update Activations</button>
+                    <button id="uploadActivations">Upload Activations File</button>
+                    <input type="file" id="fileUpload" accept=".csv, text/csv" style="display:none;" />
                 </li>
                 <li>
-                    <label for="fileUpload">Upload Activations File</label>
-                    <!-- Updated accept attribute to allow CSV files -->
-                    <input type="file" id="fileUpload" accept=".csv, text/csv" />
-                </li>
-                <li>
-                    <label><input type="checkbox" id="toggleActivations" /> Show My Activations</label>
+                    <button id="toggleActivations" class="toggle-button">Show My Activations</button>
                 </li>
             </ul>
         </div>
@@ -45,9 +41,11 @@ function initializeMenu() {
     document.body.appendChild(menu);
 
     // Add event listeners for the menu options
+    document.getElementById('uploadActivations').addEventListener('click', () => {
+        document.getElementById('fileUpload').click();
+    });
     document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
-    document.getElementById('toggleActivations').addEventListener('change', toggleActivations);
-    document.getElementById('updateActivations').addEventListener('click', handleUpdateActivations);
+    document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
     console.log("Hamburger menu initialized."); // Debugging
 
     // Add enhanced hamburger menu styles for mobile
@@ -128,19 +126,42 @@ function enhanceHamburgerMenuForMobile() {
             margin: 10px 0;
         }
 
-        #menu button,
-        #menu label {
+        /* Upload Activations Button */
+        #uploadActivations {
             cursor: pointer;
-            background: none;
+            background: #007BFF;
+            color: #fff;
             border: none;
+            padding: 10px;
             font-size: 16px;
             width: 100%;
-            text-align: left;
+            border-radius: 4px;
+            transition: background 0.3s ease;
         }
 
-        #menu input[type="file"] {
-            display: block;
-            margin-top: 5px;
+        #uploadActivations:hover {
+            background: #0056b3;
+        }
+
+        /* Toggle Activations Button */
+        .toggle-button {
+            cursor: pointer;
+            background: #6c757d;
+            color: #fff;
+            border: none;
+            padding: 10px;
+            font-size: 16px;
+            width: 100%;
+            border-radius: 4px;
+            transition: background 0.3s ease;
+        }
+
+        .toggle-button.active {
+            background: #28a745;
+        }
+
+        .toggle-button:hover {
+            background: #5a6268;
         }
 
         /* Responsive Styles for Mobile Devices */
@@ -180,6 +201,18 @@ function enhanceHamburgerMenuForMobile() {
             #map {
                 height: 100vh; /* Full viewport height */
             }
+
+            /* Style Callsign Display */
+            #callsignDisplay {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                background: rgba(255, 255, 255, 0.8);
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 16px;
+                z-index: 1001;
+            }
         }
 
         @media (min-width: 601px) and (max-width: 1024px) {
@@ -217,6 +250,18 @@ function enhanceHamburgerMenuForMobile() {
             input[type="file"] {
                 padding: 8px;
                 font-size: 14px;
+            }
+
+            /* Style Callsign Display */
+            #callsignDisplay {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                background: rgba(255, 255, 255, 0.8);
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 14px;
+                z-index: 1001;
             }
         }
 
@@ -554,55 +599,8 @@ function debounce(func, wait) {
 
 /**
  * Handles updating activations via API and stores them in IndexedDB.
+ * (Removed as per user request)
  */
-async function handleUpdateActivations() {
-    const callsign = prompt('Enter your callsign:');
-    if (!callsign) {
-        alert('Callsign is required to update activations.');
-        return;
-    }
-
-    try {
-        const recentActivations = await fetchRecentActivations(callsign);
-        console.log("Fetched Recent Activations:", recentActivations); // Debugging
-
-        if (recentActivations.length === 0) {
-            alert('No recent activations found for this callsign.');
-            return;
-        }
-
-        // Retrieve existing activations from IndexedDB
-        let storedActivations = await getActivationsFromIndexedDB();
-        console.log("Stored Activations Before Update:", storedActivations); // Debugging
-
-        // Create a map for quick lookup to avoid duplicates
-        const activationMap = new Map();
-        storedActivations.forEach(act => activationMap.set(act.reference, act));
-
-        // Append new activations, avoiding duplicates
-        recentActivations.forEach(act => {
-            if (!activationMap.has(act.reference)) {
-                activationMap.set(act.reference, act);
-                console.log(`Added new activation: ${act.reference}`); // Debugging
-            } else {
-                console.log(`Duplicate activation ignored: ${act.reference}`); // Debugging
-            }
-        });
-
-        // Update the global activations array and IndexedDB
-        activations = Array.from(activationMap.values());
-        await saveActivationsToIndexedDB(activations);
-        console.log("Updated Activations:", activations); // Debugging
-
-        alert('Activations updated successfully!');
-
-        // Refresh the map to reflect updated activations
-        updateActivationsInView();
-    } catch (error) {
-        console.error('Error updating activations:', error);
-        alert('Failed to update activations.');
-    }
-}
 
 /**
  * Handles file upload and appends activations to IndexedDB.
@@ -649,7 +647,7 @@ async function handleFileUpload(event) {
                         reference: reference,
                         name: name,
                         qso_date: qso_date,
-                        activeCallsign: "", // Assign default value or leave empty
+                        activeCallsign: act.activeCallsign ? act.activeCallsign.trim() : "", // Extracted from CSV
                         totalQSOs: totalQSOs,
                         qsosCW: 0, // Assign default value
                         qsosDATA: 0, // Assign default value
@@ -681,6 +679,12 @@ async function handleFileUpload(event) {
 
             // Refresh the map to reflect new activations
             updateActivationsInView();
+
+            // If Show My Activations is active, display callsign
+            const toggleButton = document.getElementById('toggleActivations');
+            if (toggleButton.classList.contains('active')) {
+                displayCallsign();
+            }
         } catch (err) {
             console.error('Error uploading activations:', err);
             alert('Invalid CSV file or incorrect data format.');
@@ -690,45 +694,23 @@ async function handleFileUpload(event) {
 }
 
 /**
- * Fetches recent activations from the POTA.app API.
- * @param {string} callsign - The user's callsign.
- * @returns {Promise<Array>} The list of recent activations.
- */
-async function fetchRecentActivations(callsign) {
-    const url = `https://api.pota.app/user/activations?all=1`; // Corrected API endpoint
-    try {
-        const response = await fetch(url, {
-            credentials: 'include' // Include cookies for authentication
-        });
-        if (!response.ok) {
-            if (response.status === 401) { // Unauthorized
-                throw new Error('Authentication required. Please log in to POTA.app.');
-            }
-            throw new Error(`Failed to fetch recent activations: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        console.log("API Response for Recent Activations:", data); // Debugging
-        return data.recent_activity?.activations || [];
-    } catch (error) {
-        console.error(error);
-        alert(error.message);
-        return [];
-    }
-}
-
-/**
  * Toggles the display of user's activations.
  */
-async function toggleActivations(event) {
-    const showActivations = event.target.checked;
-    console.log(`Show My Activations toggled to: ${showActivations}`); // Debugging
-    if (!showActivations) {
+async function toggleActivations() {
+    const toggleButton = document.getElementById('toggleActivations');
+    toggleButton.classList.toggle('active');
+    const isActive = toggleButton.classList.contains('active');
+
+    console.log(`Show My Activations toggled to: ${isActive}`); // Debugging
+
+    if (!isActive) {
         // Hide activations by clearing the layer
         if (map.activationsLayer) {
             map.activationsLayer.clearLayers();
             console.log("Cleared activation markers."); // Debugging
         }
+        // Remove callsign display
+        removeCallsignDisplay();
         return;
     }
 
@@ -738,51 +720,57 @@ async function toggleActivations(event) {
         console.log("Stored Activations on Toggle:", storedActivations); // Debugging
 
         if (storedActivations.length === 0) {
-            // Prompt for callsign if no activations are stored
-            const callsign = prompt('Enter your callsign to fetch activations:');
-            if (!callsign) {
-                alert('Callsign is required to fetch activations.');
-                event.target.checked = false;
-                return;
-            }
-
-            // Fetch recent activations
-            const recentActivations = await fetchRecentActivations(callsign);
-            console.log("Recent Activations on Toggle:", recentActivations); // Debugging
-
-            if (recentActivations.length === 0) {
-                alert('No recent activations found for this callsign.');
-                event.target.checked = false;
-                return;
-            }
-
-            // Merge and deduplicate activations
-            const activationMap = new Map();
-            storedActivations.forEach(act => activationMap.set(act.reference, act));
-            recentActivations.forEach(act => {
-                if (!activationMap.has(act.reference)) {
-                    activationMap.set(act.reference, act);
-                    console.log(`Added activation from toggle fetch: ${act.reference}`); // Debugging
-                }
-            });
-
-            // Update the global activations array and IndexedDB
-            activations = Array.from(activationMap.values());
-            await saveActivationsToIndexedDB(activations);
-            console.log("Activations After Toggle Fetch:", activations); // Debugging
-
-            alert('Activations loaded successfully!');
-        } else {
-            // If activations are already loaded, ensure 'activations' variable is up to date
-            activations = storedActivations;
-            console.log("Activations are already loaded from IndexedDB."); // Debugging
+            alert('No activations available to display.');
+            toggleButton.classList.remove('active');
+            return;
         }
+
+        // Update the global activations array
+        activations = storedActivations;
+        console.log("Activations are loaded from IndexedDB."); // Debugging
 
         // Update the activations on the map based on current view
         updateActivationsInView();
+
+        // Display callsign(s) on the page
+        displayCallsign();
     } catch (error) {
         console.error('Error toggling activations:', error);
         alert('Failed to toggle activations.');
+        toggleButton.classList.remove('active');
+    }
+}
+
+/**
+ * Displays the callsign(s) of the user's activations near the upper left of the page.
+ */
+function displayCallsign() {
+    // Create or update the callsign display element
+    let callsignDiv = document.getElementById('callsignDisplay');
+    if (!callsignDiv) {
+        callsignDiv = document.createElement('div');
+        callsignDiv.id = 'callsignDisplay';
+        document.body.appendChild(callsignDiv);
+    }
+
+    // Extract unique callsigns from activations
+    const uniqueCallsigns = [...new Set(activations.map(act => act.activeCallsign).filter(cs => cs))];
+
+    if (uniqueCallsigns.length > 0) {
+        callsignDiv.innerHTML = `<strong>Callsign:</strong> ${uniqueCallsigns.join(', ')}`;
+    } else {
+        callsignDiv.innerHTML = '';
+    }
+}
+
+/**
+ * Removes the callsign display from the page.
+ */
+function removeCallsignDisplay() {
+    const callsignDiv = document.getElementById('callsignDisplay');
+    if (callsignDiv) {
+        callsignDiv.remove();
+        console.log("Calls-in display removed."); // Debugging
     }
 }
 
@@ -887,8 +875,8 @@ function refreshMapActivations() {
 
     // Determine which activations to display
     let activatedReferences = [];
-    const toggleCheckbox = document.getElementById('toggleActivations');
-    if (toggleCheckbox && toggleCheckbox.checked) {
+    const toggleButton = document.getElementById('toggleActivations');
+    if (toggleButton && toggleButton.classList.contains('active')) {
         activatedReferences = activations.map(act => act.reference);
         console.log("Activated References in Refresh:", activatedReferences); // Debugging
     }
@@ -1157,8 +1145,8 @@ function refreshMapActivations() {
 
     // Determine which activations to display
     let activatedReferences = [];
-    const toggleCheckbox = document.getElementById('toggleActivations');
-    if (toggleCheckbox && toggleCheckbox.checked) {
+    const toggleButton = document.getElementById('toggleActivations');
+    if (toggleButton && toggleButton.classList.contains('active')) {
         activatedReferences = activations.map(act => act.reference);
         console.log("Activated References in Refresh:", activatedReferences); // Debugging
     }
@@ -1274,10 +1262,11 @@ async function setupPOTAMap() {
                 console.log("Attached moveend event listener with debounce."); // Debugging
 
                 // Initial display based on toggle state
-                const toggleCheckbox = document.getElementById('toggleActivations');
-                if (toggleCheckbox && toggleCheckbox.checked) {
-                    console.log("Toggle is checked. Displaying activations on load."); // Debugging
+                const toggleButton = document.getElementById('toggleActivations');
+                if (toggleButton && toggleButton.classList.contains('active')) {
+                    console.log("Toggle is active. Displaying activations on load."); // Debugging
                     await updateActivationsInView(); // Display activations immediately
+                    displayCallsign();
                 } else {
                     // Display all parks without highlighting activations
                     if (map.activationsLayer) {
@@ -1300,11 +1289,6 @@ async function setupPOTAMap() {
 }
 
 /**
- * Displays parks on the map, highlighting user-activated ones.
- * (Function already modified above)
- */
-
-/**
  * Determines the marker color based on activations and user activation status.
  * @param {number} activations - The number of activations for the park.
  * @param {boolean} userActivated - Whether the user has activated the park.
@@ -1316,11 +1300,6 @@ function getMarkerColor(activations, userActivated) {
     if (activations > 0) return "#90ee90"; // Light green for active parks
     return "#0000ff"; // Vivid blue for inactive parks
 }
-
-/**
- * Adds CSS styles for the hamburger menu and other responsive elements.
- * (Combined and enhanced in the enhanceHamburgerMenuForMobile function above)
- */
 
 /**
  * Optimizes Leaflet controls and popups for better mobile experience.
@@ -1377,11 +1356,6 @@ optimizeLeafletControlsAndPopups();
 
 /**
  * Refreshes the map activations based on the current state.
- * (Function already defined above)
- }
-
- /**
- * Refreshes the map activations based on the current state.
  */
 function refreshMapActivations() {
     // Clear existing markers or layers if necessary
@@ -1396,8 +1370,8 @@ function refreshMapActivations() {
 
     // Determine which activations to display
     let activatedReferences = [];
-    const toggleCheckbox = document.getElementById('toggleActivations');
-    if (toggleCheckbox && toggleCheckbox.checked) {
+    const toggleButton = document.getElementById('toggleActivations');
+    if (toggleButton && toggleButton.classList.contains('active')) {
         activatedReferences = activations.map(act => act.reference);
         console.log("Activated References in Refresh:", activatedReferences); // Debugging
     }
@@ -1407,16 +1381,13 @@ function refreshMapActivations() {
 }
 
 /**
- * Adds CSS styles for the hamburger menu.
- * (Already combined in the enhanceHamburgerMenuForMobile function above)
- */
-
-/**
- * Add responsive CSS styles to the document.
+ * Adds CSS styles for the hamburger menu and other responsive elements.
  * (Already incorporated into the enhanceHamburgerMenuForMobile function)
  */
 
-// Ensure that the map container adjusts to viewport changes
+/**
+ * Ensure that the map container adjusts to viewport changes
+ */
 window.addEventListener('resize', debounce(() => {
     if (map) {
         map.invalidateSize();
