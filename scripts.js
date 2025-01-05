@@ -10,8 +10,7 @@ let previousMapState = {
     bounds: null,
     displayedParks: [],
 };
-
-
+let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
@@ -90,6 +89,8 @@ function initializeMenu() {
     //     const sliderValue = slider.value === "51" ? "All" : slider.value;
     //     slider.setAttribute('data-value', sliderValue);
     // });
+    //Listener for Activations button
+    document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
 
 
     console.log("Hamburger menu initialized."); // Debugging
@@ -1166,6 +1167,51 @@ function debounce(func, wait) {
     };
 }
 
+async function toggleActivations() {
+    const toggleButton = document.getElementById('toggleActivations');
+
+    // Cycle through states: 0 -> 1 -> 2 -> back to 0
+    activationToggleState = (activationToggleState + 1) % 3;
+
+    // Update button text for clarity
+    const buttonTexts = ["Show My Activations", "Hide My Activations", "Show All Spots"];
+    toggleButton.innerText = buttonTexts[activationToggleState];
+    console.log(`Toggled activation state: ${activationToggleState}`);
+
+    // Clear activationsLayer before updating map
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+    } else {
+        map.activationsLayer = L.layerGroup().addTo(map);
+    }
+
+    // Determine behavior based on the current state
+    switch (activationToggleState) {
+        case 0: // Show all spots
+            displayParksOnMap(map, parks, activations.map((act) => act.reference), map.activationsLayer);
+            break;
+
+        case 1: // Show just user's activations
+            const userActivatedReferences = activations.map((act) => act.reference);
+            const userActivatedParks = parks.filter((park) =>
+                userActivatedReferences.includes(park.reference)
+            );
+            displayParksOnMap(map, userActivatedParks, userActivatedReferences, map.activationsLayer);
+            break;
+
+        case 2: // Show all spots except user's activations
+            const nonUserActivatedParks = parks.filter((park) =>
+                !activations.some((act) => act.reference === park.reference)
+            );
+            displayParksOnMap(map, nonUserActivatedParks, [], map.activationsLayer);
+            break;
+
+        default:
+            console.error("Invalid activation state.");
+            break;
+    }
+}
+
 /**
  * Handles updating activations via API and stores them in IndexedDB.
  * (Removed as per user request)
@@ -1609,66 +1655,6 @@ function filterParksByActivations(maxActivations) {
     console.log("Displayed activated parks within filtered view."); // Debugging
 }
 
-/**
- * Toggles the display of user's activations.
- */
-async function toggleActivations() {
-    const toggleButton = document.getElementById('toggleActivations');
-    const isActive = toggleButton.classList.toggle('active');
-    console.log(`Show My Activations toggled to: ${isActive}`);
-
-    // If deactivating, remove only the user's activation highlights
-    if (!isActive) {
-        if (map.activationsLayer) {
-            // Remove only user-activated spots
-            const nonUserMarkers = [];
-            map.activationsLayer.eachLayer((layer) => {
-                // Check if the layer corresponds to user activations
-                const popupContent = layer.getPopup()?.getContent() || '';
-                const isUserActivated = activations.some((act) =>
-                    popupContent.includes(act.reference)
-                );
-                if (!isUserActivated) {
-                    nonUserMarkers.push(layer); // Keep non-user markers
-                }
-            });
-
-            // Clear the activations layer
-            map.activationsLayer.clearLayers();
-
-            // Re-add non-user markers
-            nonUserMarkers.forEach((layer) => map.activationsLayer.addLayer(layer));
-        }
-
-        // Remove callsign display
-        removeCallsignDisplay();
-        return;
-    }
-
-    // If activating, add user activations
-    try {
-        // If activations are not loaded, fetch from IndexedDB
-        if (!activations.length) {
-            activations = await getActivationsFromIndexedDB();
-        }
-
-        // Filter activated parks in the current map bounds
-        const activatedReferences = activations.map((act) => act.reference);
-        const parksInBounds = parks.filter((park) =>
-            activatedReferences.includes(park.reference)
-        );
-
-        // Display only the user's activated parks
-        if (parksInBounds.length) {
-            displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
-        }
-
-        // Display callsign(s)
-        displayCallsign();
-    } catch (error) {
-        console.error('Error toggling activations:', error);
-    }
-}
 
 
 /**
@@ -2041,7 +2027,13 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
         const { reference, name, latitude, longitude, activations: parkActivationCount } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
 
-        const markerColor = isUserActivated ? "#ffa500" : parkActivationCount > 10 ? "#ff6666" : "#90ee90";
+        const markerColor = isUserActivated
+            ? "#ffa500" // User's activation
+            : parkActivationCount > 10
+                ? "#ff6666" // Highly active parks
+                : parkActivationCount > 0
+                    ? "#90ee90" // Other active parks
+                    : "#0000ff"; // Inactive parks
 
         // Create popup content
         const potaAppLink = `<a href="https://pota.app/#/park/${reference}" target="_blank" rel="noopener noreferrer"><b>${name} (${reference})</b></a>`;
