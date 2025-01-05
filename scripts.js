@@ -11,10 +11,12 @@ let currentSearchResults = [];
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
  */
-document.addEventListener('DOMContentLoaded', () => {
-    initializeMenu();
-    setupPOTAMap();
+document.addEventListener('DOMContentLoaded', async () => {
+    initializeMenu(); // Set up the menu
+    setupPOTAMap(); // Set up the map
+    await initializeActivationsDisplay(); // Check and display activations if available
 });
+
 /**
  * Initializes the hamburger menu.
  */
@@ -39,14 +41,15 @@ function initializeMenu() {
                 </li>
                 <li id="searchBoxContainer">
                     <!-- <label for="searchBox">Search Parks:</label> -->
-                    <input type="text" id="searchBox" placeholder="Enter park name, ID, location..." />
+                    <input type="text" id="searchBox" placeholder="Search name, ID, location..." />
                     <br/>
-                    <button id="clearSearch" title="Clear Search" aria-label="Clear Search"><i class="fas fa-times" aria-hidden="true"></i></button>
+                    <button id="clearSearch" title="Clear Search" aria-label="Clear Search">Clear Search</button>
                 </li>
-                <li id="activationSliderContainer">
-                    <label for="activationSlider">Minimum Activations: <span id="sliderValue">0</span></label>
-                    <input type="range" id="activationSlider" min="0" max="100" value="0" />
-                </li>
+                <div id="activationSliderContainer">
+                    <label for="activationSlider">Maximum Activations to Display: <span id="sliderValue">All</span></label>
+                    <input type="range" id="activationSlider" min="0" max="51" value="10" />
+                </div>
+
             </ul>
         </div>
     `;
@@ -453,49 +456,47 @@ function enhanceHamburgerMenuForMobile() {
                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }
         }
-/* Adjust the search box container to prevent overhang */
+/* Container for the search box and clear button */
 #searchBoxContainer {
-    display: flex;
-    align-items: center;
-    gap: 8px; /* Space between the search box and button */
-    overflow: hidden; /* Prevent overflow of child elements */
-    width: 100%; /* Constrain to the width of the parent container */
-    box-sizing: border-box; /* Include padding and border in width */
+    position: relative;
+    width: 100%; /* Constrain to parent width */
+    box-sizing: border-box;
+    margin-bottom: 10px;
+    z-index: 10;
 }
 
-/* Adjust the search box to fit within the container */
 #searchBox {
-    flex: 1; /* Make the search box take up available space */
+    width: 100%;
     padding: 10px;
     font-size: 16px;
     border: 1px solid #ccc;
     border-radius: 4px;
     outline: none;
-    transition: border-color 0.3s ease;
-    box-sizing: border-box; /* Ensure proper sizing with padding and border */
+    box-sizing: border-box; /* Include padding in width */
+    margin-bottom: 10px; /* Add spacing between input and button */
 }
 
-/* Clear Search Button */
 #clearSearch {
-    background: transparent;
-    border: none;
-    color: #aaa;
-    font-size: 18px;
+    display: block; /* Make it behave as a block element */
+    width: 100%; /* Full width for alignment */
+    padding: 10px;
+    font-size: 16px; /* Adjust font size */
+    color: #fff; /* Text color */
+    background-color: #336633; /* Forest green background */
+    border: none; /* Remove border */
+    border-radius: 4px; /* Round edges */
     cursor: pointer;
-    line-height: 1;
-    padding: 0 8px;
-    border-radius: 50%; /* Round button */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 40px;
-    width: 40px;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    text-align: center; /* Center-align text */
+    transition: background-color 0.3s ease, transform 0.2s ease; /* Add hover/active effects */
 }
 
 #clearSearch:hover {
-    color: #333;
-    background: #f0f0f0;
+    background-color: #264d26; /* Darker green background on hover */
+    transform: scale(1.02); /* Slightly enlarge on hover */
+}
+
+#clearSearch:active {
+    transform: scale(0.98); /* Slightly shrink when clicked */
 }
 
 /* Make the search box and button responsive */
@@ -1142,36 +1143,37 @@ async function handleFileUpload(event) {
     };
     reader.readAsText(file);
 }
-
-/**
- * Handles changes to the activation slider.
- * @param {Event} event - The input event from the slider.
- */
 function handleSliderChange(event) {
     const slider = event.target;
-    if (!slider) {
-        console.error("Activation slider element not found.");
-        return;
-    }
+    const sliderValue = parseInt(slider.value, 10);
 
-    const minActivations = parseInt(slider.value, 10);
-    if (isNaN(minActivations)) {
-        console.error("Invalid slider value:", slider.value);
-        return;
-    }
-
+    // Update the displayed slider value
     const sliderValueElement = document.getElementById('sliderValue');
-    if (sliderValueElement) {
-        sliderValueElement.innerText = minActivations;
+    sliderValueElement.innerText = sliderValue === 51 ? "All" : sliderValue.toString();
+
+    console.log(`Slider changed: ${sliderValue === 51 ? 'All' : sliderValue}`); // Debugging
+
+    // Apply filtering logic
+    if (sliderValue === 51) {
+        console.log("Displaying all parks.");
+        displayParksOnMap(map, parks, activations.map((act) => act.reference), map.activationsLayer);
     } else {
-        console.error("Slider value display element not found.");
+        console.log(`Filtering parks with activations <= ${sliderValue}`);
+        const filteredParks = parks.filter((park) => park.activations <= sliderValue);
+        console.log(`Filtered Parks: ${filteredParks.length}`);
+        const activatedReferences = activations.map((act) => act.reference);
+
+        // Clear the map layer and add filtered parks
+        if (map.activationsLayer) {
+            map.activationsLayer.clearLayers(); // Clear existing markers
+            console.log("Cleared previous markers from the map.");
+        }
+
+        displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
     }
-
-    console.log(`Minimum activations set to: ${minActivations}`); // Debugging
-
-    // Update the map based on the new slider value
-    filterParksByActivations(minActivations);
 }
+
+
 /**
  * Handles input in the search box and filters parks based on the query.
  * @param {Event} event - The input event from the search box.
@@ -1324,10 +1326,10 @@ function normalizeString(str) {
 
 
 /**
- * Filters and displays parks based on the minimum number of activations.
- * @param {number} minActivations - The minimum number of activations to display.
+ * Filters and displays parks based on the maximum number of activations.
+ * @param {number} maxActivations - The maximum number of activations to display.
  */
-function filterParksByActivations(minActivations) {
+function filterParksByActivations(maxActivations) {
     if (!map) {
         console.error("Map instance is not initialized.");
         return;
@@ -1341,13 +1343,13 @@ function filterParksByActivations(minActivations) {
     const parksInBounds = parks.filter(park => {
         if (park.latitude && park.longitude) {
             const latLng = L.latLng(park.latitude, park.longitude);
-            return bounds.contains(latLng) && park.activations >= minActivations;
+            return bounds.contains(latLng) && park.activations <= maxActivations;
         }
         console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
         return false;
     });
 
-    console.log("Parks in Current View with Activations >= min:", parksInBounds); // Debugging
+    console.log("Parks in Current View with Activations <= max:", parksInBounds); // Debugging
 
     // Clear existing markers
     if (map.activationsLayer) {
@@ -1370,52 +1372,64 @@ function filterParksByActivations(minActivations) {
     console.log("Displayed activated parks within filtered view."); // Debugging
 }
 
-
 /**
  * Toggles the display of user's activations.
  */
 async function toggleActivations() {
     const toggleButton = document.getElementById('toggleActivations');
-    toggleButton.classList.toggle('active');
-    const isActive = toggleButton.classList.contains('active');
+    const isActive = toggleButton.classList.toggle('active');
+    console.log(`Show My Activations toggled to: ${isActive}`);
 
-    console.log(`Show My Activations toggled to: ${isActive}`); // Debugging
-
+    // If deactivating, remove only the user's activation highlights
     if (!isActive) {
-        // Hide activations by clearing the layer
         if (map.activationsLayer) {
+            // Remove only user-activated spots
+            const nonUserMarkers = [];
+            map.activationsLayer.eachLayer((layer) => {
+                // Check if the layer corresponds to user activations
+                const popupContent = layer.getPopup()?.getContent() || '';
+                const isUserActivated = activations.some((act) =>
+                    popupContent.includes(act.reference)
+                );
+                if (!isUserActivated) {
+                    nonUserMarkers.push(layer); // Keep non-user markers
+                }
+            });
+
+            // Clear the activations layer
             map.activationsLayer.clearLayers();
-            console.log("Cleared activation markers."); // Debugging
+
+            // Re-add non-user markers
+            nonUserMarkers.forEach((layer) => map.activationsLayer.addLayer(layer));
         }
+
         // Remove callsign display
         removeCallsignDisplay();
         return;
     }
 
+    // If activating, add user activations
     try {
-        // Get activations from IndexedDB
-        let storedActivations = await getActivationsFromIndexedDB();
-        console.log("Stored Activations on Toggle:", storedActivations); // Debugging
-
-        if (storedActivations.length === 0) {
-            alert('No activations available to display.');
-            toggleButton.classList.remove('active');
-            return;
+        // If activations are not loaded, fetch from IndexedDB
+        if (!activations.length) {
+            activations = await getActivationsFromIndexedDB();
         }
 
-        // Update the global activations array
-        activations = storedActivations;
-        console.log("Activations are loaded from IndexedDB."); // Debugging
+        // Filter activated parks in the current map bounds
+        const activatedReferences = activations.map((act) => act.reference);
+        const parksInBounds = parks.filter((park) =>
+            activatedReferences.includes(park.reference)
+        );
 
-        // Update the activations on the map based on current view
-        updateActivationsInView();
+        // Display only the user's activated parks
+        if (parksInBounds.length) {
+            displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
+        }
 
-        // Display callsign(s) on the page
+        // Display callsign(s)
         displayCallsign();
     } catch (error) {
         console.error('Error toggling activations:', error);
-        alert('Failed to toggle activations.');
-        toggleButton.classList.remove('active');
     }
 }
 
@@ -1577,13 +1591,44 @@ function updateMapWithFilteredParks(filteredParks) {
 function clearSearchInput() {
     const searchBox = document.getElementById('searchBox');
     if (searchBox) {
-        searchBox.value = '';
+        searchBox.value = ''; // Clear the input
         console.log("Search input cleared."); // Debugging
     }
 
-    // Reset park display based on current activation filters
+    // Reset the park display
     resetParkDisplay();
 }
+
+/**
+ * Adds event listeners to the search box and Clear button.
+ */
+function setupSearchBoxListeners() {
+    const searchBox = document.getElementById('searchBox');
+    const clearButton = document.getElementById('clearSearch');
+
+    if (!searchBox || !clearButton) {
+        console.error("Search box or Clear button not found.");
+        return;
+    }
+
+    // Show the Clear button only when there is input
+    searchBox.addEventListener('input', () => {
+        if (searchBox.value.trim() !== '') {
+            clearButton.style.display = 'block';
+        } else {
+            clearButton.style.display = 'none';
+        }
+    });
+
+    // Attach the Clear button functionality
+    clearButton.addEventListener('click', clearSearchInput);
+}
+
+// Call the setup function when the DOM is fully loaded
+document.addEventListener('DOMContentLoaded', () => {
+    setupSearchBoxListeners();
+    console.log("Search box listeners initialized."); // Debugging
+});
 
 /**
  * Resets the park display on the map based on current activation filters.
@@ -1660,6 +1705,35 @@ async function fetchAndCacheParks(csvUrl, cacheDuration) {
 }
 
 /**
+ * Initializes the app and sets up default behavior based on IndexedDB.
+ */
+async function initializeActivationsDisplay() {
+    try {
+        const storedActivations = await getActivationsFromIndexedDB();
+        if (storedActivations.length > 0) {
+            // Set the toggle button to active
+            const toggleButton = document.getElementById('toggleActivations');
+            if (toggleButton) {
+                toggleButton.classList.add('active');
+                console.log("Activations exist in IndexedDB. Enabling 'Show My Activations' by default.");
+            }
+
+            // Load and display activations on the map
+            activations = storedActivations;
+            updateActivationsInView();
+            displayCallsign();
+        } else {
+            console.log("No activations found in IndexedDB. Starting with default view.");
+        }
+    } catch (error) {
+        console.error('Error initializing activations display:', error);
+    }
+}
+
+
+
+
+/**
  * Initializes the Leaflet map.
  * @param {number} lat - Latitude for the map center.
  * @param {number} lng - Longitude for the map center.
@@ -1728,7 +1802,7 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
         const isUserActivated = userActivatedReferences.includes(reference);
         const markerColor = getMarkerColor(parkActivationCount, isUserActivated);
 
-        console.log(`Adding marker for: ${name} (${reference}) with color: ${markerColor}`); // Debugging
+//        console.log(`Adding marker for: ${name} (${reference}) with color: ${markerColor}`); // Debugging
 
         // Find all activations for this specific park
         const parkActivations = activations.filter(act => act.reference === reference);
