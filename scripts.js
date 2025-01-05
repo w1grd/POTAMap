@@ -52,11 +52,14 @@ function initializeMenu() {
                 </li>
 <div id="activationSliderContainer">
     <label for="activationSlider">Maximum Activations to Display:</label>
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <span>0</span>
-        <input type="range" id="activationSlider" min="0" max="999" value="999" />
-        <span>All</span>
-    </div>
+    <input
+        type="range"
+        id="activationSlider"
+        min="0"
+        max="100"
+        value="10"
+        data-value="10"
+    />
 </div>
 
 
@@ -81,6 +84,13 @@ function initializeMenu() {
 
     // Add event listener for the activation slider
     document.getElementById('activationSlider').addEventListener('input', handleSliderChange);
+
+    // document.getElementById('activationSlider').addEventListener('input', (event) => {
+    //     const slider = event.target;
+    //     const sliderValue = slider.value === "51" ? "All" : slider.value;
+    //     slider.setAttribute('data-value', sliderValue);
+    // });
+
 
     console.log("Hamburger menu initialized."); // Debugging
 
@@ -181,36 +191,60 @@ function enhancePOTAMenuStyles() {
     position: relative;
     width: 100%;
 }
+/* Style the slider container to position relative for proper placement */
+#activationSliderContainer {
+    position: relative;
+    margin-bottom: 20px; /* Adjust spacing as needed */
+}
 
-/* Slider Styling */
+/* Style for the slider */
 #activationSlider {
     -webkit-appearance: none;
     width: 100%;
     height: 8px;
     border-radius: 4px;
-    background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+    background: #d3d3d3;
     outline: none;
     transition: background 0.3s ease;
-    position: relative;
-    z-index: 1; /* Ensure it appears above the tooltip */
 }
 
+#activationSlider::before {
+    content: attr(data-value); /* Display the slider value */
+    position: absolute;
+    top: 30px; /* Adjust to place below the slider */
+    left: 50%; /* Center horizontally */
+    transform: translateX(-50%); /* Adjust for tooltip alignment */
+    font-size: 14px;
+    color: #333;
+    background: #fff;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    white-space: nowrap;
+    z-index: 9999;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+
+/* Adjust the position dynamically for better centering */
 #activationSlider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: #336633; /* Forest green */
+    background: #007BFF;
     cursor: pointer;
+    transition: background 0.3s ease, transform 0.2s ease;
 }
 
 #activationSlider::-moz-range-thumb {
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: #336633; /* Forest green */
+    background: #007BFF;
     cursor: pointer;
+    transition: background 0.3s ease, transform 0.2s ease;
 }
 
 #sliderTooltip {
@@ -1188,22 +1222,43 @@ async function handleFileUpload(event) {
     reader.readAsText(file);
 }
 /**
+ * Maps the slider's linear value (0-100) to the desired non-linear scale.
+ * @param {number} value - The linear slider value (0-100).
+ * @returns {number|string} The mapped value ('All' for the maximum).
+ */
+function mapSliderValue(value) {
+    if (value <= 33) {
+        // Map the first third (0–33) to 0–10
+        return Math.round((value / 33) * 10);
+    } else if (value <= 66) {
+        // Map the middle third (34–66) to 11–50
+        return Math.round(11 + ((value - 33) / 33) * 39);
+    } else {
+        // Map the last third (67–100) to 51–All
+        const mappedValue = Math.round(51 + ((value - 66) / 34) * 948); // Maps 67-100 to 51-999
+        return mappedValue >= 999 ? 'All' : mappedValue;
+    }
+}
+
+/**
  * Handles changes to the activation slider.
  * @param {Event} event - The input event from the slider.
  */
 function handleSliderChange(event) {
     const slider = event.target;
-    const sliderValue = parseInt(slider.value, 10);
+    const linearValue = parseInt(slider.value, 10);
+    const nonLinearValue = mapSliderValue(linearValue);
 
-    console.log(`Maximum Activations to Display: ${sliderValue === 51 ? 'All' : sliderValue}`); // Debugging
+    // Update the slider's data-value attribute for display
+    slider.setAttribute('data-value', nonLinearValue);
 
-    // Apply the filtering logic
-    if (sliderValue === 51) {
-        // Show all parks if "All" is selected
+    console.log(`Slider Linear Value: ${linearValue}, Mapped Non-Linear Value: ${nonLinearValue}`);
+
+    // Apply filtering logic
+    if (nonLinearValue === 'All') {
         displayParksOnMap(map, parks, activations.map((act) => act.reference), map.activationsLayer);
     } else {
-        // Filter parks based on the maximum activations
-        const filteredParks = parks.filter((park) => park.activations <= sliderValue);
+        const filteredParks = parks.filter((park) => park.activations <= nonLinearValue);
         const activatedReferences = activations.map((act) => act.reference);
         displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
     }
