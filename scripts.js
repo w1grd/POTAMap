@@ -49,6 +49,219 @@ function initializeMenu() {
     document.getElementById('toggleActivations').addEventListener('change', toggleActivations);
     document.getElementById('updateActivations').addEventListener('click', handleUpdateActivations);
     console.log("Hamburger menu initialized."); // Debugging
+
+    // Add enhanced hamburger menu styles for mobile
+    enhanceHamburgerMenuForMobile();
+}
+
+/**
+ * Enhances the hamburger menu's responsiveness and touch-friendliness.
+ */
+function enhanceHamburgerMenuForMobile() {
+    const style = document.createElement('style');
+    style.innerHTML = `
+        /* Hamburger Menu Container */
+        #hamburgerMenu {
+            position: absolute;
+            top: 10px;
+            right: 10px; /* Positioned to the right */
+            z-index: 1000;
+        }
+
+        /* Menu Toggle */
+        #menuToggle {
+            display: flex;
+            flex-direction: column;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        /* Hide the checkbox */
+        #menuToggle input[type="checkbox"] {
+            display: none;
+        }
+
+        /* Hamburger Lines within Label */
+        #menuToggle label span {
+            background: #333;
+            height: 3px;
+            margin: 5px 0;
+            width: 25px;
+            transition: all 0.3s ease;
+            display: block;
+        }
+
+        /* Menu Styling */
+        #menu {
+            display: none;
+            list-style: none;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ccc;
+            position: absolute;
+            top: 35px;
+            right: 0; /* Positioned to the right */
+            width: 200px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Show Menu When Checkbox is Checked */
+        #menuToggle input[type="checkbox"]:checked ~ #menu {
+            display: block;
+        }
+
+        /* Animate Hamburger to 'X' When Menu is Open */
+        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(1) {
+            transform: translateY(8px) rotate(45deg);
+        }
+
+        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(2) {
+            opacity: 0;
+        }
+
+        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(3) {
+            transform: translateY(-8px) rotate(-45deg);
+        }
+
+        /* Style Menu Items */
+        #menu li {
+            margin: 10px 0;
+        }
+
+        #menu button,
+        #menu label {
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-size: 16px;
+            width: 100%;
+            text-align: left;
+        }
+
+        #menu input[type="file"] {
+            display: block;
+            margin-top: 5px;
+        }
+
+        /* Responsive Styles for Mobile Devices */
+        @media (max-width: 600px) {
+            /* Adjust hamburger menu size and positioning */
+            #hamburgerMenu {
+                top: 5px;
+                right: 5px;
+            }
+
+            #menuToggle label span {
+                width: 20px;
+                height: 2px;
+                margin: 4px 0;
+            }
+
+            /* Adjust menu width */
+            #menu {
+                width: 150px;
+                padding: 8px;
+            }
+
+            /* Increase font sizes for better readability */
+            #menu button,
+            #menu label {
+                font-size: 18px;
+            }
+
+            /* Increase button sizes for touch */
+            button,
+            input[type="file"] {
+                padding: 10px;
+                font-size: 16px;
+            }
+
+            /* Adjust map container height */
+            #map {
+                height: 100vh; /* Full viewport height */
+            }
+        }
+
+        @media (min-width: 601px) and (max-width: 1024px) {
+            /* Tablet-specific styles */
+            #hamburgerMenu {
+                top: 10px;
+                right: 10px;
+            }
+
+            #menuToggle label span {
+                width: 25px;
+                height: 3px;
+                margin: 5px 0;
+            }
+
+            /* Adjust menu width */
+            #menu {
+                width: 180px;
+                padding: 10px;
+            }
+
+            /* Increase font sizes moderately */
+            #menu button,
+            #menu label {
+                font-size: 16px;
+            }
+
+            /* Adjust map container height */
+            #map {
+                height: 90vh; /* Slightly less than viewport height */
+            }
+
+            /* Increase button sizes */
+            button,
+            input[type="file"] {
+                padding: 8px;
+                font-size: 14px;
+            }
+        }
+
+        /* General Responsive Enhancements */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #map {
+            width: 100%;
+            height: 90vh; /* Adjust height as needed */
+        }
+
+        /* Adjust Leaflet Controls for Mobile */
+        .leaflet-control-attribution {
+            font-size: 12px;
+        }
+
+        .leaflet-control {
+            font-size: 16px; /* Increase control sizes */
+        }
+
+        /* Popup Content Adjustments */
+        .leaflet-popup-content {
+            font-size: 14px;
+        }
+
+        /* Tooltip Adjustments */
+        .custom-tooltip {
+            font-size: 14px;
+            padding: 5px;
+        }
+
+        /* Ensure buttons and inputs have adequate size and spacing */
+        button, label, input[type="file"] {
+            min-height: 40px;
+            padding: 10px;
+            font-size: 16px;
+        }
+    `;
+    document.head.appendChild(style);
+    console.log("Responsive styles added."); // Debugging
 }
 
 /**
@@ -746,7 +959,16 @@ async function fetchAndCacheParks(csvUrl, cacheDuration) {
  * @returns {L.Map} The initialized Leaflet map instance.
  */
 function initializeMap(lat, lng) {
-    const mapInstance = L.map("map").setView([lat, lng], 10);
+    // Determine if the device is mobile based on screen width
+    const isMobile = window.innerWidth <= 600;
+
+    const mapInstance = L.map("map", {
+        center: [lat, lng],
+        zoom: isMobile ? 12 : 10, // Higher zoom on mobile for better detail
+        zoomControl: !isMobile, // Optionally disable zoom controls on mobile
+        attributionControl: true
+    });
+
     console.log("Initialized map at:", lat, lng); // Debugging
 
     // Add OpenStreetMap tiles
@@ -755,8 +977,15 @@ function initializeMap(lat, lng) {
     }).addTo(mapInstance);
     console.log("Added OpenStreetMap tiles."); // Debugging
 
-    // Add marker for user's location
-    L.marker([lat, lng])
+    // Add marker for user's location with adjusted icon size
+    L.marker([lat, lng], {
+        icon: L.icon({
+            iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png', // Replace with your custom icon URL if needed
+            iconSize: [30, 30], // Increased icon size for better visibility on mobile
+            iconAnchor: [15, 30],
+            popupAnchor: [0, -30]
+        })
+    })
         .addTo(mapInstance)
         .bindPopup("Your Location")
         .openPopup();
@@ -782,6 +1011,10 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
     } else {
         console.log("Activations is a valid array with length:", activations.length); // Debugging
     }
+
+    // Determine if the device is mobile
+    const isMobile = window.innerWidth <= 600;
+    const markerRadius = isMobile ? 8 : 6; // Larger markers on mobile
 
     parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount } = park;
@@ -828,9 +1061,9 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
             <i>Loading recent activations...</i>
         `;
 
-        // Create a custom marker
+        // Create a custom marker with adjusted size
         const customMarker = L.circleMarker([latitude, longitude], {
-            radius: 6, // Marker size
+            radius: markerRadius, // Adjusted radius
             fillColor: markerColor, // Inner color
             color: "#000", // Border color
             weight: 1,
@@ -909,16 +1142,84 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
 }
 
 /**
- * Determines the marker color based on activations and user activation status.
- * @param {number} activations - The number of activations for the park.
- * @param {boolean} userActivated - Whether the user has activated the park.
- * @returns {string} The color code for the marker.
+ * Refreshes the map activations based on the current state.
  */
-function getMarkerColor(activations, userActivated) {
-    if (userActivated) return "#ffa500"; // Orange for user-activated parks
-    if (activations > 10) return "#ff6666"; // Light red for highly active parks
-    if (activations > 0) return "#90ee90"; // Light green for active parks
-    return "#0000ff"; // Vivid blue for inactive parks
+function refreshMapActivations() {
+    // Clear existing markers or layers if necessary
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+        console.log("Cleared existing activation markers."); // Debugging
+    }
+
+    // Create a new layer group
+    map.activationsLayer = L.layerGroup().addTo(map);
+    console.log("Created activationsLayer."); // Debugging
+
+    // Determine which activations to display
+    let activatedReferences = [];
+    const toggleCheckbox = document.getElementById('toggleActivations');
+    if (toggleCheckbox && toggleCheckbox.checked) {
+        activatedReferences = activations.map(act => act.reference);
+        console.log("Activated References in Refresh:", activatedReferences); // Debugging
+    }
+    // Display parks with the current activations
+    displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
+    console.log("Displayed activated parks (if any) based on refresh."); // Debugging
+}
+
+/**
+ * Fetches and caches park data from the CSV using IndexedDB and PapaParse.
+ * @param {string} csvUrl - The CSV file URL.
+ * @param {number} cacheDuration - Duration in milliseconds before cache expires.
+ * @returns {Promise<Array>} The fetched and parsed park data.
+ */
+async function fetchAndCacheParks(csvUrl, cacheDuration) {
+    const db = await getDatabase();
+    const transaction = db.transaction('parks', 'readwrite');
+    const store = transaction.objectStore('parks');
+
+    // Check if parks data already exists
+    const existingParks = await store.getAll();
+    if (existingParks.length > 0) {
+        // Optionally, implement cache invalidation based on your requirements
+        console.log('Using cached park data from IndexedDB.');
+        return existingParks;
+    }
+
+    try {
+        console.log('Fetching park data from CSV...');
+        const response = await fetch(csvUrl);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch park data: ${response.statusText}`);
+        }
+
+        const csvText = await response.text();
+        const parsedData = parseCSV(csvText);
+        console.log('Parsed Park Data:', parsedData); // Debugging
+
+        // Transform parsed data to desired format
+        const parks = parsedData.map(park => ({
+            reference: park.reference,
+            name: park.name,
+            latitude: parseFloat(park.latitude),
+            longitude: parseFloat(park.longitude),
+            activations: parseInt(park.activations, 10) || 0
+        }));
+
+        // Save parks to IndexedDB
+        await saveParksToIndexedDB(parks);
+        console.log('Park data fetched and cached successfully.');
+
+        return parks;
+    } catch (error) {
+        console.error('Error fetching and caching park data:', error);
+        // If fetch fails and parks are cached, return cached data
+        if (existingParks.length > 0) {
+            console.warn('Using existing cached park data due to fetch error.');
+            return existingParks;
+        }
+        throw error; // Re-throw error if no cached data
+    }
 }
 
 /**
@@ -998,8 +1299,88 @@ async function setupPOTAMap() {
     }
 }
 
+/**
+ * Displays parks on the map, highlighting user-activated ones.
+ * (Function already modified above)
+ */
 
 /**
+ * Determines the marker color based on activations and user activation status.
+ * @param {number} activations - The number of activations for the park.
+ * @param {boolean} userActivated - Whether the user has activated the park.
+ * @returns {string} The color code for the marker.
+ */
+function getMarkerColor(activations, userActivated) {
+    if (userActivated) return "#ffa500"; // Orange for user-activated parks
+    if (activations > 10) return "#ff6666"; // Light red for highly active parks
+    if (activations > 0) return "#90ee90"; // Light green for active parks
+    return "#0000ff"; // Vivid blue for inactive parks
+}
+
+/**
+ * Adds CSS styles for the hamburger menu and other responsive elements.
+ * (Combined and enhanced in the enhanceHamburgerMenuForMobile function above)
+ */
+
+/**
+ * Optimizes Leaflet controls and popups for better mobile experience.
+ */
+function optimizeLeafletControlsAndPopups() {
+    const style = document.createElement('style');
+    style.innerHTML = `
+        /* Adjust Leaflet Controls for Mobile */
+        .leaflet-control-attribution {
+            font-size: 12px;
+        }
+
+        .leaflet-control {
+            font-size: 16px; /* Increase control sizes */
+        }
+
+        /* Adjust popup font sizes for better readability on mobile */
+        .leaflet-popup-content {
+            font-size: 16px;
+            line-height: 1.5;
+        }
+
+        /* Ensure links are easily tappable */
+        .leaflet-popup-content a {
+            font-size: 16px;
+            text-decoration: underline;
+        }
+
+        /* Ensure images or other media within popups are responsive */
+        .leaflet-popup-content img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* Adjust tooltip styles for mobile */
+        .custom-tooltip {
+            font-size: 14px;
+            padding: 8px;
+        }
+
+        @media (min-width: 601px) {
+            .custom-tooltip {
+                font-size: 12px;
+                padding: 5px;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+    console.log("Leaflet controls and popups optimized for mobile."); // Debugging
+}
+
+// Call the optimization function
+optimizeLeafletControlsAndPopups();
+
+/**
+ * Refreshes the map activations based on the current state.
+ * (Function already defined above)
+ }
+
+ /**
  * Refreshes the map activations based on the current state.
  */
 function refreshMapActivations() {
@@ -1027,93 +1408,18 @@ function refreshMapActivations() {
 
 /**
  * Adds CSS styles for the hamburger menu.
+ * (Already combined in the enhanceHamburgerMenuForMobile function above)
  */
-(function addHamburgerMenuStyles() {
-    const style = document.createElement('style');
-    style.innerHTML = `
-        /* Hamburger Menu Container */
-        #hamburgerMenu {
-            position: absolute;
-            top: 10px;
-            right: 10px; /* Changed from left: 10px to right: 10px */
-            z-index: 1000;
-        }
 
-        /* Menu Toggle */
-        #menuToggle {
-            display: flex;
-            flex-direction: column;
-            cursor: pointer;
-            user-select: none;
-        }
+/**
+ * Add responsive CSS styles to the document.
+ * (Already incorporated into the enhanceHamburgerMenuForMobile function)
+ */
 
-        /* Hide the checkbox */
-        #menuToggle input[type="checkbox"] {
-            display: none;
-        }
-
-        /* Hamburger Lines within Label */
-        #menuToggle label span {
-            background: #333;
-            height: 3px;
-            margin: 5px 0;
-            width: 25px;
-            transition: all 0.3s ease;
-            display: block;
-        }
-
-        /* Menu Styling */
-        #menu {
-            display: none;
-            list-style: none;
-            padding: 10px;
-            background: #fff;
-            border: 1px solid #ccc;
-            position: absolute;
-            top: 35px;
-            right: 0; /* Changed from left: 0 to right: 0 */
-            width: 200px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        /* Show Menu When Checkbox is Checked */
-        #menuToggle input[type="checkbox"]:checked ~ #menu {
-            display: block;
-        }
-
-        /* Animate Hamburger to 'X' When Menu is Open */
-        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(1) {
-            transform: translateY(8px) rotate(45deg);
-        }
-
-        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(2) {
-            opacity: 0;
-        }
-
-        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(3) {
-            transform: translateY(-8px) rotate(-45deg);
-        }
-
-        /* Style Menu Items */
-        #menu li {
-            margin: 10px 0;
-        }
-
-        #menu button,
-        #menu label {
-            cursor: pointer;
-            background: none;
-            border: none;
-            font-size: 16px;
-            width: 100%;
-            text-align: left;
-        }
-
-        #menu input[type="file"] {
-            display: block;
-            margin-top: 5px;
-        }
-    `;
-    document.head.appendChild(style);
-    console.log("Hamburger menu styles added and positioned to the right."); // Debugging
-})();
+// Ensure that the map container adjusts to viewport changes
+window.addEventListener('resize', debounce(() => {
+    if (map) {
+        map.invalidateSize();
+        console.log("Map size invalidated on window resize."); // Debugging
+    }
+}, 300));
