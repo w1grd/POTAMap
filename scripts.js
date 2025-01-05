@@ -6,6 +6,11 @@ let userLat = null;
 let userLng = null;
 // Declare a global variable to store current search results
 let currentSearchResults = [];
+let previousMapState = {
+    bounds: null,
+    displayedParks: [],
+};
+
 
 
 /**
@@ -1175,12 +1180,27 @@ function handleSliderChange(event) {
 
 
 /**
- * Handles input in the search box and filters parks based on the query.
+ * Handles input in the search box and dynamically highlights matching parks.
  * @param {Event} event - The input event from the search box.
  */
 function handleSearchInput(event) {
     const query = normalizeString(event.target.value);
     console.log(`Search query received: "${query}"`); // Debugging
+
+    // Clear previous highlights
+    if (map.highlightLayer) {
+        map.highlightLayer.clearLayers();
+    } else {
+        map.highlightLayer = L.layerGroup().addTo(map);
+    }
+// Save the map's state before searching (only once)
+    if (query && !previousMapState.bounds) {
+        previousMapState = {
+            bounds: map.getBounds(),
+            displayedParks: [...parks], // Save the currently displayed parks
+        };
+        console.log("Saved map state before search:", previousMapState); // Debugging
+    }
 
     if (query === '') {
         // If the search box is empty, reset the park display based on current filters
@@ -1194,7 +1214,6 @@ function handleSearchInput(event) {
         return (
             normalizeString(park.name).includes(query) ||
             normalizeString(park.reference).includes(query)
-            // Removed park.location as it's undefined
         );
     });
 
@@ -1203,8 +1222,36 @@ function handleSearchInput(event) {
     // Update the global search results
     currentSearchResults = filteredParks;
 
-    // Update the map to display only the filtered parks
-    updateMapWithFilteredParks(filteredParks);
+    // Highlight matching parks dynamically
+    filteredParks.forEach((park, index) => {
+        const markerSize = index === 0 ? 20 : 15; // Larger size for the top result
+        const markerColor = index === 0 ? "#ff6600" : "#ffa500"; // Different color for emphasis
+
+        const highlightMarker = L.circleMarker([park.latitude, park.longitude], {
+            radius: markerSize,
+            fillColor: markerColor,
+            color: "#000",
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 0.8
+        }).addTo(map.highlightLayer);
+
+        highlightMarker.bindTooltip(`${park.name} (${park.reference})`, {
+            direction: "top",
+            className: "custom-tooltip"
+        });
+
+        // Optionally bind the full popup content
+        highlightMarker.on('click', async () => {
+            const popupContent = await fetchFullPopupContent(park);
+            highlightMarker.bindPopup(popupContent).openPopup();
+        });
+    });
+
+    // If there is a single match, zoom to it
+    if (filteredParks.length === 1) {
+        zoomToPark(filteredParks[0]);
+    }
 }
 
 /**
@@ -1232,7 +1279,7 @@ function handleSearchEnter(event) {
     }
 }
 /**
- * Zooms the map to a single park's location and increases the zoom level by one.
+ * Zooms the map to a single park's location and shows its full information popup.
  * @param {Object} park - The park object to zoom into.
  */
 function zoomToPark(park) {
@@ -1244,24 +1291,88 @@ function zoomToPark(park) {
     const { latitude, longitude } = park;
     const currentZoom = map.getZoom();
     const maxZoom = map.getMaxZoom();
-    const newZoomLevel = Math.min(currentZoom + 1, maxZoom); // Ensure zoom does not exceed maximum
+    const newZoomLevel = Math.min(currentZoom + 2, maxZoom); // Zoom in closer for emphasis
 
     map.setView([latitude, longitude], newZoomLevel, {
         animate: true,
-        duration: 1.5 // Duration in seconds for the animation
+        duration: 1.5 // Animation duration in seconds
     });
 
     console.log(`Zoomed to park: ${park.name} (${park.reference}) at [${latitude}, ${longitude}].`); // Debugging
 
-    // Optionally, open the popup for the park
-    // Find the corresponding marker and open its popup
-    map.activationsLayer.eachLayer(layer => {
-        const layerLatLng = layer.getLatLng();
-        if (layerLatLng.lat === latitude && layerLatLng.lng === longitude) {
-            layer.openPopup();
-        }
-    });
+    // Highlight the marker by temporarily adding a larger circle
+    const highlightedMarker = L.circleMarker([latitude, longitude], {
+        radius: 15, // Larger radius for emphasis
+        fillColor: "#ff9900", // Highlight color
+        color: "#ff6600", // Border color
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 0.9
+    }).addTo(map);
+
+    // Fetch and display the full popup content
+    fetchFullPopupContent(park)
+        .then((popupContent) => {
+            highlightedMarker.bindPopup(popupContent).openPopup();
+        })
+        .catch((error) => {
+            console.error(`Error fetching popup content for park ${park.reference}:`, error);
+            highlightedMarker.bindPopup(`
+                <b>${park.name} (${park.reference})</b><br>
+                Activations: ${park.activations}<br>
+                Unable to load full details.
+            `).openPopup();
+        });
+
+    // Remove the temporary highlight after 5 seconds
+    setTimeout(() => {
+        map.removeLayer(highlightedMarker);
+        console.log("Highlight removed from searched park.");
+    }, 5000); // 5 seconds timeout
 }
+
+/**
+ * Fetches the full popup content for a park.
+ * @param {Object} park - The park object containing its details.
+ * @returns {Promise<string>} The full popup HTML content.
+ */
+async function fetchFullPopupContent(park) {
+    const { reference, name, latitude, longitude, activations } = park;
+
+    let parkActivations = await getParkActivationsFromIndexedDB(reference);
+    if (!parkActivations) {
+        console.log(`Fetching activations for park ${reference} from API.`);
+        parkActivations = await fetchParkActivations(reference);
+        await saveParkActivationsToIndexedDB(reference, parkActivations);
+    } else {
+        console.log(`Using cached activations for park ${reference}.`);
+    }
+
+    // Get the three most recent activations
+    const recentActivations = parkActivations
+        .sort((a, b) => parseInt(b.qso_date) - parseInt(a.qso_date))
+        .slice(0, 3);
+
+    // Format the recent activations
+    let recentActivationsHtml = '';
+    if (recentActivations.length > 0) {
+        recentActivationsHtml += '<b>Recent Activations:</b><br>';
+        recentActivations.forEach((act) => {
+            const dateStr = formatQsoDate(act.qso_date);
+            recentActivationsHtml += `${act.activeCallsign} on ${dateStr} (${act.totalQSOs} QSOs)<br>`;
+        });
+    } else {
+        recentActivationsHtml += 'No recent activations.';
+    }
+
+    return `
+        <b>${name} (${reference})</b><br>
+        Activations: ${activations}<br>
+        ${recentActivationsHtml}<br>
+        <a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>
+    `;
+}
+
 /**
  * Zooms the map to fit all searched parks within the view and increases the zoom level by one.
  * @param {Array} parks - An array of park objects to include in the view.
@@ -1585,9 +1696,6 @@ function updateMapWithFilteredParks(filteredParks) {
     displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
     console.log("Displayed filtered parks on the map."); // Debugging
 }
-/**
- * Clears the search input and resets the park display.
- */
 function clearSearchInput() {
     const searchBox = document.getElementById('searchBox');
     if (searchBox) {
@@ -1595,8 +1703,24 @@ function clearSearchInput() {
         console.log("Search input cleared."); // Debugging
     }
 
-    // Reset the park display
-    resetParkDisplay();
+    // Clear highlights and reset the map view
+    if (map.highlightLayer) {
+        map.highlightLayer.clearLayers();
+    }
+
+    if (previousMapState.bounds) {
+        // Restore the previous map bounds
+        map.fitBounds(previousMapState.bounds);
+
+        // Display the previously shown parks
+        const activatedReferences = activations.map((act) => act.reference);
+        displayParksOnMap(map, previousMapState.displayedParks, activatedReferences, map.activationsLayer);
+
+        console.log("Map view restored to prior state."); // Debugging
+
+        // Clear the saved state
+        previousMapState = { bounds: null, displayedParks: [] };
+    }
 }
 
 /**
@@ -1775,148 +1899,91 @@ function initializeMap(lat, lng) {
     return mapInstance;
 }
 
-/**
- * Displays parks on the map, highlighting user-activated ones and filtering based on activation count.
- * @param {L.Map} map - The Leaflet map instance.
- * @param {Array} parks - The complete list of parks to display.
- * @param {Array} userActivatedReferences - List of activated park references to highlight.
- * @param {L.LayerGroup} layerGroup - The layer group to add markers to.
- */
 function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map.activationsLayer) {
     console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
 
-    // Ensure 'activations' is an array
-    if (!Array.isArray(activations)) {
-        console.error("Activations is not an array:", activations);
-        activations = []; // Fallback to an empty array to prevent further errors
+    if (!map.activationsLayer) {
+        map.activationsLayer = L.layerGroup().addTo(map);
+        console.log("Created a new activations layer.");
     } else {
-        console.log("Activations is a valid array with length:", activations.length); // Debugging
+        console.log("Using existing activations layer.");
     }
 
-    // Determine if the device is mobile
-    const isMobile = window.innerWidth <= 600;
-    const markerRadius = isMobile ? 8 : 6; // Larger markers on mobile
+    layerGroup.clearLayers(); // Ensure the layer is cleared before adding new markers
 
     parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
-        const markerColor = getMarkerColor(parkActivationCount, isUserActivated);
 
-//        console.log(`Adding marker for: ${name} (${reference}) with color: ${markerColor}`); // Debugging
+        const markerColor = isUserActivated ? "#ffa500" : parkActivationCount > 10 ? "#ff6666" : "#90ee90";
 
-        // Find all activations for this specific park
-        const parkActivations = activations.filter(act => act.reference === reference);
-        let latestActivationDate = 'No activations';
-
-        if (parkActivations.length > 0) {
-            // Extract valid dates from activations
-            const validDates = parkActivations
-                .map(act => new Date(act.qso_date))
-                .filter(date => !isNaN(date)); // Filter out invalid dates
-
-            if (validDates.length > 0) {
-                // Sort dates in descending order and pick the latest
-                const latestDate = validDates.sort((a, b) => b - a)[0];
-                latestActivationDate = latestDate.toLocaleDateString(undefined, {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                });
-            }
-        }
-
-        // Create the directions link if user location is available
-        const directionsLink = userLat !== null && userLng !== null
-            ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>`
-            : '';
-
-        // Create the POTA.app park page link
+        // Create popup content
         const potaAppLink = `<a href="https://pota.app/#/park/${reference}" target="_blank" rel="noopener noreferrer"><b>${name} (${reference})</b></a>`;
-
-        // Create the initial popup content with a placeholder for recent activations
-        let popupContent = `
+        const directionsLink =
+            userLat !== null && userLng !== null
+                ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>`
+                : '';
+        const popupContent = `
             ${potaAppLink}<br>
             Activations: ${parkActivationCount}<br>
-            <b>Most Recent Activation:</b> ${latestActivationDate}<br>
-            ${directionsLink}<br>
-            <i>Loading recent activations...</i>
+            ${directionsLink ? `${directionsLink}<br>` : ''}
+            <i>Click marker for more details.</i>
         `;
 
-        // Create a custom marker with adjusted size
-        const customMarker = L.circleMarker([latitude, longitude], {
-            radius: markerRadius, // Adjusted radius
-            fillColor: markerColor, // Inner color
-            color: "#000", // Border color
+        // Create marker
+        const marker = L.circleMarker([latitude, longitude], {
+            radius: 6,
+            fillColor: markerColor,
+            color: "#000",
             weight: 1,
-            opacity: 1, // Border opacity
-            fillOpacity: 0.9, // Fill opacity
+            opacity: 1,
+            fillOpacity: 0.9,
         });
 
-        // Add marker to the specified layer group
-        customMarker
+        // Add marker to layer group with popup
+        marker
             .addTo(layerGroup)
             .bindPopup(popupContent)
             .bindTooltip(`${reference}: ${name} (${parkActivationCount} activations)`, {
                 direction: "top",
                 opacity: 0.9,
-                sticky: false, // Ensures tooltip disappears when not hovering
-                className: "custom-tooltip", // Optional: Add a custom class for additional styling
+                sticky: false,
+                className: "custom-tooltip",
             });
 
-        // Add click event listener to close the tooltip when marker is clicked
-        customMarker.on('click', function() {
-            this.closeTooltip();
-        });
-
-        // Add event listener for when the popup is opened
-        (function(marker, reference, name, parkActivationCount, latestActivationDate, directionsLink) {
-            marker.on('popupopen', async function() {
-                try {
-                    // Fetch activations for this park
-                    let parkActivations = await getParkActivationsFromIndexedDB(reference);
-                    if (!parkActivations) {
-                        console.log(`Fetching activations for park ${reference} from API.`);
-                        parkActivations = await fetchParkActivations(reference);
-                        await saveParkActivationsToIndexedDB(reference, parkActivations);
-                    } else {
-                        console.log(`Using cached activations for park ${reference}.`);
-                    }
-
-                    // Get the three most recent activations
-                    const recentActivations = parkActivations
-                        .sort((a, b) => parseInt(b.qso_date) - parseInt(a.qso_date))
-                        .slice(0, 3);
-
-                    // Format the recent activations
-                    let recentActivationsHtml = '';
-                    if (recentActivations.length > 0) {
-                        recentActivationsHtml += '<b>Recent Activations:</b><br>';
-                        recentActivations.forEach(act => {
-                            const dateStr = formatQsoDate(act.qso_date);
-                            recentActivationsHtml += `${act.activeCallsign} on ${dateStr} (${act.totalQSOs} QSOs)<br>`;
-                        });
-                    } else {
-                        recentActivationsHtml += 'No recent activations.';
-                    }
-
-                    // Create the POTA.app park page link
-                    const updatedPotaAppLink = `<a href="https://pota.app/#/park/${reference}" target="_blank" rel="noopener noreferrer"><b>${name} (${reference})</b></a>`;
-
-                    // Update the popup content
-                    const updatedPopupContent = `
-                        ${updatedPotaAppLink}<br>
-                        Activations: ${parkActivationCount}<br>
-                        <b>Most Recent Activation:</b> ${latestActivationDate}<br>
-                        ${directionsLink}<br>
-                        ${recentActivationsHtml}
-                    `;
-
-                    marker.setPopupContent(updatedPopupContent);
-                } catch (error) {
-                    console.error(`Error fetching activations for park ${reference}:`, error);
+        // Add event listener for popupopen to fetch additional details
+        marker.on('popupopen', async function () {
+            try {
+                // Fetch activations for this park from IndexedDB or API
+                let parkActivations = await getParkActivationsFromIndexedDB(reference);
+                if (!parkActivations) {
+                    console.log(`Fetching activations for park ${reference} from API.`);
+                    parkActivations = await fetchParkActivations(reference);
+                    await saveParkActivationsToIndexedDB(reference, parkActivations);
                 }
-            });
-        })(customMarker, reference, name, parkActivationCount, latestActivationDate, directionsLink);
+
+                // Format recent activations
+                const recentActivations = parkActivations
+                    .sort((a, b) => parseInt(b.qso_date) - parseInt(a.qso_date))
+                    .slice(0, 3)
+                    .map(act => {
+                        const dateStr = formatQsoDate(act.qso_date);
+                        return `${act.activeCallsign} on ${dateStr} (${act.totalQSOs} QSOs)`;
+                    })
+                    .join('<br>') || 'No recent activations.';
+
+                // Update popup with additional details
+                const updatedPopupContent = `
+                    ${potaAppLink}<br>
+                    Activations: ${parkActivationCount}<br>
+                    <b>Recent Activations:</b><br>${recentActivations}<br>
+                    ${directionsLink ? `${directionsLink}<br>` : ''}
+                `;
+                marker.setPopupContent(updatedPopupContent);
+            } catch (error) {
+                console.error(`Error fetching activations for park ${reference}:`, error);
+            }
+        });
     });
 
     console.log("All parks displayed with appropriate highlights."); // Debugging
