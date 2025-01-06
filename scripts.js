@@ -1355,7 +1355,7 @@ function handleSliderChange(event) {
 
 
 /**
- * Handles input in the search box and dynamically highlights matching parks.
+ * Handles input in the search box and dynamically highlights matching parks within the visible map bounds.
  * @param {Event} event - The input event from the search box.
  */
 function handleSearchInput(event) {
@@ -1368,7 +1368,8 @@ function handleSearchInput(event) {
     } else {
         map.highlightLayer = L.layerGroup().addTo(map);
     }
-// Save the map's state before searching (only once)
+
+    // Save the map's state before searching (only once)
     if (query && !previousMapState.bounds) {
         previousMapState = {
             bounds: map.getBounds(),
@@ -1384,15 +1385,21 @@ function handleSearchInput(event) {
         return;
     }
 
-    // Filter parks based on the search query
+    // Get current map bounds
+    const bounds = getCurrentMapBounds();
+
+    // Filter parks within the visible map bounds based on the search query
     const filteredParks = parks.filter(park => {
+        const isWithinBounds =
+            park.latitude && park.longitude && bounds.contains([park.latitude, park.longitude]);
         return (
-            normalizeString(park.name).includes(query) ||
-            normalizeString(park.reference).includes(query)
+            isWithinBounds &&
+            (normalizeString(park.name).includes(query) ||
+                normalizeString(park.reference).includes(query))
         );
     });
 
-    console.log(`Parks matching search: ${filteredParks.length}`); // Debugging
+    console.log(`Parks matching search within bounds: ${filteredParks.length}`); // Debugging
 
     // Update the global search results
     currentSearchResults = filteredParks;
@@ -1473,7 +1480,7 @@ function zoomToPark(park) {
         duration: 1.5 // Animation duration in seconds
     });
 
-    console.log(`Zoomed to park: ${park.name} (${park.reference}) at [${latitude}, ${longitude}].`); // Debugging
+    console.log(`Zoomed to park at [${latitude}, ${longitude}].`); // Debugging
 
     // Highlight the marker by temporarily adding a larger circle
     const highlightedMarker = L.circleMarker([latitude, longitude], {
@@ -1491,12 +1498,8 @@ function zoomToPark(park) {
             highlightedMarker.bindPopup(popupContent).openPopup();
         })
         .catch((error) => {
-            console.error(`Error fetching popup content for park ${park.reference}:`, error);
-            highlightedMarker.bindPopup(`
-                <b>${park.name} (${park.reference})</b><br>
-                Activations: ${park.activations}<br>
-                Unable to load full details.
-            `).openPopup();
+            console.error(`Error fetching popup content for park:`, error);
+            highlightedMarker.bindPopup('<b>Error loading park details</b>').openPopup();
         });
 
     // Remove the temporary highlight after 5 seconds
@@ -1506,8 +1509,9 @@ function zoomToPark(park) {
     }, 5000); // 5 seconds timeout
 }
 
+
 /**
- * Fetches the full popup content for a park.
+ * Fetches the full popup content for a park, including recent activations and navigation links.
  * @param {Object} park - The park object containing its details.
  * @returns {Promise<string>} The full popup HTML content.
  */
@@ -1540,12 +1544,22 @@ async function fetchFullPopupContent(park) {
         recentActivationsHtml += 'No recent activations.';
     }
 
+    // Generate POTA.app link
+    const potaAppLink = `<a href="https://pota.app/#/park/${reference}" target="_blank" rel="noopener noreferrer"><b>${name} (${reference})</b></a>`;
+
+    // Generate directions link if user location is available
+    const directionsLink =
+        userLat !== null && userLng !== null
+            ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>`
+            : '';
+
+    // Construct and return the popup content
     return `
-        <b>${name} (${reference})</b><br>
+        ${potaAppLink}<br>
         Activations: ${activations}<br>
-        ${recentActivationsHtml}<br>
-        <a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>
-    `;
+        ${recentActivationsHtml}
+        ${directionsLink ? `<br>${directionsLink}` : ''}
+    `.trim();
 }
 
 /**
@@ -2013,7 +2027,6 @@ function initializeMap(lat, lng) {
 
     return mapInstance;
 }
-
 function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map.activationsLayer) {
     console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
 
@@ -2047,7 +2060,6 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
         const popupContent = `
             ${potaAppLink}<br>
             Activations: ${parkActivationCount}<br>
-            ${directionsLink ? `${directionsLink}<br>` : ''}
             <i>Click marker for more details.</i>
         `;
 
@@ -2061,7 +2073,7 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
             fillOpacity: 0.9,
         });
 
-        // Add marker to layer group with popup
+        // Add marker to layer group with popup and tooltip
         marker
             .addTo(layerGroup)
             .bindPopup(popupContent)
@@ -2072,8 +2084,11 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
                 className: "custom-tooltip",
             });
 
-        // Add event listener for popupopen to fetch additional details
+        // Consolidated popupopen handler
         marker.on('popupopen', async function () {
+            // Close the tooltip when the popup is opened
+            marker.unbindTooltip();
+
             try {
                 // Fetch activations for this park from IndexedDB or API
                 let parkActivations = await getParkActivationsFromIndexedDB(reference);
@@ -2095,16 +2110,17 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
 
                 // Update popup with additional details
                 const updatedPopupContent = `
-                    ${potaAppLink}<br>
-                    Activations: ${parkActivationCount}<br>
-                    <b>Recent Activations:</b><br>${recentActivations}<br>
-                    ${directionsLink ? `${directionsLink}<br>` : ''}
-                `;
+            ${potaAppLink}<br>
+            Activations: ${parkActivationCount}<br>
+            <b>Recent Activations:</b><br>${recentActivations}<br>
+            ${directionsLink ? `${directionsLink}<br>` : ''}
+        `;
                 marker.setPopupContent(updatedPopupContent);
             } catch (error) {
                 console.error(`Error fetching activations for park ${reference}:`, error);
             }
         });
+
     });
 
     console.log("All parks displayed with appropriate highlights."); // Debugging
