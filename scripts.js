@@ -1898,65 +1898,6 @@ function resetParkDisplay() {
     // Update the map with the filtered parks
     filterParksByActivations(minActivations);
 }
-
-
-
-
-/**
- * Fetches and caches park data from the CSV using IndexedDB and PapaParse.
- * @param {string} csvUrl - The CSV file URL.
- * @param {number} cacheDuration - Duration in milliseconds before cache expires.
- * @returns {Promise<Array>} The fetched and parsed park data.
- */
-async function fetchAndCacheParks(csvUrl, cacheDuration) {
-    const db = await getDatabase();
-    const transaction = db.transaction('parks', 'readwrite');
-    const store = transaction.objectStore('parks');
-
-    // Check if parks data already exists
-    const existingParks = await store.getAll();
-    if (existingParks.length > 0) {
-        // Optionally, implement cache invalidation based on your requirements
-        console.log('Using cached park data from IndexedDB.');
-        return existingParks;
-    }
-
-    try {
-        console.log('Fetching park data from CSV...');
-        const response = await fetch(csvUrl);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch park data: ${response.statusText}`);
-        }
-
-        const csvText = await response.text();
-        const parsedData = parseCSV(csvText);
-        console.log('Parsed Park Data:', parsedData); // Debugging
-
-        // Transform parsed data to desired format
-        const parks = parsedData.map(park => ({
-            reference: park.reference,
-            name: park.name,
-            latitude: parseFloat(park.latitude),
-            longitude: parseFloat(park.longitude),
-            activations: parseInt(park.activations, 10) || 0
-        }));
-
-        // Save parks to IndexedDB
-        await saveParksToIndexedDB(parks);
-        console.log('Park data fetched and cached successfully.');
-
-        return parks;
-    } catch (error) {
-        console.error('Error fetching and caching park data:', error);
-        // If fetch fails and parks are cached, return cached data
-        if (existingParks.length > 0) {
-            console.warn('Using existing cached park data due to fetch error.');
-            return existingParks;
-        }
-        throw error; // Re-throw error if no cached data
-    }
-}
-
 /**
  * Initializes the app and sets up default behavior based on IndexedDB.
  */
@@ -1982,9 +1923,6 @@ async function initializeActivationsDisplay() {
         console.error('Error initializing activations display:', error);
     }
 }
-
-
-
 
 /**
  * Initializes the Leaflet map.
