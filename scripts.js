@@ -1553,59 +1553,85 @@ function handleSearchEnter(event) {
 }
 
 /**
- * Zooms the map to a single park's location and shows its full information popup.
- * @param {Object} park - The park object to zoom into.
+ * Zooms the map to a single park's location and shows its full information popup,
+ * including current activation details, as if clicked by the user.
+ * @param {Object} park - The park object to zoom into (must have .latitude, .longitude).
  */
-function zoomToPark(park) {
+async function zoomToPark(park) {
     if (!map) {
         console.error("Map instance is not initialized.");
         return;
     }
 
     const { latitude, longitude } = park;
+    if (!latitude || !longitude) {
+        console.warn("Park has no valid coordinates:", park.reference);
+        return;
+    }
+
+    // Zoom in closer
     const currentZoom = map.getZoom();
     const maxZoom = map.getMaxZoom();
-    const newZoomLevel = Math.min(currentZoom + 2, maxZoom); // Zoom in closer for emphasis
-
+    const newZoomLevel = Math.min(currentZoom + 2, maxZoom); // or pick any desired zoom
     map.setView([latitude, longitude], newZoomLevel, {
         animate: true,
-        duration: 1.5 // Animation duration in seconds
+        duration: 1.5, // animation in seconds
     });
+    console.log(`Zoomed to park [${latitude}, ${longitude}] - ${park.reference}.`);
 
-    console.log(`Zoomed to park at [${latitude}, ${longitude}].`); // Debugging
-
-    // Close the hamburger menu
+    // Close the hamburger menu (if open)
     const menuCheckbox = document.getElementById('menuCheckbox');
     if (menuCheckbox && menuCheckbox.checked) {
         menuCheckbox.checked = false;
         console.log("Hamburger menu closed.");
     }
 
-    // Highlight the marker by temporarily adding a larger circle
-    const highlightedMarker = L.circleMarker([latitude, longitude], {
-        radius: 15, // Larger radius for emphasis
-        fillColor: "#ff9900", // Highlight color
-        color: "#ff6600", // Border color
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0.9
-    }).addTo(map);
+    // 1) Try to find the existing marker in map activations/spots layers
+    //    We'll assume your "parks" go in map.activationsLayer, but if spots are separate, check map.spotsLayer too.
+    let foundMarker = null;
 
-    // Fetch and display the full popup content
-    fetchFullPopupContent(park)
-        .then((popupContent) => {
-            highlightedMarker.bindPopup(popupContent).openPopup();
-        })
-        .catch((error) => {
-            console.error(`Error fetching popup content for park:`, error);
-            highlightedMarker.bindPopup('<b>Error loading park details</b>').openPopup();
+    // If you have a single group for parks:
+    if (map.activationsLayer) {
+        map.activationsLayer.eachLayer((layer) => {
+            // If it's a circleMarker, check if it belongs to the park
+            // For your code, you might store the park reference in layer.options or layer.parkReference
+            // or match lat/long. For instance:
+            if (layer.getLatLng) {
+                const latLng = layer.getLatLng();
+                if (latLng.lat === park.latitude && latLng.lng === park.longitude) {
+                    foundMarker = layer;
+                }
+            }
         });
+    }
 
-    // Remove the temporary highlight after 5 seconds
-    setTimeout(() => {
-        map.removeLayer(highlightedMarker);
-        console.log("Highlight removed from searched park.");
-    }, 5000); // 5 seconds timeout
+    // If you also keep "spot" markers in map.spotsLayer, you might do the same loop there:
+    if (!foundMarker && map.spotsLayer) {
+        map.spotsLayer.eachLayer((layer) => {
+            if (layer.getLatLng) {
+                const latLng = layer.getLatLng();
+                if (latLng.lat === park.latitude && latLng.lng === park.longitude) {
+                    foundMarker = layer;
+                }
+            }
+        });
+    }
+
+    // 2) If we found an existing marker, open its popup so it triggers the normal "popupopen" logic
+    if (foundMarker) {
+        // Ensure the popup is bound (it should be, from your displayParksOnMap or fetchAndDisplaySpots function)
+        if (foundMarker._popup) {
+            // This will automatically trigger the 'popupopen' event if you have it set
+            foundMarker.openPopup();
+            console.log(`Opened popup for existing marker of park ${park.reference}.`);
+        } else {
+            console.warn(`Marker has no bound popup for ${park.reference}.`);
+        }
+    } else {
+        console.warn(`No existing marker found for park ${park.reference}.`);
+        // Optionally, create a *temporary* marker if you like
+        // ...
+    }
 }
 
 /**
@@ -1670,8 +1696,8 @@ async function fetchFullPopupContent(park, currentActivation = null) {
 
     // Construct the final popup content
     return `
-        ${potaAppLink}<br>
-        <br>Activations: ${park.activations || 0}<br>
+        ${potaAppLink}
+        <br>Activations: ${park.activations || 0}
         <br>${directionsLink ? `<br>${directionsLink}` : ''}
         <br>${recentActivationsHtml}
         ${currentActivationHtml ? `<br>${currentActivationHtml}` : ''}
