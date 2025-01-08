@@ -1066,28 +1066,13 @@ async function saveParkActivationsToIndexedDB(reference, activations) {
 }
 
 /**
- * Fetches activations for a specific park from the POTA API.
- * @param {string} reference - The park reference code.
- * @returns {Promise<Array>} Array of activation objects.
+ * Fetches *all* activations for a specific park from the POTA API,
+ * with *no* caching in IndexedDB.
+ * @param {string} reference - The park reference code (e.g. "K-1234").
+ * @returns {Promise<Array>} Array of activation objects from the API.
  */
 async function fetchParkActivations(reference) {
-    const db = await getDatabase();
-    const transaction = db.transaction('parkActivations', 'readwrite');
-    const store = transaction.objectStore('parkActivations');
-
-    // Check if activations are already cached
-    const cachedActivations = await new Promise((resolve) => {
-        const request = store.get(reference);
-        request.onsuccess = () => resolve(request.result ? request.result.activations : null);
-        request.onerror = () => resolve(null);
-    });
-
-    if (cachedActivations) {
-        console.log(`Using cached activations for park ${reference}.`);
-        return cachedActivations;
-    }
-
-    // Fetch activations from the API if not cached
+    // Always fetch from the POTA API, no cache check
     const url = `https://api.pota.app/park/activations/${reference}?count=all`;
     try {
         const response = await fetch(url);
@@ -1097,16 +1082,15 @@ async function fetchParkActivations(reference) {
         const data = await response.json();
         console.log(`Fetched ${data.length} activations for park ${reference} from API.`);
 
-        // Cache the activations
-        const activationsData = { reference, activations: data };
-        store.put(activationsData);
-
+        // Return the fresh data
         return data;
     } catch (error) {
         console.error(error);
+        // Return empty array if fetch fails
         return [];
     }
 }
+
 
 /**
  * Formats a QSO date string from 'YYYYMMDD' to a human-readable date.
@@ -1624,25 +1608,29 @@ function zoomToPark(park) {
     }, 5000); // 5 seconds timeout
 }
 
-
 /**
- * Fetches the full popup content for a park, including current activation details if provided.
+ * Fetches the full popup content for a park, including recent activations,
+ * plus optionally showing "current activation" (spot) details if provided.
+ *
  * @param {Object} park - The park object containing its details.
- * @param {Object} [currentActivation] - Optional activation/spot details (e.g. { activator, frequency, mode, comments }).
+ *   e.g. { reference: "K-1234", name: "Some Park", latitude: 12.345, longitude: -98.765, ... }
+ * @param {Object} [currentActivation] - Optional activation/spot details
+ *   (e.g. { activator, frequency, mode, comments }).
  * @returns {Promise<string>} The full popup HTML content.
  */
 async function fetchFullPopupContent(park, currentActivation = null) {
     const { reference, name, latitude, longitude } = park;
 
-    // Retrieve cached activations for this park, if any
-    const cachedActivations = await getParkActivationsFromIndexedDB(reference);
+    // Always fetch from the API, ignoring any cache
+    const allActivations = await fetchParkActivations(reference);
 
-    // Sort by date desc, then take a few
-    const recentActivations = cachedActivations
-        ? cachedActivations.sort((a, b) => parseInt(b.qso_date) - parseInt(a.qso_date)).slice(0, 3)
-        : [];
+    // Sort by date descending and take top 3
+    // (Make sure `qso_date` is in a format parseable by new Date() or parseInt)
+    const recentActivations = allActivations
+        .sort((a, b) => parseInt(b.qso_date) - parseInt(a.qso_date))
+        .slice(0, 3);
 
-    // Format a “Recent Activations” block
+    // Build out the "Recent Activations" HTML
     let recentActivationsHtml = '<b>Recent Activations:</b><br>';
     if (recentActivations.length > 0) {
         recentActivations.forEach((act) => {
@@ -1660,19 +1648,18 @@ async function fetchFullPopupContent(park, currentActivation = null) {
       </a>
     `.trim();
 
-    // Generate directions link if user location is available
+    // Generate "Get Directions" link if user location is available
     const directionsLink =
         userLat !== null && userLng !== null
-            ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" 
+            ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving"
                  target="_blank" rel="noopener noreferrer">Get Directions</a>`
             : '';
 
-    // Append current activation details if provided
+    // Optionally show the "current activation" (spot) details if passed in
     let currentActivationHtml = '';
     if (currentActivation) {
         const { activator, frequency, mode, comments } = currentActivation;
         currentActivationHtml = `
-            <br/>
             <b>Current Activation:</b><br>
             <b>Activator</b>: ${activator}<br>
             <b>Frequency:</b> ${frequency} MHz<br>
@@ -1684,8 +1671,8 @@ async function fetchFullPopupContent(park, currentActivation = null) {
     // Construct the final popup content
     return `
         ${potaAppLink}<br>
-        ${directionsLink ? `<br>${directionsLink}` : ''}
-        Activations: ${park.activations || 0}<br>
+        <br>Activations: ${park.activations || 0}<br>
+        <br>${directionsLink ? `<br>${directionsLink}` : ''}
         <br>${recentActivationsHtml}
         ${currentActivationHtml ? `<br>${currentActivationHtml}` : ''}
     `.trim();
