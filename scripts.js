@@ -79,7 +79,6 @@ function initializeMenu() {
         document.getElementById('fileUpload').click();
     });
     document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
-    document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
 
     // Add event listeners for the search box
     document.getElementById('searchBox').addEventListener('input', debounce(handleSearchInput, 300));
@@ -1072,6 +1071,23 @@ async function saveParkActivationsToIndexedDB(reference, activations) {
  * @returns {Promise<Array>} Array of activation objects.
  */
 async function fetchParkActivations(reference) {
+    const db = await getDatabase();
+    const transaction = db.transaction('parkActivations', 'readwrite');
+    const store = transaction.objectStore('parkActivations');
+
+    // Check if activations are already cached
+    const cachedActivations = await new Promise((resolve) => {
+        const request = store.get(reference);
+        request.onsuccess = () => resolve(request.result ? request.result.activations : null);
+        request.onerror = () => resolve(null);
+    });
+
+    if (cachedActivations) {
+        console.log(`Using cached activations for park ${reference}.`);
+        return cachedActivations;
+    }
+
+    // Fetch activations from the API if not cached
     const url = `https://api.pota.app/park/activations/${reference}?count=all`;
     try {
         const response = await fetch(url);
@@ -1080,6 +1096,11 @@ async function fetchParkActivations(reference) {
         }
         const data = await response.json();
         console.log(`Fetched ${data.length} activations for park ${reference} from API.`);
+
+        // Cache the activations
+        const activationsData = { reference, activations: data };
+        store.put(activationsData);
+
         return data;
     } catch (error) {
         console.error(error);
@@ -1605,31 +1626,25 @@ function zoomToPark(park) {
 
 
 /**
- * Fetches the full popup content for a park, including recent activations and navigation links.
+ * Fetches the full popup content for a park, including current activation details if provided.
  * @param {Object} park - The park object containing its details.
+ * @param {Object} [currentActivation] - Optional activation/spot details (e.g. { activator, frequency, mode, comments }).
  * @returns {Promise<string>} The full popup HTML content.
  */
-async function fetchFullPopupContent(park) {
-    const { reference, name, latitude, longitude, activations } = park;
+async function fetchFullPopupContent(park, currentActivation = null) {
+    const { reference, name, latitude, longitude } = park;
 
-    let parkActivations = await getParkActivationsFromIndexedDB(reference);
-    if (!parkActivations) {
-        console.log(`Fetching activations for park ${reference} from API.`);
-        parkActivations = await fetchParkActivations(reference);
-        await saveParkActivationsToIndexedDB(reference, parkActivations);
-    } else {
-        console.log(`Using cached activations for park ${reference}.`);
-    }
+    // Retrieve cached activations for this park, if any
+    const cachedActivations = await getParkActivationsFromIndexedDB(reference);
 
-    // Get the three most recent activations
-    const recentActivations = parkActivations
-        .sort((a, b) => parseInt(b.qso_date) - parseInt(a.qso_date))
-        .slice(0, 3);
+    // Sort by date desc, then take a few
+    const recentActivations = cachedActivations
+        ? cachedActivations.sort((a, b) => parseInt(b.qso_date) - parseInt(a.qso_date)).slice(0, 3)
+        : [];
 
-    // Format the recent activations
-    let recentActivationsHtml = '';
+    // Format a “Recent Activations” block
+    let recentActivationsHtml = '<b>Recent Activations:</b><br>';
     if (recentActivations.length > 0) {
-        recentActivationsHtml += '<b>Recent Activations:</b><br>';
         recentActivations.forEach((act) => {
             const dateStr = formatQsoDate(act.qso_date);
             recentActivationsHtml += `${act.activeCallsign} on ${dateStr} (${act.totalQSOs} QSOs)<br>`;
@@ -1639,20 +1654,40 @@ async function fetchFullPopupContent(park) {
     }
 
     // Generate POTA.app link
-    const potaAppLink = `<a href="https://pota.app/#/park/${reference}" target="_blank" rel="noopener noreferrer"><b>${name} (${reference})</b></a>`;
+    const potaAppLink = `
+      <a href="https://pota.app/#/park/${reference}" target="_blank" rel="noopener noreferrer">
+        <b>${name} (${reference})</b>
+      </a>
+    `.trim();
 
     // Generate directions link if user location is available
     const directionsLink =
         userLat !== null && userLng !== null
-            ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>`
+            ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" 
+                 target="_blank" rel="noopener noreferrer">Get Directions</a>`
             : '';
 
-    // Construct and return the popup content
+    // Append current activation details if provided
+    let currentActivationHtml = '';
+    if (currentActivation) {
+        const { activator, frequency, mode, comments } = currentActivation;
+        currentActivationHtml = `
+            <br/>
+            <b>Current Activation:</b><br>
+            <b>Activator</b>: ${activator}<br>
+            <b>Frequency:</b> ${frequency} MHz<br>
+            <b>Mode:</b> ${mode}<br>
+            <b>Comments:</b> ${comments || 'N/A'}
+        `;
+    }
+
+    // Construct the final popup content
     return `
         ${potaAppLink}<br>
-        Activations: ${activations}<br>
-        ${recentActivationsHtml}
         ${directionsLink ? `<br>${directionsLink}` : ''}
+        Activations: ${park.activations || 0}<br>
+        <br>${recentActivationsHtml}
+        ${currentActivationHtml ? `<br>${currentActivationHtml}` : ''}
     `.trim();
 }
 
@@ -2032,7 +2067,7 @@ function initializeMap(lat, lng) {
         center: [lat, lng],
         zoom: isMobile ? 12 : 10, // Higher zoom on mobile for better detail
         zoomControl: !isMobile, // Optionally disable zoom controls on mobile
-        attributionControl: true
+        attributionControl: true,
     });
 
     console.log("Initialized map at:", lat, lng); // Debugging
@@ -2041,58 +2076,79 @@ function initializeMap(lat, lng) {
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; OpenStreetMap contributors',
     }).addTo(mapInstance);
+
     console.log("Added OpenStreetMap tiles."); // Debugging
 
     // Add marker for user's location with adjusted icon size
     L.marker([lat, lng], {
         icon: L.icon({
-            iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png', // Replace with your custom icon URL if needed
+            iconUrl:
+                "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
             iconSize: [30, 30], // Increased icon size for better visibility on mobile
             iconAnchor: [15, 30],
-            popupAnchor: [0, -30]
-        })
+            popupAnchor: [0, -30],
+        }),
     })
         .addTo(mapInstance)
         .bindPopup("Your Location")
         .openPopup();
+
     console.log("Added user location marker."); // Debugging
+
+    // Attach dynamic spot fetching to map movement
+    mapInstance.on(
+        "moveend",
+        debounce(() => {
+            console.log("Map moved or zoomed. Updating spots...");
+            fetchAndDisplaySpotsInCurrentBounds(mapInstance);
+        }, 300) // Debounce to reduce API calls
+    );
 
     return mapInstance;
 }
+
+
+/**
+ * Displays parks on the map.
+ */
+/**
+ * Displays parks on the map with proper popups that include activation information.
+ */
 function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map.activationsLayer) {
     console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
 
-    if (!map.activationsLayer) {
+    if (!layerGroup) {
         map.activationsLayer = L.layerGroup().addTo(map);
+        layerGroup = map.activationsLayer;
         console.log("Created a new activations layer.");
     } else {
         console.log("Using existing activations layer.");
     }
 
-    layerGroup.clearLayers(); // Ensure the layer is cleared before adding new markers
+    layerGroup.clearLayers(); // Clear existing markers before adding new ones
 
     parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
 
         const markerColor = isUserActivated
-            ? "#ffa500" // User's activation
+            ? "#ffa500" // User's activation (Orange)
             : parkActivationCount > 10
-                ? "#ff6666" // Highly active parks
+                ? "#ff6666" // Highly active parks (Light Red)
                 : parkActivationCount > 0
-                    ? "#90ee90" // Other active parks
-                    : "#0000ff"; // Inactive parks
+                    ? "#90ee90" // Other active parks (Light Green)
+                    : "#0000ff"; // Inactive parks (Blue)
 
-        // Create popup content
+        // Create basic popup content
         const potaAppLink = `<a href="https://pota.app/#/park/${reference}" target="_blank" rel="noopener noreferrer"><b>${name} (${reference})</b></a>`;
         const directionsLink =
             userLat !== null && userLng !== null
                 ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${latitude},${longitude}&travelmode=driving" target="_blank" rel="noopener noreferrer">Get Directions</a>`
                 : '';
-        const popupContent = `
+        const initialPopupContent = `
             ${potaAppLink}<br>
             Activations: ${parkActivationCount}<br>
-            <i>Click marker for more details.</i>
+            ${directionsLink ? `${directionsLink}<br>` : ''}
         `;
 
         // Create marker
@@ -2105,10 +2161,13 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
             fillOpacity: 0.9,
         });
 
-        // Add marker to layer group with popup and tooltip
+        // Store the original popup content to ensure it persists
+        marker.originalPopupContent = initialPopupContent;
+
+        // Add marker to layer group with initial popup and tooltip
         marker
             .addTo(layerGroup)
-            .bindPopup(popupContent)
+            .bindPopup(marker.originalPopupContent)
             .bindTooltip(`${reference}: ${name} (${parkActivationCount} activations)`, {
                 direction: "top",
                 opacity: 0.9,
@@ -2116,10 +2175,9 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
                 className: "custom-tooltip",
             });
 
-        // Consolidated popupopen handler
+        // Add popup open event handler to append activation data
         marker.on('popupopen', async function () {
-            // Close the tooltip when the popup is opened
-            marker.unbindTooltip();
+            console.log(`Popup opened for park ${reference}`); // Debugging
 
             try {
                 // Fetch activations for this park from IndexedDB or API
@@ -2134,22 +2192,36 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
                 const recentActivations = parkActivations
                     .sort((a, b) => parseInt(b.qso_date) - parseInt(a.qso_date))
                     .slice(0, 3)
-                    .map(act => {
+                    .map((act) => {
                         const dateStr = formatQsoDate(act.qso_date);
                         return `${act.activeCallsign} on ${dateStr} (${act.totalQSOs} QSOs)`;
                     })
                     .join('<br>') || 'No recent activations.';
 
-                // Update popup with additional details
+                // Retrieve the existing popup content (preserve marker.originalPopupContent)
+                const existingContent = marker.originalPopupContent;
+
+                // Append activation details to the existing content
                 const updatedPopupContent = `
-            ${potaAppLink}<br>
-            Activations: ${parkActivationCount}<br>
-            <b>Recent Activations:</b><br>${recentActivations}<br>
-            ${directionsLink ? `${directionsLink}<br>` : ''}
+            ${existingContent}
+            <br>
+            <b>Recent Activations:</b><br>${recentActivations}
         `;
+
                 marker.setPopupContent(updatedPopupContent);
+
+                console.log(`Updated popup content for park ${reference}.`); // Debugging
             } catch (error) {
                 console.error(`Error fetching activations for park ${reference}:`, error);
+
+                // Append an error message to the existing content
+                const existingContent = marker.originalPopupContent;
+                const errorContent = `
+            ${existingContent}
+            <br><br>
+            <b>Error loading recent activations.</b>
+        `;
+                marker.setPopupContent(errorContent);
             }
         });
 
@@ -2157,7 +2229,6 @@ function displayParksOnMap(map, parks, userActivatedReferences, layerGroup = map
 
     console.log("All parks displayed with appropriate highlights."); // Debugging
 }
-
 
 /**
  * Fetches and caches park data from the CSV using IndexedDB and PapaParse.
@@ -2291,6 +2362,186 @@ async function setupPOTAMap() {
         alert('Failed to set up the POTA map. Please try again later.');
     }
 }
+/**
+ * Fetches active POTA spots from the API and displays them on the map.
+ */
+async function fetchAndDisplaySpots() {
+    const SPOT_API_URL = 'https://api.pota.app/v1/spots';
+    try {
+        const response = await fetch(SPOT_API_URL);
+        if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
+        const spots = await response.json();
+
+        console.log('Fetched spots data:', spots); // Debugging
+
+        // Check if the map exists and spotsLayer is initialized
+        if (!map) {
+            console.error('Map instance is not initialized.');
+            return;
+        }
+
+        // Initialize spotsLayer if it doesn't exist
+        if (!map.spotsLayer) {
+            console.log('Initializing spots layer...');
+            map.spotsLayer = L.layerGroup().addTo(map);
+        } else {
+            console.log('Clearing existing spots layer...');
+            map.spotsLayer.clearLayers();
+        }
+
+        // Add new spots to the map
+        spots.forEach((spot) => {
+            const { latitude, longitude, name, activator, frequency, mode, comments } = spot;
+
+            if (!latitude || !longitude) {
+                console.warn(`Invalid coordinates for spot: ${JSON.stringify(spot)}`);
+                return;
+            }
+
+            const markerStyle = {
+                radius: 10,
+                color: '#3366cc', // Border color
+                fillColor: '#99ccff', // Fill color
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8,
+            };
+
+            const marker = L.circleMarker([latitude, longitude], markerStyle)
+                .addTo(map.spotsLayer)
+                .bindPopup(`
+                    <b>${name}</b><br>
+                    Activator: ${activator}<br>
+                    Frequency: ${frequency} MHz<br>
+                    Mode: ${mode}<br>
+                    Comments: ${comments || 'N/A'}
+                `);
+
+            marker.bindTooltip(`${name} (${frequency} MHz)`, {
+                direction: 'top',
+                className: 'custom-tooltip',
+            });
+        });
+
+        console.log(`Displayed ${spots.length} spots on the map.`);
+    } catch (error) {
+        console.error('Error fetching or displaying POTA spots:', error);
+    }
+}
+/**
+ * Fetches active POTA spots from the API, filters them to the current map bounds,
+ * and displays them so that their popups show both park info + the spot's real-time data.
+ */
+async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
+    const SPOT_API_URL = "https://api.pota.app/v1/spots";
+    try {
+        // 1. Fetch spots from the API
+        const response = await fetch(SPOT_API_URL);
+        if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
+        const spots = await response.json();
+
+        console.log("Fetched spots data:", spots); // Debugging
+
+        // 2. Initialize (or clear) the spots layer
+        if (!mapInstance.spotsLayer) {
+            console.log("Initializing spots layer...");
+            mapInstance.spotsLayer = L.layerGroup().addTo(mapInstance);
+        } else {
+            console.log("Clearing existing spots layer...");
+            mapInstance.spotsLayer.clearLayers();
+        }
+
+        // 3. Get the current map bounds so we only show spots in view
+        const bounds = mapInstance.getBounds();
+        console.log("Current map bounds:", bounds);
+
+        // 4. Filter the fetched spots to those inside the current bounds
+        const spotsInBounds = spots.filter((spot) => {
+            const { latitude, longitude } = spot;
+            if (!latitude || !longitude) {
+                console.warn(`Invalid coordinates for spot: ${JSON.stringify(spot)}`);
+                return false;
+            }
+            return bounds.contains([latitude, longitude]);
+        });
+
+        console.log(`Displaying ${spotsInBounds.length} spots in current bounds.`);
+
+        // 5. Create circle markers for each spot
+        spotsInBounds.forEach((spot) => {
+            // Destructure all needed fields from the spot
+            const {
+                reference,    // <--- The spot's park reference ID
+                latitude,
+                longitude,
+                name,
+                activator,
+                frequency,
+                mode,
+                comments
+            } = spot;
+
+            const markerStyle = {
+                radius: 10,
+                color: "#3366cc",   // Border color
+                fillColor: "#99ccff", // Fill color
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8,
+            };
+
+            // Create the spot marker and add to layer
+            const marker = L.circleMarker([latitude, longitude], markerStyle)
+                .addTo(mapInstance.spotsLayer);
+
+            // Step A: Set a "Loading" popup so there's something if user taps immediately
+            marker.bindPopup(`<b>Loading park data...</b>`);
+
+            // Step B: Also attach a tooltip (optional)
+            marker.bindTooltip(`${name} (${frequency} MHz)`, {
+                direction: "top",
+                className: "custom-tooltip",
+            });
+
+            // Step C: On popup open, build the unified Park + Spot content
+            marker.on("popupopen", async () => {
+                // 1) Find the matching park by reference
+                const park = parks.find((p) => p.reference === reference);
+                if (!park) {
+                    marker.setPopupContent("No matching park found for this spot.");
+                    return;
+                }
+
+                try {
+                    // 2) Build the combined HTML by calling fetchFullPopupContent,
+                    //    passing this entire `spot` as the second arg (so we see freq, etc.)
+                    const combinedHtml = await fetchFullPopupContent(park, spot);
+                    marker.setPopupContent(combinedHtml);
+                } catch (error) {
+                    console.error("Error fetching park info or building popup:", error);
+                    marker.setPopupContent("<b>Error loading park details.</b>");
+                }
+            });
+        });
+    } catch (error) {
+        console.error("Error fetching or displaying POTA spots:", error);
+    }
+}
+
+/**
+ * Initializes the recurring fetch for POTA spots.
+ */
+function initializeSpotFetching() {
+    fetchAndDisplaySpots(); // Initial fetch
+    setInterval(fetchAndDisplaySpots, 5 * 60 * 1000); // Fetch every 5 minutes
+}
+
+// Ensure spots fetching starts when the DOM is fully loaded
+document.addEventListener('DOMContentLoaded', () => {
+    initializeSpotFetching();
+});
+
+
 
 /**
  * Determines the marker color based on activations and user activation status.
