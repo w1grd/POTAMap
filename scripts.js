@@ -56,6 +56,7 @@ function initializeMenu() {
                 <li>
                 <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Review</button>
             </li>
+            <!-- Removing slider functionality for now, it doesn't seem useful (also listener))
 <div id="activationSliderContainer">
     <label for="activationSlider">Maximum Activations to Display:</label>
     <input
@@ -67,7 +68,7 @@ function initializeMenu() {
         data-value="10"
     />
 </div>
-
+-->
 
             </ul>
         </div>
@@ -87,9 +88,9 @@ function initializeMenu() {
     // Add event listener for 'Enter' key in the search box
     document.getElementById('searchBox').addEventListener('keydown', handleSearchEnter);
 
+    //Removing slider functionality for now, it doesn't seem useful
     // Add event listener for the activation slider
-    document.getElementById('activationSlider').addEventListener('input', handleSliderChange);
-
+    //document.getElementById('activationSlider').addEventListener('input', handleSliderChange);
     // document.getElementById('activationSlider').addEventListener('input', (event) => {
     //     const slider = event.target;
     //     const sliderValue = slider.value === "51" ? "All" : slider.value;
@@ -1688,7 +1689,7 @@ async function fetchFullPopupContent(park, currentActivation = null) {
         currentActivationHtml = `
             <b>Current Activation:</b><br>
             <b>Activator</b>: ${activator}<br>
-            <b>Frequency:</b> ${frequency} MHz<br>
+            <b>Frequency:</b> ${frequency} kHz<br>
             <b>Mode:</b> ${mode}<br>
             <b>Comments:</b> ${comments || 'N/A'}
         `;
@@ -2103,8 +2104,9 @@ function initializeMap(lat, lng) {
         }),
     })
         .addTo(mapInstance)
-        .bindPopup("Your Location")
-        .openPopup();
+//Remove initial popup
+//        .bindPopup("Your Location")
+//        .openPopup();
 
     console.log("Added user location marker."); // Debugging
 
@@ -2425,12 +2427,12 @@ async function fetchAndDisplaySpots() {
                 .bindPopup(`
                     <b>${name}</b><br>
                     Activator: ${activator}<br>
-                    Frequency: ${frequency} MHz<br>
+                    Frequency: ${frequency} kHz<br>
                     Mode: ${mode}<br>
                     Comments: ${comments || 'N/A'}
                 `);
 
-            marker.bindTooltip(`${name} (${frequency} MHz)`, {
+            marker.bindTooltip(`${name} (${frequency} kHz)`, {
                 direction: 'top',
                 className: 'custom-tooltip',
             });
@@ -2443,7 +2445,8 @@ async function fetchAndDisplaySpots() {
 }
 /**
  * Fetches active POTA spots from the API, filters them to the current map bounds,
- * and displays them so that their popups show both park info + the spot's real-time data.
+ * and displays them so that their popups show both park info + spot data.
+ * Clicking on a spot now also closes any visible tooltip.
  */
 async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
     const SPOT_API_URL = "https://api.pota.app/v1/spots";
@@ -2482,9 +2485,9 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
 
         // 5. Create circle markers for each spot
         spotsInBounds.forEach((spot) => {
-            // Destructure all needed fields from the spot
+            // Destructure relevant fields
             const {
-                reference,    // <--- The spot's park reference ID
+                reference,    // The spot's park reference ID
                 latitude,
                 longitude,
                 name,
@@ -2496,8 +2499,8 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
 
             const markerStyle = {
                 radius: 10,
-                color: "#3366cc",   // Border color
-                fillColor: "#99ccff", // Fill color
+                color: "#3366cc",    // Border color
+                fillColor: "#99ccff",// Fill color
                 weight: 2,
                 opacity: 1,
                 fillOpacity: 0.8,
@@ -2507,18 +2510,28 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
             const marker = L.circleMarker([latitude, longitude], markerStyle)
                 .addTo(mapInstance.spotsLayer);
 
-            // Step A: Set a "Loading" popup so there's something if user taps immediately
+            // Step A: Bind a "Loading" popup so there's something if user taps immediately
             marker.bindPopup(`<b>Loading park data...</b>`);
 
             // Step B: Also attach a tooltip (optional)
-            marker.bindTooltip(`${name} (${frequency} MHz)`, {
+            marker.bindTooltip(`${name} (${activator} on ${frequency} kHz)`, {
                 direction: "top",
                 className: "custom-tooltip",
             });
 
-            // Step C: On popup open, build the unified Park + Spot content
+            // Step C: On popup open, close the tooltip and build the unified Park + Spot content
             marker.on("popupopen", async () => {
-                // 1) Find the matching park by reference
+                // Attempt the modern method:
+                if (typeof marker.closeTooltip === "function") {
+                    marker.closeTooltip();
+                } else {
+                    // Fallback for older Leaflet or custom layers
+                    if (marker._tooltip && marker._tooltip.isOpen()) {
+                        marker._tooltip.close();
+                    }
+                }
+
+                // Now fetch the park data as before
                 const park = parks.find((p) => p.reference === reference);
                 if (!park) {
                     marker.setPopupContent("No matching park found for this spot.");
@@ -2526,8 +2539,6 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
                 }
 
                 try {
-                    // 2) Build the combined HTML by calling fetchFullPopupContent,
-                    //    passing this entire `spot` as the second arg (so we see freq, etc.)
                     const combinedHtml = await fetchFullPopupContent(park, spot);
                     marker.setPopupContent(combinedHtml);
                 } catch (error) {
@@ -2535,6 +2546,7 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
                     marker.setPopupContent("<b>Error loading park details.</b>");
                 }
             });
+
         });
     } catch (error) {
         console.error("Error fetching or displaying POTA spots:", error);
