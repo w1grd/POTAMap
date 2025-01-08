@@ -50,6 +50,10 @@ function initializeMenu() {
                     <button id="clearSearch" title="Clear Search" aria-label="Clear Search">Clear Search</button>
                 </li>
                 <li>
+                    <button id="centerOnGeolocation" title="Center the map based on your current location.">Center on My Location</button>
+                </li>
+
+                <li>
                 <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Review</button>
             </li>
 <div id="activationSliderContainer">
@@ -95,6 +99,7 @@ function initializeMenu() {
     //Listener for Activations button
     document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
 
+    document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
     console.log("Hamburger menu initialized."); // Debugging
 
@@ -564,6 +569,24 @@ function enhanceHamburgerMenuForMobile() {
             #map {
                 height: 100vh; /* Full viewport height */
             }
+            
+            #centerOnGeolocation {
+    cursor: pointer;
+    background: #336633; /* Forest green */
+    color: #fff;
+    border: none;
+    padding: 10px;
+    font-size: 16px;
+    width: 100%;
+    border-radius: 6px;
+    transition: background 0.3s ease, transform 0.2s ease;
+}
+
+#centerOnGeolocation:hover {
+    background: #264d26; /* Darker green */
+    transform: translateY(-2px);
+}
+
 
             /* Style Callsign Display */
             #callsignDisplay {
@@ -1353,6 +1376,48 @@ function handleSliderChange(event) {
     }
 }
 
+/**
+ * Centers the map on the user's current geolocation.
+ */
+function centerMapOnGeolocation() {
+    if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.");
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            const { latitude, longitude } = position.coords;
+
+            if (map) {
+                map.setView([latitude, longitude], 12, {
+                    animate: true,
+                    duration: 1.5, // Smooth animation to the location
+                });
+                console.log(`Map centered on user location: [${latitude}, ${longitude}]`);
+            } else {
+                console.error("Map instance is not initialized.");
+            }
+        },
+        (error) => {
+            console.error("Geolocation error:", error.message);
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    alert("Permission to access location was denied.");
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    alert("Location information is unavailable.");
+                    break;
+                case error.TIMEOUT:
+                    alert("Request to get user location timed out.");
+                    break;
+                default:
+                    alert("An unknown error occurred while retrieving your location.");
+                    break;
+            }
+        }
+    );
+}
 
 /**
  * Handles input in the search box and dynamically highlights matching parks within the visible map bounds.
@@ -1445,21 +1510,43 @@ function handleSearchEnter(event) {
         event.preventDefault(); // Prevent form submission or other default actions
         console.log("'Enter' key pressed in search box."); // Debugging
 
-        if (currentSearchResults.length === 0) {
-            alert('No parks found matching your search criteria.');
+        // Ensure the search box has a value
+        const searchBox = document.getElementById('searchBox');
+        if (!searchBox || !searchBox.value.trim()) {
+            console.warn("Search box is empty. No action taken."); // Debugging
             return;
         }
 
-        if (currentSearchResults.length === 1) {
-            // If only one park matches, center and zoom to it
-            const park = currentSearchResults[0];
-            zoomToPark(park);
+        // Search for parks matching the input query
+        const query = normalizeString(searchBox.value.trim());
+        console.log(`Searching for parks matching: "${query}"`); // Debugging
+
+        if (currentSearchResults.length > 0) {
+            if (currentSearchResults.length === 1) {
+                // If only one park matches, center and zoom to it
+                const park = currentSearchResults[0];
+                zoomToPark(park);
+            } else {
+                // If multiple parks match, fit the map bounds to include all
+                zoomToParks(currentSearchResults);
+            }
         } else {
-            // If multiple parks match, fit the map bounds to include all
-            zoomToParks(currentSearchResults);
+            // Handle "Go To Park" functionality for the global dataset
+            const matchingPark = parks.find(park =>
+                normalizeString(park.name).includes(query) ||
+                normalizeString(park.reference).includes(query)
+            );
+
+            if (matchingPark) {
+                zoomToPark(matchingPark);
+            } else {
+                // Display message only if no matches are found after searching
+                alert('No parks found matching your search criteria.');
+            }
         }
     }
 }
+
 /**
  * Zooms the map to a single park's location and shows its full information popup.
  * @param {Object} park - The park object to zoom into.
@@ -1481,6 +1568,13 @@ function zoomToPark(park) {
     });
 
     console.log(`Zoomed to park at [${latitude}, ${longitude}].`); // Debugging
+
+    // Close the hamburger menu
+    const menuCheckbox = document.getElementById('menuCheckbox');
+    if (menuCheckbox && menuCheckbox.checked) {
+        menuCheckbox.checked = false;
+        console.log("Hamburger menu closed.");
+    }
 
     // Highlight the marker by temporarily adding a larger circle
     const highlightedMarker = L.circleMarker([latitude, longitude], {
@@ -2289,6 +2383,89 @@ function refreshMapActivations() {
     displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
     console.log("Displayed activated parks (if any) based on refresh."); // Debugging
 }
+
+
+/**
+ * Adds a "Go To Park" button below the search box for global dataset search.
+ */
+function addGoToParkButton() {
+    const searchBoxContainer = document.getElementById('searchBoxContainer');
+
+    if (!searchBoxContainer) {
+        console.error("SearchBoxContainer not found.");
+        return;
+    }
+
+    // Create Go To Park button
+    const goToParkButton = document.createElement('button');
+    goToParkButton.id = 'goToParkButton';
+    goToParkButton.innerText = 'Go To Park';
+    goToParkButton.title = 'Expand search to the full dataset and zoom to a park';
+    goToParkButton.style.marginTop = '10px';
+
+    // Add event listener for Go To Park button
+    goToParkButton.addEventListener('click', () => {
+        triggerGoToPark();
+    });
+
+    // Add Clear Search button if not already present
+    const clearButton = document.getElementById('clearSearch');
+    if (!clearButton) {
+        const clearSearchButton = document.createElement('button');
+        clearSearchButton.id = 'clearSearch';
+        clearSearchButton.innerText = 'Clear Search';
+        clearSearchButton.title = 'Clear Search';
+        clearSearchButton.style.marginTop = '10px';
+
+        clearSearchButton.addEventListener('click', clearSearchInput);
+        searchBoxContainer.appendChild(clearSearchButton);
+        console.log("Clear Search button added.");
+    }
+
+    // Append Go To Park button after the Clear Search button
+    searchBoxContainer.appendChild(goToParkButton);
+    console.log("Go To Park button added.");
+
+    // Bind Enter key to Go To Park functionality
+    const searchBox = document.getElementById('searchBox');
+    if (searchBox) {
+        searchBox.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                triggerGoToPark(true);
+            }
+        });
+        console.log("Enter key bound to Go To Park functionality.");
+    }
+}
+
+/**
+ * Triggers the Go To Park functionality by searching and zooming to a park.
+ */
+function triggerGoToPark() {
+    const searchBox = document.getElementById('searchBox');
+    if (!searchBox || !searchBox.value.trim()) {
+        alert('Please enter a search term.');
+        return;
+    }
+
+    const query = normalizeString(searchBox.value);
+    const matchingPark = parks.find(park =>
+        normalizeString(park.name).includes(query) ||
+        normalizeString(park.reference).includes(query)
+    );
+
+    if (matchingPark) {
+        zoomToPark(matchingPark);
+    } else {
+        alert('No matching park.');
+    }
+}
+
+// Initialize Go To Park button on DOMContentLoaded
+addEventListener('DOMContentLoaded', () => {
+    addGoToParkButton();
+});
 
 /**
  * Adds CSS styles for the hamburger menu and other responsive elements.
