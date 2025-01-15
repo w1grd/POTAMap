@@ -1094,15 +1094,25 @@ async function fetchParkActivations(reference) {
 
 
 /**
- * Formats a QSO date string from 'YYYYMMDD' to a human-readable date.
- * @param {string} qsoDate - The QSO date in 'YYYYMMDD' format.
+ * Formats a QSO date string into a human‑readable date.
+ * If the date contains a dash, it is assumed to be in ISO format.
+ * Otherwise, it is assumed to be in YYYYMMDD format.
+ *
+ * @param {string} qsoDate - The QSO date string.
  * @returns {string} The formatted date.
  */
 function formatQsoDate(qsoDate) {
-    const year = qsoDate.substring(0, 4);
-    const month = qsoDate.substring(4, 6);
-    const day = qsoDate.substring(6, 8);
-    const date = new Date(`${year}-${month}-${day}`);
+    let date;
+    if (qsoDate.includes("-")) {
+        // Date is already in ISO format (e.g., "2025-01-10")
+        date = new Date(qsoDate);
+    } else {
+        // Date is in YYYYMMDD format (e.g., "20250110")
+        const year = qsoDate.substring(0, 4);
+        const month = qsoDate.substring(4, 6);
+        const day = qsoDate.substring(6, 8);
+        date = new Date(`${year}-${month}-${day}`);
+    }
     return date.toLocaleDateString(undefined, {
         year: 'numeric',
         month: 'long',
@@ -2042,21 +2052,28 @@ function resetParkDisplay() {
     filterParksByActivations(minActivations);
 }
 /**
- * Initializes the app and sets up default behavior based on IndexedDB.
+ * Initializes and displays activations on startup.
+ * If activations exist in the local store, this function attempts to update them
+ * by fetching data from the API at https://pota.app/#/user/activations.
  */
 async function initializeActivationsDisplay() {
     try {
         const storedActivations = await getActivationsFromIndexedDB();
         if (storedActivations.length > 0) {
-            // Set the toggle button to active
+            // Set the toggle button to active if activations exist.
             const toggleButton = document.getElementById('toggleActivations');
             if (toggleButton) {
                 toggleButton.classList.add('active');
                 console.log("Activations exist in IndexedDB. Enabling 'Show My Activations' by default.");
             }
 
-            // Load and display activations on the map
+            // Load stored activations.
             activations = storedActivations;
+
+            // If we have stored activations (and by extension a valid callsign), try updating from the API.
+//            await updateUserActivationsFromAPI();
+await updateActivationsFromScrape();
+            // Refresh the map view and display the user's callsign.
             updateActivationsInView();
             displayCallsign();
         } else {
@@ -2064,6 +2081,227 @@ async function initializeActivationsDisplay() {
         }
     } catch (error) {
         console.error('Error initializing activations display:', error);
+    }
+}
+
+async function updateUserActivationsFromAPI() {
+    try {
+        // Correct endpoint returning JSON.
+        const apiUrl = 'https://api.pota.app/#/user/activations?all=1';
+
+        // Fetch using credentials so that cookies are sent
+        const response = await fetch(apiUrl, {
+            credentials: 'include', // Include cookies and credentials in cross-origin requests.
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+                // If needed, you can add:
+                // 'Authorization': `Bearer YOUR_TOKEN_HERE`
+            }
+        });
+
+        // Parse the JSON response.
+        const apiData = await response.json();
+        console.log("Fetched API activations:", apiData.activations);
+
+        // Check if activations were returned.
+        if (!apiData || !Array.isArray(apiData.activations) || apiData.activations.length === 0) {
+            console.log("No activation data returned from API, skipping update.");
+            return;
+        }
+
+        // Create a map keyed by 'reference' from existing activations.
+        const activationMap = new Map();
+        activations.forEach(act => {
+            activationMap.set(act.reference, act);
+        });
+
+        // Merge each API activation into the map.
+        apiData.activations.forEach(apiAct => {
+            const reference = apiAct.reference.trim();
+            const newActivation = {
+                reference: reference,
+                name: apiAct.name.trim(),
+                qso_date: apiAct.date.trim(),  // e.g., "2025-01-10"
+                activeCallsign: apiAct.callsign.trim(),
+                totalQSOs: parseInt(apiAct.total, 10) || 0,
+                qsosCW: parseInt(apiAct.cw, 10) || 0,
+                qsosDATA: parseInt(apiAct.data, 10) || 0,
+                qsosPHONE: parseInt(apiAct.phone, 10) || 0,
+                attempts: parseInt(apiAct.total, 10) || 0,
+                activations: parseInt(apiAct.total, 10) || 0,
+            };
+
+            if (activationMap.has(reference)) {
+                const existingAct = activationMap.get(reference);
+                activationMap.set(reference, {
+                    ...existingAct,
+                    ...newActivation,
+                    // Optionally aggregate numeric values:
+                    totalQSOs: existingAct.totalQSOs + newActivation.totalQSOs,
+                    qsosCW: existingAct.qsosCW + newActivation.qsosCW,
+                    qsosDATA: existingAct.qsosDATA + newActivation.qsosDATA,
+                    qsosPHONE: existingAct.qsosPHONE + newActivation.qsosPHONE,
+                    activations: existingAct.activations + newActivation.activations,
+                });
+                console.log(`Updated activation: ${reference}`);
+            } else {
+                activationMap.set(reference, newActivation);
+                console.log(`Added new activation: ${reference}`);
+            }
+        });
+
+        // Update the global activations array.
+        activations = Array.from(activationMap.values());
+        await saveActivationsToIndexedDB(activations);
+        console.log("Successfully merged API activations into local store.");
+    } catch (error) {
+        console.error("Error fetching or merging user activations from API:", error);
+    }
+}
+
+/**
+ * Scrapes recent activations data from the returned HTML string.
+ * Assumes that the table rows in the first table inside an element
+ * with class "v-data-table__wrapper" contain the data.
+ *
+ * Each row is assumed to have these columns (in order):
+ *  - Date (e.g. "01/09/2025")
+ *  - Park (an <a> element whose href contains a reference like "#/park/US-0891" and text with the park name)
+ *  - CW (a number)
+ *  - Data (a number)
+ *  - Phone (a number)
+ *  - Total QSOs (a number)
+ *
+ * @param {string} html - The full HTML from the page.
+ * @returns {Array<Object>} Array of activation objects.
+ */
+function scrapeActivationsFromHTML(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    // Find the table that holds the activations.
+    // Adjust this selector if needed.
+    const table = doc.querySelector('.v-data-table__wrapper table');
+    if (!table) {
+        console.error('Activations table not found in HTML.');
+        return [];
+    }
+
+    // Query all rows within the table body.
+    const rows = Array.from(table.querySelectorAll('tbody > tr'));
+    if (!rows.length) {
+        console.warn('No rows found in the activations table.');
+        return [];
+    }
+
+    // Map over each row to extract the data.
+    const activations = rows.map(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 6) {
+            // If for some reason there are not enough cells, skip this row.
+            return null;
+        }
+
+        // Column indices:
+        // 0: Date (assumed format "MM/DD/YYYY")
+        // 1: Park information (contains an <a> tag with href and text)
+        // 2: CW
+        // 3: Data
+        // 4: Phone
+        // 5: Total QSOs
+        const date = cells[0].textContent.trim();
+
+        // Extract park reference from the <a> tag.
+        let parkReference = '';
+        let parkName = '';
+        const parkAnchor = cells[1].querySelector('a');
+        if (parkAnchor) {
+            // Example href: "#/park/US-0891"
+            const href = parkAnchor.getAttribute('href');
+            const match = href.match(/\/park\/(.+)/);
+            if (match) {
+                parkReference = match[1].trim();
+            }
+            parkName = parkAnchor.textContent.trim();
+        }
+
+        const cw = parseInt(cells[2].textContent.trim(), 10) || 0;
+        const dataVal = parseInt(cells[3].textContent.trim(), 10) || 0;
+        const phone = parseInt(cells[4].textContent.trim(), 10) || 0;
+        const totalQSOs = parseInt(cells[5].textContent.trim(), 10) || 0;
+
+        // Return an object matching (or easily mappable to) your activation format.
+        return {
+            date,            // This is the display date (you might later convert it to YYYY-MM-DD if needed)
+            reference: parkReference,
+            name: parkName,
+            callsign: '',    // If not available here, you'll have to set it from elsewhere (or leave it empty)
+            total: totalQSOs,
+            cw,
+            data: dataVal,
+            phone
+        };
+    }).filter(item => item !== null);
+
+    return activations;
+}
+
+/**
+ * An example function that fetches the page containing the recent activations,
+ * scrapes the activations from its HTML, and then merges them with your local data.
+ *
+ * You can call this function in place of, or in addition to, your API call.
+ */
+async function updateActivationsFromScrape() {
+    try {
+        // Replace with the URL of the page you want to scrape.
+        const url = 'https://api.pota.app/#/user/activations?all=1';
+        const response = await fetch(url, { credentials: 'include' });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch activations page. Status: ${response.status}`);
+        }
+
+        const html = await response.text();
+        console.log("Fetched HTML (first 300 chars):", html.substring(0, 300));
+
+        // Scrape activations from the HTML.
+        const scrapedActivations = scrapeActivationsFromHTML(html);
+        console.log("Scraped activations:", scrapedActivations);
+
+        // Merge scrapedActivations into your existing global 'activations' array.
+        // For merging, we’ll build a map keyed by the activation reference.
+        const activationMap = new Map();
+        activations.forEach(act => {
+            activationMap.set(act.reference, act);
+        });
+
+        scrapedActivations.forEach(scraped => {
+            const ref = scraped.reference;
+            if (activationMap.has(ref)) {
+                // Merge the activation. Adjust merge logic as needed.
+                const existing = activationMap.get(ref);
+                activationMap.set(ref, {
+                    ...existing,
+                    ...scraped,
+                    // Optionally combine numeric fields.
+                    total: existing.total + scraped.total
+                });
+                console.log(`Merged scraped activation: ${ref}`);
+            } else {
+                activationMap.set(ref, scraped);
+                console.log(`Added new scraped activation: ${ref}`);
+            }
+        });
+
+        // Update the global array.
+        activations = Array.from(activationMap.values());
+        await saveActivationsToIndexedDB(activations);
+        console.log("Successfully saved merged scraped activations.");
+        updateActivationsInView();
+
+    } catch (error) {
+        console.error("Error updating activations from scrape:", error);
     }
 }
 
