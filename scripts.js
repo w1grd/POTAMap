@@ -2539,6 +2539,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences, layerGroup
             ${directionsLink ? `${directionsLink}<br>` : ''}
         `;
 
+
         // Create the marker
         const marker = L.circleMarker([latitude, longitude], {
             radius: 6,
@@ -2818,11 +2819,14 @@ async function fetchAndDisplaySpots() {
                     Mode: ${mode}<br>
                     Comments: ${comments || 'N/A'}
                 `);
-
+//Similar to ISSUE 11
             marker.bindTooltip(`${name} (${frequency} kHz)`, {
                 direction: 'top',
                 className: 'custom-tooltip',
-            });
+            })
+                .on('click', function () {
+                    this.closeTooltip();
+                });
         });
 
         console.log(`Displayed ${spots.length} spots on the map.`);
@@ -2904,7 +2908,10 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
             marker.bindTooltip(`${name} (${activator} on ${frequency} kHz)`, {
                 direction: "top",
                 className: "custom-tooltip",
-            });
+            })
+                .on('click', function () {
+                    this.closeTooltip();
+                });
 
             // Step C: On popup open, close the tooltip and build the unified Park + Spot content
             marker.on("popupopen", async () => {
