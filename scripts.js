@@ -1212,11 +1212,16 @@ function debounce(func, wait) {
 async function toggleActivations() {
     const toggleButton = document.getElementById('toggleActivations');
 
-    // Cycle through states: 0 -> 1 -> 2 -> back to 0
-    activationToggleState = (activationToggleState + 1) % 3;
+    // Cycle through states: 0 -> 1 -> 2 -> 3 -> back to 0
+    activationToggleState = (activationToggleState + 1) % 4;
 
     // Update button text for clarity
-    const buttonTexts = ["Show My Activations", "Hide My Activations", "Show All Spots"];
+    const buttonTexts = [
+        "Show My Activations",
+        "Hide My Activations",
+        "Show Currently On Air",
+        "Show All Spots",
+    ];
     toggleButton.innerText = buttonTexts[activationToggleState];
     console.log(`Toggled activation state: ${activationToggleState}`);
 
@@ -1227,14 +1232,14 @@ async function toggleActivations() {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
 
-    // Determine behavior based on the current state
+    const userActivatedReferences = activations.map((act) => act.reference);
+
     switch (activationToggleState) {
         case 0: // Show all spots
-            displayParksOnMap(map, parks, activations.map((act) => act.reference), map.activationsLayer);
+            displayParksOnMap(map, parks, userActivatedReferences, map.activationsLayer);
             break;
 
         case 1: // Show just user's activations
-            const userActivatedReferences = activations.map((act) => act.reference);
             const userActivatedParks = parks.filter((park) =>
                 userActivatedReferences.includes(park.reference)
             );
@@ -1243,9 +1248,17 @@ async function toggleActivations() {
 
         case 2: // Show all spots except user's activations
             const nonUserActivatedParks = parks.filter((park) =>
-                !activations.some((act) => act.reference === park.reference)
+                !userActivatedReferences.includes(park.reference)
             );
             displayParksOnMap(map, nonUserActivatedParks, [], map.activationsLayer);
+            break;
+
+        case 3: // Show only currently active parks (on air)
+            const onAirReferences = spots.map((spot) => spot.reference);
+            const onAirParks = parks.filter((park) =>
+                onAirReferences.includes(park.reference)
+            );
+            displayParksOnMap(map, onAirParks, userActivatedReferences, map.activationsLayer);
             break;
 
         default:
