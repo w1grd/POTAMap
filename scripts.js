@@ -2072,7 +2072,7 @@ async function initializeActivationsDisplay() {
 
             // If we have stored activations (and by extension a valid callsign), try updating from the API.
 //            await updateUserActivationsFromAPI();
-await updateActivationsFromScrape();
+            await updateActivationsFromScrape();
             // Refresh the map view and display the user's callsign.
             updateActivationsInView();
             displayCallsign();
@@ -2538,7 +2538,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences, layerGroup
 
         // Store the initial popup content
         marker.originalPopupContent = initialPopupContent;
-
+//ISSUE 11 fix tooltip incorrectly persisting
+        //
         // Add marker to layer group
         marker
             .addTo(layerGroup)
@@ -2551,7 +2552,10 @@ async function displayParksOnMap(map, parks, userActivatedReferences, layerGroup
                     sticky: false,
                     className: "custom-tooltip",
                 }
-            );
+            )
+            .on('click', function () {
+                this.closeTooltip();
+            });
 
         // When popup opens, fetch all park activations and build the final popup
         marker.on('popupopen', async function () {
