@@ -2754,12 +2754,15 @@ async function setupPOTAMap() {
                     displayParksOnMap(map, parks, [], map.activationsLayer);
                     console.log("Displayed all parks without activated highlights."); // Debugging
                 }
+                //ISSUE 16 display active parks on map load
+                fetchAndDisplaySpots();
             },
             (error) => {
                 console.error('Error getting location:', error.message);
                 alert('Unable to retrieve your location.');
             }
         );
+        console.log('XX Displaying active spots')
     } catch (error) {
         console.error('Error setting up POTA map:', error.message);
         alert('Failed to set up the POTA map. Please try again later.');
