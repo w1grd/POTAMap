@@ -2462,66 +2462,139 @@ async function displayParksOnMap(map, parks, userActivatedReferences=null, layer
     }); // closes parks.forEach
 } // closes displayParksOnMap
 
-/**
- * Fetches and caches park data from the CSV using IndexedDB and PapaParse.
- * @param {string} csvUrl - The CSV file URL.
- * @param {number} cacheDuration - Duration in milliseconds before cache expires.
- * @returns {Promise<Array>} The fetched and parsed park data.
- */
-async function fetchAndCacheParks(csvUrl, cacheDuration) {
+async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     const db = await getDatabase();
-    const transaction = db.transaction('parks', 'readwrite');
-    const store = transaction.objectStore('parks');
+    const now = Date.now();
+    const lastFullFetch = await getLastFetchTimestamp('allparks.json');
+    let parks = [];
 
-    // Check if parks data already exists
-    const existingParks = await store.getAll();
-    if (existingParks.length > 0) {
-        // Optionally, implement cache invalidation based on your requirements
-        console.log('Using cached park data from IndexedDB.');
-        return existingParks;
-    }
+    if (!lastFullFetch || (now - lastFullFetch > cacheDuration)) {
+        console.log('Fetching full park data from JSON...');
+        const response = await fetch(jsonUrl);
+        if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
 
-    try {
-        console.log('Fetching park data from CSV...');
-        const response = await fetch(csvUrl);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch park data: ${response.statusText}`);
-        }
+        const parsed = await response.json();
 
-        const csvText = await response.text();
-        const parsedData = parseCSV(csvText);
-        console.log('Parsed Park Data:', parsedData); // Debugging
-
-        // Transform parsed data to desired format
-        const parks = parsedData.map(park => ({
+        parks = parsed.map(park => ({
             reference: park.reference,
             name: park.name,
             latitude: parseFloat(park.latitude),
             longitude: parseFloat(park.longitude),
-            activations: parseInt(park.activations, 10) || 0
+            activations: parseInt(park.activations, 10) || 0,
+            created: park.created || new Date().toISOString()
         }));
 
-        // Save parks to IndexedDB
         await saveParksToIndexedDB(parks);
-        console.log('Park data fetched and cached successfully.');
+        await setLastFetchTimestamp('allparks.json', now);
+    } else {
+        console.log('Using cached full park data');
+        parks = await getAllParksFromIndexedDB();
+    }
 
-        return parks;
-    } catch (error) {
-        console.error('Error fetching and caching park data:', error);
-        // If fetch fails and parks are cached, return cached data
-        if (existingParks.length > 0) {
-            console.warn('Using existing cached park data due to fetch error.');
-            return existingParks;
+    // Apply updates from usparks_changes.csv
+    // Apply updates from changes.json
+// Apply updates from changes.json
+    try {
+        const changesResponse = await fetchIfModified('https://pota.review/potamap/data/changes.json', 'changes.json');
+        if (changesResponse && changesResponse.ok) {
+            const changesData = await changesResponse.json();
+
+            const updatedParks = changesData.map(park => ({
+                reference: park.reference,
+                name: park.name,
+                latitude: park.latitude,
+                longitude: park.longitude,
+                grid: park.grid,
+                locationDesc: park.locationDesc,
+                attempts: park.attempts,
+                activations: park.activations,
+                qsos: park.qsos,
+                created: park.created || new Date().toISOString()
+            }));
+
+            await upsertParksToIndexedDB(updatedParks);
+            await setLastModifiedHeader('changes.json', changesResponse.headers.get('last-modified'));
+            console.log('Applied updates from changes.json');
+        } else {
+            console.log('No new changes in changes.json');
         }
-        throw error; // Re-throw error if no cached data
+    } catch (err) {
+        console.warn('Failed to apply park changes:', err);
+    }
+
+
+    const finalList = await getAllParksFromIndexedDB();
+    console.log('finalList:', finalList, 'typeof:', typeof finalList, 'isArray:', Array.isArray(finalList));
+
+    // Tag "new" parks
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+    return finalList.map(park => {
+        const created = new Date(park.created).getTime();
+        return {
+            ...park,
+            new: (now - created) < THIRTY_DAYS_MS
+        };
+    });
+}
+
+async function upsertParksToIndexedDB(parks) {
+    const db = await getDatabase();
+    const tx = db.transaction('parks', 'readwrite');
+    const store = tx.objectStore('parks');
+
+    for (const park of parks) {
+        store.put(park);
+    }
+
+    return tx.complete;
+}
+
+async function getAllParksFromIndexedDB() {
+    const db = await getDatabase();
+    const transaction = db.transaction('parks', 'readonly');
+    const store = transaction.objectStore('parks');
+
+    return new Promise((resolve, reject) => {
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+
+async function getLastFetchTimestamp(key) {
+    return parseInt(localStorage.getItem(`lastFetch_${key}`), 10) || null;
+}
+
+async function setLastFetchTimestamp(key, timestamp) {
+    localStorage.setItem(`lastFetch_${key}`, timestamp.toString());
+}
+
+async function fetchIfModified(url, key) {
+    const lastMod = localStorage.getItem(`lastModified_${key}`);
+    const headers = lastMod ? { 'If-Modified-Since': lastMod } : {};
+    const response = await fetch(url, { headers });
+
+    if (response.status === 304) {
+        console.log(`${key} not modified`);
+        return null;
+    }
+
+    return response;
+}
+
+async function setLastModifiedHeader(key, value) {
+    if (value) {
+        localStorage.setItem(`lastModified_${key}`, value);
     }
 }
+
 
 /**
  * Initializes the Leaflet map and loads park data from CSV using IndexedDB.
  */
 async function setupPOTAMap() {
-    const csvUrl = 'https://pota.review/potamap/data/usparks.csv';
+    const csvUrl = 'https://pota.review/potamap/data/allparks.json';
     const cacheDuration = 24 * 60 * 60 * 1000; // 1 day in milliseconds
 
     try {
