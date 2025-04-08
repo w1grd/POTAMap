@@ -140,7 +140,7 @@ async function displayVersionInfo() {
         console.warn("Could not fetch changes.json HEAD:", e);
     }
 
-    const versionString = `App: ${appVersion} | Parks: ${parksDate} | Changes: ${changesDate}`;
+    const versionString = `App: ${appVersion} <\br> Parks: ${parksDate} | Changes: ${changesDate}`;
     document.getElementById("versionInfo").textContent = versionString;
 }
 
