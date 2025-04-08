@@ -1867,7 +1867,7 @@ function filterParksByActivations(maxActivations) {
             const latLng = L.latLng(park.latitude, park.longitude);
             return bounds.contains(latLng) && park.activations <= maxActivations;
         }
-        console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
+//        console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
         return false;
     });
 
