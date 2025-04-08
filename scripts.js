@@ -121,7 +121,7 @@ async function displayVersionInfo() {
     let changesDate = "unknown";
 
     try {
-        const parksResponse = await fetch("/data/allparks.json", { method: 'HEAD' });
+        const parksResponse = await fetch("/potamap/data/allparks.json", { method: 'HEAD' });
         const parksHeader = parksResponse.headers.get("last-modified");
         if (parksHeader) {
             parksDate = formatAsYYYYMMDD(new Date(parksHeader));
@@ -131,7 +131,7 @@ async function displayVersionInfo() {
     }
 
     try {
-        const changesResponse = await fetch("/data/changes.json", { method: 'HEAD' });
+        const changesResponse = await fetch("/potamap/data/changes.json", { method: 'HEAD' });
         const changesHeader = changesResponse.headers.get("last-modified");
         if (changesHeader) {
             changesDate = formatAsYYYYMMDD(new Date(changesHeader));
