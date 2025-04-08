@@ -12,6 +12,8 @@ let previousMapState = {
 };
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
+const appVersion = "20250408"; // manually update as needed
+
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
  */
@@ -69,7 +71,9 @@ function initializeMenu() {
     />
 </div>
 -->
-
+<li>
+<div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
+</li>
             </ul>
         </div>
     `;
@@ -105,7 +109,48 @@ function initializeMenu() {
 
     // Add enhanced hamburger menu styles for mobile
     enhanceHamburgerMenuForMobile();
+
+    displayVersionInfo();
+
 }
+
+async function displayVersionInfo() {
+//    const appVersion = "20250408"; // manually update as needed
+
+    let parksDate = "unknown";
+    let changesDate = "unknown";
+
+    try {
+        const parksResponse = await fetch("/data/allparks.json", { method: 'HEAD' });
+        const parksHeader = parksResponse.headers.get("last-modified");
+        if (parksHeader) {
+            parksDate = formatAsYYYYMMDD(new Date(parksHeader));
+        }
+    } catch (e) {
+        console.warn("Could not fetch allparks.json HEAD:", e);
+    }
+
+    try {
+        const changesResponse = await fetch("/data/changes.json", { method: 'HEAD' });
+        const changesHeader = changesResponse.headers.get("last-modified");
+        if (changesHeader) {
+            changesDate = formatAsYYYYMMDD(new Date(changesHeader));
+        }
+    } catch (e) {
+        console.warn("Could not fetch changes.json HEAD:", e);
+    }
+
+    const versionString = `App: ${appVersion} | Parks: ${parksDate} | Changes: ${changesDate}`;
+    document.getElementById("versionInfo").textContent = versionString;
+}
+
+function formatAsYYYYMMDD(date) {
+    const y = date.getFullYear();
+    const m = (date.getMonth() + 1).toString().padStart(2, '0');
+    const d = date.getDate().toString().padStart(2, '0');
+    return `${y}${m}${d}`;
+}
+
 function enhancePOTAMenuStyles() {
     const style = document.createElement('style');
     style.innerHTML = `
