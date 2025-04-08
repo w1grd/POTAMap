@@ -2141,7 +2141,7 @@ async function initializeActivationsDisplay() {
 
             // If we have stored activations (and by extension a valid callsign), try updating from the API.
 //            await updateUserActivationsFromAPI();
-            await updateActivationsFromScrape();
+            // await updateActivationsFromScrape();
             // Refresh the map view and display the user's callsign.
             updateActivationsInView();
             displayCallsign();
