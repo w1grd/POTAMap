@@ -2495,11 +2495,11 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
         marker.on('popupopen', async function () {
             try {
-                let parkActivations = await getParkActivationsFromIndexedDB(reference);
-                if (!parkActivations) {
+//                let parkActivations = await getParkActivationsFromIndexedDB(reference);
+              //  if (!parkActivations) {
                     parkActivations = await fetchParkActivations(reference);
                     await saveParkActivationsToIndexedDB(reference, parkActivations);
-                }
+                //}
 
                 const updatedPopup = await fetchFullPopupContent(park, currentActivation, parkActivations);
                 this.setPopupContent(updatedPopup);
