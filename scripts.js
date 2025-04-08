@@ -1684,12 +1684,23 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
                  target="_blank" rel="noopener noreferrer">Get Directions</a>`
             : '';
 
+    // Use passed-in activations or fetch fresh
+    if (!parkActivations) {
+        try {
+            parkActivations = await fetchParkActivations(reference);
+            await saveParkActivationsToIndexedDB(reference, parkActivations);
+        } catch (err) {
+            console.warn(`Unable to fetch activations for ${reference}:`, err);
+            parkActivations = [];
+        }
+    }
+
     // Start building popup content
-    let popupContent = `${potaAppLink}<br>Activations: ${park.activations || 0}`;
+    const activationCount = parkActivations.length;
+    let popupContent = `${potaAppLink}<br>Activations: ${activationCount}`;
     if (directionsLink) popupContent += `<br>${directionsLink}`;
 
-    // If parkActivations provided, add mode totals and recent activations
-    if (parkActivations) {
+    if (parkActivations.length > 0) {
         const cwTotal = parkActivations.reduce((sum, act) => sum + (act.qsosCW || act.cw || 0), 0);
         const phoneTotal = parkActivations.reduce((sum, act) => sum + (act.qsosPHONE || act.phone || 0), 0);
         const dataTotal = parkActivations.reduce((sum, act) => sum + (act.qsosDATA || act.data || 0), 0);
@@ -1715,8 +1726,6 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
         <br><br><b>Recent Activations:</b><br>${recentActivations}`;
     }
 
-
-    // Optionally add a live/current activation (spot)
     if (currentActivation) {
         const { activator, frequency, mode, comments } = currentActivation;
         popupContent += `
@@ -2382,7 +2391,7 @@ function initializeMap(lat, lng) {
 /**
  * Displays parks on the map with proper popups that include activation information.
  */
-async function displayParksOnMap(map, parks, userActivatedReferences=null, layerGroup = map.activationsLayer) {
+async function displayParksOnMap(map, parks, userActivatedReferences = null, layerGroup = map.activationsLayer) {
     console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
 
     if (!layerGroup) {
@@ -2395,23 +2404,21 @@ async function displayParksOnMap(map, parks, userActivatedReferences=null, layer
 
     layerGroup.clearLayers(); // Clear existing markers before adding new ones
 
-    parks.forEach(async (park) => {
+    parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
 
         // Determine marker color
         const markerColor = isUserActivated
-            ? "#ffa500" // User's activation (Orange)
+            ? "#ffa500"
             : parkActivationCount > 10
-                ? "#ff6666" // Highly active parks (Light Red)
+                ? "#ff6666"
                 : parkActivationCount > 0
-                    ? "#90ee90" // Other active parks (Light Green)
-                    : "#0000ff"; // Inactive parks (Blue)
+                    ? "#90ee90"
+                    : "#0000ff";
 
         const currentActivation = spots?.find(spot => spot.reference === reference);
-        const popupContent = await fetchFullPopupContent(park, currentActivation, null); // we'll load parkActivations on demand in popupopen
 
-        // Create the marker
         const marker = L.circleMarker([latitude, longitude], {
             radius: 6,
             fillColor: markerColor,
@@ -2421,13 +2428,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences=null, layer
             fillOpacity: 0.9,
         });
 
-        // Store the initial popup content
-        marker.originalPopupContent = popupContent;
+        // Attach the park data so popupopen can use it
+        marker.park = park;
+        marker.currentActivation = currentActivation;
 
-        // Add marker to layer group
         marker
             .addTo(layerGroup)
-            .bindPopup(marker.originalPopupContent)
+            .bindPopup("<b>Loading park info...</b>")
             .bindTooltip(
                 `${reference}: ${name} (${parkActivationCount} activations)`,
                 {
@@ -2441,7 +2448,6 @@ async function displayParksOnMap(map, parks, userActivatedReferences=null, layer
                 this.closeTooltip();
             });
 
-        // When popup opens, fetch all park activations and build the final popup
         marker.on('popupopen', async function () {
             try {
                 let parkActivations = await getParkActivationsFromIndexedDB(reference);
@@ -2454,13 +2460,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences=null, layer
                 this.setPopupContent(updatedPopup);
             } catch (error) {
                 console.error(`Error fetching activations for park ${reference}:`, error);
-                this.setPopupContent(`${marker.originalPopupContent}<br><br><b>Error loading recent activations.</b>`);
+                this.setPopupContent("<b>Error loading park info.</b>");
             }
         });
+    });
 
-        console.log("All parks displayed with appropriate highlights."); // Debugging
-    }); // closes parks.forEach
-} // closes displayParksOnMap
+    console.log("All parks displayed with appropriate highlights."); // Debugging
+}
 
 async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     const db = await getDatabase();
