@@ -1957,7 +1957,7 @@ function getActivatedParksInBounds(activations, parks, bounds) {
             console.log(`Park ${park.reference} (${park.name}) is within bounds: ${isWithin}`); // Debugging
             return isWithin;
         }
-        console.warn(`Invalid park data for reference: ${activation.reference}`); // Debugging
+       // console.warn(`Invalid park data for reference: ${activation.reference}`); // Debugging
         return false;
     });
     console.log("Filtered Activated Parks:", filteredParks); // Debugging
@@ -1990,7 +1990,7 @@ async function updateActivationsInView() {
             const latLng = L.latLng(park.latitude, park.longitude);
             return bounds.contains(latLng);
         }
-        console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
+       // console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
         return false;
     });
 
