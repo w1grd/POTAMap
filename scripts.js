@@ -2452,14 +2452,11 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
-        const createdDate = new Date(park.created);
-        const isNew = (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24) <= 30;
-//debug
-//        console.log(`${reference} created: ${park.created}`);
- //       console.log(`${reference} isNew: ${isNew}`);
+        const changeDate = new Date(park.changeTimestamp || park.created);
+        const isRecentlyChanged = (Date.now() - changeDate.getTime()) <= (30 * 24 * 60 * 60 * 1000);
 
         // Determine marker color
-        const markerColor = isNew
+        const markerColor = isRecentlyChanged
             ? "#800080" // Purple for new parks
             : isUserActivated
                 ? "#ffa500" // Orange
@@ -2473,7 +2470,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
         let marker;
 
-        if (isNew) {
+        if (isRecentlyChanged) {
             marker = L.marker([latitude, longitude], {
                 icon: L.divIcon({
                     className: 'pulse-marker',
@@ -2518,11 +2515,14 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
                 let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
 
-                // Append change info if available
-                if (park.change) {
-                    popupContent += `<div style="font-style: italic; font-size: 0.8em; margin-top: 0.5em;">
-                ${park.change} — ${new Date(park.changeTimestamp).toLocaleDateString()}
-            </div>`;
+                if (park.change && park.changeTimestamp) {
+                    const formattedDate = new Date(park.changeTimestamp).toLocaleDateString();
+                    popupContent += `
+                <div style="font-size: 0.85em; font-style: italic; margin-top: 0.5em;">
+                    <b>Recent change:</b> ${park.change} <br/>
+                    <b>Changed:</b> ${formattedDate}
+                </div>
+            `;
                 }
 
                 this.setPopupContent(popupContent);
@@ -2569,11 +2569,8 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
 
     // Apply updates from changes.json
     try {
-        //debug, change path
-//        const changesResponse = await fetchIfModified('https://pota.review/potamap/data/changes.json', 'changes.json');
         const changesResponse = await fetchIfModified('/potamap/data/changes.json', 'changes.json');
-//        if (changesResponse && changesResponse.ok) {
-            if ((changesResponse && changesResponse.ok) || true) {
+        if (changesResponse && changesResponse.ok) {
             const changesData = await changesResponse.json();
 
             const updatedParks = changesData.map(park => {
@@ -2596,9 +2593,6 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
             });
 //debug
             console.log("Final updatedParks going to IndexedDB:", updatedParks);
-
-            const testPark = updatedParks.find(p => p.reference === 'US-99999');
-            console.log("Test park before writing to IndexedDB:", testPark);
 
             await upsertParksToIndexedDB(updatedParks);
             await setLastModifiedHeader('changes.json', changesResponse.headers.get('last-modified'));
@@ -2677,19 +2671,7 @@ async function getLastFetchTimestamp(key) {
 async function setLastFetchTimestamp(key, timestamp) {
     localStorage.setItem(`lastFetch_${key}`, timestamp.toString());
 }
-//debug
-// async function fetchIfModified(url, key) {
-//     const lastMod = localStorage.getItem(`lastModified_${key}`);
-//     const headers = lastMod ? { 'If-Modified-Since': lastMod } : {};
-//     const response = await fetch(url, { headers });
-//
-//     if (response.status === 304) {
-//         console.log(`${key} not modified`);
-//         return null;
-//     }
-//
-//     return response;
-// }
+
 async function fetchIfModified(url, key) {
     const response = await fetch('/potamap/data/changes.json', { cache: 'no-store' });
     const data = await response;
