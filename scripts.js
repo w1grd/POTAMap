@@ -2452,26 +2452,44 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
+        const createdDate = new Date(park.created);
+        const isNew = (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24) <= 30;
+//debug
+//        console.log(`${reference} created: ${park.created}`);
+ //       console.log(`${reference} isNew: ${isNew}`);
 
         // Determine marker color
-        const markerColor = isUserActivated
-            ? "#ffa500"
-            : parkActivationCount > 10
-                ? "#ff6666"
-                : parkActivationCount > 0
-                    ? "#90ee90"
-                    : "#0000ff";
+        const markerColor = isNew
+            ? "#800080" // Purple for new parks
+            : isUserActivated
+                ? "#ffa500" // Orange
+                : parkActivationCount > 10
+                    ? "#ff6666" // Light red
+                    : parkActivationCount > 0
+                        ? "#90ee90" // Light green
+                        : "#0000ff"; // Blue
 
         const currentActivation = spots?.find(spot => spot.reference === reference);
 
-        const marker = L.circleMarker([latitude, longitude], {
-            radius: 6,
-            fillColor: markerColor,
-            color: "#000",
-            weight: 1,
-            opacity: 1,
-            fillOpacity: 0.9,
-        });
+        let marker;
+
+        if (isNew) {
+            marker = L.marker([latitude, longitude], {
+                icon: L.divIcon({
+                    className: 'pulse-marker',
+                    iconSize: [20, 20],
+                })
+            });
+        } else {
+            marker = L.circleMarker([latitude, longitude], {
+                radius: 6,
+                fillColor: markerColor,
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.9,
+            });
+        }
 
         // Attach the park data so popupopen can use it
         marker.park = park;
@@ -2495,19 +2513,25 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
         marker.on('popupopen', async function () {
             try {
-//                let parkActivations = await getParkActivationsFromIndexedDB(reference);
-              //  if (!parkActivations) {
-                    parkActivations = await fetchParkActivations(reference);
-                    await saveParkActivationsToIndexedDB(reference, parkActivations);
-                //}
+                parkActivations = await fetchParkActivations(reference);
+                await saveParkActivationsToIndexedDB(reference, parkActivations);
 
-                const updatedPopup = await fetchFullPopupContent(park, currentActivation, parkActivations);
-                this.setPopupContent(updatedPopup);
+                let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+
+                // Append change info if available
+                if (park.change) {
+                    popupContent += `<div style="font-style: italic; font-size: 0.8em; margin-top: 0.5em;">
+                ${park.change} — ${new Date(park.changeTimestamp).toLocaleDateString()}
+            </div>`;
+                }
+
+                this.setPopupContent(popupContent);
             } catch (error) {
                 console.error(`Error fetching activations for park ${reference}:`, error);
                 this.setPopupContent("<b>Error loading park info.</b>");
             }
         });
+
     });
 
     console.log("All parks displayed with appropriate highlights."); // Debugging
@@ -2532,7 +2556,8 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
             latitude: parseFloat(park.latitude),
             longitude: parseFloat(park.longitude),
             activations: parseInt(park.activations, 10) || 0,
-            created: park.created || new Date().toISOString()
+            //do this in upsert instead
+            //created: park.created || new Date().toISOString()
         }));
 
         await saveParksToIndexedDB(parks);
@@ -2542,26 +2567,38 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
         parks = await getAllParksFromIndexedDB();
     }
 
-    // Apply updates from usparks_changes.csv
     // Apply updates from changes.json
-// Apply updates from changes.json
     try {
-        const changesResponse = await fetchIfModified('https://pota.review/potamap/data/changes.json', 'changes.json');
-        if (changesResponse && changesResponse.ok) {
+        //debug, change path
+//        const changesResponse = await fetchIfModified('https://pota.review/potamap/data/changes.json', 'changes.json');
+        const changesResponse = await fetchIfModified('/potamap/data/changes.json', 'changes.json');
+//        if (changesResponse && changesResponse.ok) {
+            if ((changesResponse && changesResponse.ok) || true) {
             const changesData = await changesResponse.json();
 
-            const updatedParks = changesData.map(park => ({
-                reference: park.reference,
-                name: park.name,
-                latitude: park.latitude,
-                longitude: park.longitude,
-                grid: park.grid,
-                locationDesc: park.locationDesc,
-                attempts: park.attempts,
-                activations: park.activations,
-                qsos: park.qsos,
-                created: park.created || new Date().toISOString()
-            }));
+            const updatedParks = changesData.map(park => {
+                const isNew = park.change === 'Park added';
+
+                return {
+                    reference: park.reference,
+                    name: park.name,
+                    latitude: park.latitude,
+                    longitude: park.longitude,
+                    grid: park.grid,
+                    locationDesc: park.locationDesc,
+                    attempts: park.attempts,
+                    activations: park.activations,
+                    qsos: park.qsos,
+                    created: isNew ? park.timestamp : undefined,
+                    change: park.change,
+                    changeTimestamp: park.timestamp
+                };
+            });
+//debug
+            console.log("Final updatedParks going to IndexedDB:", updatedParks);
+
+            const testPark = updatedParks.find(p => p.reference === 'US-99999');
+            console.log("Test park before writing to IndexedDB:", testPark);
 
             await upsertParksToIndexedDB(updatedParks);
             await setLastModifiedHeader('changes.json', changesResponse.headers.get('last-modified'));
@@ -2588,17 +2625,37 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     });
 }
 
+function getFromStore(store, key) {
+    return new Promise((resolve, reject) => {
+        const request = store.get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+
 async function upsertParksToIndexedDB(parks) {
     const db = await getDatabase();
     const tx = db.transaction('parks', 'readwrite');
     const store = tx.objectStore('parks');
 
     for (const park of parks) {
-        store.put(park);
+        const existing = await getFromStore(store, park.reference);
+
+        const merged = {
+            ...existing,
+            ...park,
+            created: park.created || existing?.created || (park.change === 'Park added' ? park.timestamp : new Date().toISOString())
+        };
+
+        console.log(`Merged ${park.reference}`, merged);
+        store.put(merged);
     }
+
 
     return tx.complete;
 }
+
 
 async function getAllParksFromIndexedDB() {
     const db = await getDatabase();
@@ -2620,19 +2677,26 @@ async function getLastFetchTimestamp(key) {
 async function setLastFetchTimestamp(key, timestamp) {
     localStorage.setItem(`lastFetch_${key}`, timestamp.toString());
 }
-
+//debug
+// async function fetchIfModified(url, key) {
+//     const lastMod = localStorage.getItem(`lastModified_${key}`);
+//     const headers = lastMod ? { 'If-Modified-Since': lastMod } : {};
+//     const response = await fetch(url, { headers });
+//
+//     if (response.status === 304) {
+//         console.log(`${key} not modified`);
+//         return null;
+//     }
+//
+//     return response;
+// }
 async function fetchIfModified(url, key) {
-    const lastMod = localStorage.getItem(`lastModified_${key}`);
-    const headers = lastMod ? { 'If-Modified-Since': lastMod } : {};
-    const response = await fetch(url, { headers });
-
-    if (response.status === 304) {
-        console.log(`${key} not modified`);
-        return null;
-    }
-
-    return response;
+    const response = await fetch('/potamap/data/changes.json', { cache: 'no-store' });
+    const data = await response;
+    console.log("Bypassed fetchIfModified — data:", data);
+    return data;
 }
+
 
 async function setLastModifiedHeader(key, value) {
     if (value) {
@@ -2645,7 +2709,7 @@ async function setLastModifiedHeader(key, value) {
  * Initializes the Leaflet map and loads park data from CSV using IndexedDB.
  */
 async function setupPOTAMap() {
-    const csvUrl = 'https://pota.review/potamap/data/allparks.json';
+    const csvUrl = '/potamap/data/allparks.json';
     const cacheDuration = 24 * 60 * 60 * 1000; // 1 day in milliseconds
 
     try {
@@ -2925,12 +2989,18 @@ document.addEventListener('DOMContentLoaded', () => {
  * @param {boolean} userActivated - Whether the user has activated the park.
  * @returns {string} The color code for the marker.
  */
-function getMarkerColor(activations, userActivated) {
-    if (userActivated) return "#ffa500"; // Orange for user-activated parks
+function getMarkerColor(activations, userActivated, created) {
+    const now = new Date();
+    const createdDate = new Date(created);
+    const ageInDays = (now - createdDate) / (1000 * 60 * 60 * 24);
+
+    if (ageInDays <= 30) return "#800080"; // Purple for new parks
+    if (userActivated) return "#ffa500";   // Orange for user-activated parks
     if (activations > 10) return "#ff6666"; // Light red for highly active parks
-    if (activations > 0) return "#90ee90"; // Light green for active parks
-    return "#0000ff"; // Vivid blue for inactive parks
+    if (activations > 0) return "#90ee90";  // Light green for active parks
+    return "#0000ff";                      // Vivid blue for inactive parks
 }
+
 
 /**
  * Optimizes Leaflet controls and popups for better mobile experience.

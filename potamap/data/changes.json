@@ -1,0 +1,15 @@
+[
+  {
+    "reference": "US-4702",
+    "name": "PD State Forest",
+    "latitude": 42.0498,
+    "longitude": -71.2673,
+    "grid": "FN42ib",
+    "locationDesc": "US-MA",
+    "attempts": 112,
+    "activations": 107,
+    "qsos": 470,
+    "change": "name changed",
+    "timestamp": "2025-04-03T16:55:43.575190"
+  }
+]
