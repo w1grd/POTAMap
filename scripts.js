@@ -12,7 +12,7 @@ let previousMapState = {
 };
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
-const appVersion = "20250409"; // manually update as needed
+const appVersion = "20250411"; // manually update as needed
 
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
