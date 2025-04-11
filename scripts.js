@@ -2452,11 +2452,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
-        const changeDate = new Date(park.changeTimestamp || park.created);
-        const isRecentlyChanged = (Date.now() - changeDate.getTime()) <= (30 * 24 * 60 * 60 * 1000);
+        const isNew = (Date.now() - new Date(park.created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
 
-        // Determine marker color
-        const markerColor = isRecentlyChanged
+        const markerColor = isNew
             ? "#800080" // Purple for new parks
             : isUserActivated
                 ? "#ffa500" // Orange
@@ -2468,17 +2466,14 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
         const currentActivation = spots?.find(spot => spot.reference === reference);
 
-        let marker;
-
-        if (isRecentlyChanged) {
-            marker = L.marker([latitude, longitude], {
+        const marker = isNew
+            ? L.marker([latitude, longitude], {
                 icon: L.divIcon({
                     className: 'pulse-marker',
                     iconSize: [20, 20],
                 })
-            });
-        } else {
-            marker = L.circleMarker([latitude, longitude], {
+            })
+            : L.circleMarker([latitude, longitude], {
                 radius: 6,
                 fillColor: markerColor,
                 color: "#000",
@@ -2486,9 +2481,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 opacity: 1,
                 fillOpacity: 0.9,
             });
-        }
 
-        // Attach the park data so popupopen can use it
         marker.park = park;
         marker.currentActivation = currentActivation;
 
@@ -2515,14 +2508,12 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
                 let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
 
-                if (park.change && park.changeTimestamp) {
-                    const formattedDate = new Date(park.changeTimestamp).toLocaleDateString();
+                if (park.change) {
                     popupContent += `
-                <div style="font-size: 0.85em; font-style: italic; margin-top: 0.5em;">
-                    <b>Recent change:</b> ${park.change} <br/>
-                    <b>Changed:</b> ${formattedDate}
-                </div>
-            `;
+                        <div style="font-size: 0.85em; font-style: italic; margin-top: 0.5em;">
+                            <b>Recent change:</b> ${park.change}
+                        </div>
+                    `;
                 }
 
                 this.setPopupContent(popupContent);
@@ -2531,10 +2522,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 this.setPopupContent("<b>Error loading park info.</b>");
             }
         });
-
     });
 
-    console.log("All parks displayed with appropriate highlights."); // Debugging
+    console.log("All parks displayed with appropriate highlights.");
 }
 
 async function fetchAndCacheParks(jsonUrl, cacheDuration) {
@@ -2555,9 +2545,7 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
             name: park.name,
             latitude: parseFloat(park.latitude),
             longitude: parseFloat(park.longitude),
-            activations: parseInt(park.activations, 10) || 0,
-            //do this in upsert instead
-            //created: park.created || new Date().toISOString()
+            activations: parseInt(park.activations, 10) || 0
         }));
 
         await saveParksToIndexedDB(parks);
@@ -2587,11 +2575,10 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
                     activations: park.activations,
                     qsos: park.qsos,
                     created: isNew ? park.timestamp : undefined,
-                    change: park.change,
-                    changeTimestamp: park.timestamp
+                    change: park.change
                 };
             });
-//debug
+
             console.log("Final updatedParks going to IndexedDB:", updatedParks);
 
             await upsertParksToIndexedDB(updatedParks);
@@ -2604,17 +2591,14 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
         console.warn('Failed to apply park changes:', err);
     }
 
-
     const finalList = await getAllParksFromIndexedDB();
     console.log('finalList:', finalList, 'typeof:', typeof finalList, 'isArray:', Array.isArray(finalList));
 
-    // Tag "new" parks
-    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     return finalList.map(park => {
         const created = new Date(park.created).getTime();
         return {
             ...park,
-            new: (now - created) < THIRTY_DAYS_MS
+            new: (now - created) < 30 * 24 * 60 * 60 * 1000
         };
     });
 }
@@ -2639,13 +2623,12 @@ async function upsertParksToIndexedDB(parks) {
         const merged = {
             ...existing,
             ...park,
-            created: park.created || existing?.created || (park.change === 'Park added' ? park.timestamp : new Date().toISOString())
+            created: park.created || existing?.created || new Date().toISOString()
         };
 
         console.log(`Merged ${park.reference}`, merged);
         store.put(merged);
     }
-
 
     return tx.complete;
 }
