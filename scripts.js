@@ -2465,6 +2465,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                         : "#0000ff"; // Blue
 
         const currentActivation = spots?.find(spot => spot.reference === reference);
+//debug
+        if (!park.created) {
+            console.warn(`Missing 'created' for ${reference}`);
+        } else {
+            const delta = Date.now() - new Date(park.created).getTime();
+            console.log(`Park ${reference} created: ${park.created}, delta: ${delta}, isNew: ${delta <= 30 * 24 * 60 * 60 * 1000}`);
+        }
 
         const marker = isNew
             ? L.marker([latitude, longitude], {
