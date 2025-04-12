@@ -1984,8 +1984,10 @@ async function updateActivationsInView() {
     const bounds = getCurrentMapBounds();
     console.log("Current Map Bounds:", bounds.toBBoxString()); // Debugging
 
-    // Get all parks within the current bounds
-    const parksInBounds = parks.filter(park => {
+    //Make sure we have current data in order to pick up .changed field
+    const allParks = await getAllParksFromIndexedDB();
+    const parksInBounds = allParks.filter(park => {
+
         if (park.latitude && park.longitude) {
             const latLng = L.latLng(park.latitude, park.longitude);
             return bounds.contains(latLng);
