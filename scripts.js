@@ -2837,75 +2837,15 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
 
         console.log(`Displaying ${spotsInBounds.length} spots in current bounds.`);
 
-        spotsInBounds.forEach((spot) => {
-            const {
-                reference,
-                latitude,
-                longitude,
-                name,
-                activator,
-                frequency,
-                mode,
-                comments
-            } = spot;
+        if (!mapInstance.activationsLayer) {
+            mapInstance.activationsLayer = L.layerGroup().addTo(mapInstance);
+        } else {
+            mapInstance.activationsLayer.clearLayers();
+        }
 
-            const markerStyle = {
-                radius: 10,
-                color: "#3366cc",
-                fillColor: "#99ccff",
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.8,
-            };
-            const marker = L.circleMarker([latitude, longitude], markerStyle)
-                .addTo(mapInstance.spotsLayer);
+        const activatedReferences = activations.map(act => act.reference);
+        displayParksOnMap(mapInstance, parks, activatedReferences, mapInstance.activationsLayer);
 
-            marker.bindPopup(`<b>Loading park data...</b>`);
-            marker.bindTooltip(`${name} (${activator} on ${frequency} kHz)`, {
-                direction: "top",
-                className: "custom-tooltip",
-            });
-
-            marker.on("click", function () {
-                this.closeTooltip();
-            });
-
-            marker.on("popupopen", async () => {
-                if (typeof marker.closeTooltip === "function") {
-                    marker.closeTooltip();
-                }
-
-                const park = parks.find(p => p.reference === reference);
-                if (!park) {
-                    marker.setPopupContent("<b>No matching park found for this spot.</b>");
-                    return;
-                }
-
-                try {
-                    const popupHtml = await fetchFullPopupContent(park, spot);
-                    // When popup opens, fetch all park activations and build the final popup
-                    marker.on('popupopen', async function () {
-                        try {
-                            let parkActivations = await getParkActivationsFromIndexedDB(reference);
-                            if (!parkActivations) {
-                                parkActivations = await fetchParkActivations(reference);
-                                await saveParkActivationsToIndexedDB(reference, parkActivations);
-                            }
-
-                            const updatedPopup = await fetchFullPopupContent(park, currentActivation, parkActivations);
-                            this.setPopupContent(updatedPopup);
-                        } catch (error) {
-                            console.error(`Error fetching activations for park ${reference}:`, error);
-                            this.setPopupContent(`${marker.originalPopupContent}<br><br><b>Error loading recent activations.</b>`);
-                        }
-                    });
-                    marker.setPopupContent(popupHtml);
-                } catch (error) {
-                    console.error("Error building popup:", error);
-                    marker.setPopupContent("<b>Error loading park details.</b>");
-                }
-            });
-        });
     } catch (error) {
         console.error("Error fetching or displaying POTA spots:", error);
     }
