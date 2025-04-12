@@ -1191,7 +1191,7 @@ async function saveParksToIndexedDB(parks) {
     const store = transaction.objectStore('parks');
 
     // Clear existing parks to prevent duplicates
-    store.clear();
+   // store.clear();
 
     return new Promise((resolve, reject) => {
         parks.forEach(park => {
@@ -2556,7 +2556,7 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
             activations: parseInt(park.activations, 10) || 0
         }));
 
-        await saveParksToIndexedDB(parks);
+        await upsertParksToIndexedDB(parks);
         await setLastFetchTimestamp('allparks.json', now);
     } else {
         console.log('Using cached full park data');
