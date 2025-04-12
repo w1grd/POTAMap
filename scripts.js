@@ -2542,8 +2542,8 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     const now = Date.now();
     const lastFullFetch = await getLastFetchTimestamp('allparks.json');
     let parks = [];
-
-    if (!lastFullFetch || (now - lastFullFetch > cacheDuration)) {
+if (true) {
+    // if (!lastFullFetch || (now - lastFullFetch > cacheDuration)) {
         console.log('Fetching full park data from JSON...');
         const response = await fetch(jsonUrl);
         if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
