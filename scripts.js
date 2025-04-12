@@ -2775,70 +2775,32 @@ async function fetchAndDisplaySpots() {
     try {
         const response = await fetch(SPOT_API_URL);
         if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
-        const spots = await response.json();
+
+        spots = await response.json();  // ✅ store globally for isActive logic
 
         console.log('Fetched spots data:', spots); // Debugging
 
-        // Check if the map exists and spotsLayer is initialized
         if (!map) {
             console.error('Map instance is not initialized.');
             return;
         }
 
-        // Initialize spotsLayer if it doesn't exist
-        if (!map.spotsLayer) {
-            console.log('Initializing spots layer...');
-            map.spotsLayer = L.layerGroup().addTo(map);
+        // Just refresh markers using the existing unified logic
+        if (!map.activationsLayer) {
+            map.activationsLayer = L.layerGroup().addTo(map);
         } else {
-            console.log('Clearing existing spots layer...');
-            map.spotsLayer.clearLayers();
+            map.activationsLayer.clearLayers();
         }
 
-        // Add new spots to the map
-        spots.forEach((spot) => {
-            const { reference, latitude, longitude, name, activator, frequency, mode, comments } = spot;
+        const activatedReferences = activations.map(act => act.reference);
+        displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
 
-            if (!latitude || !longitude) {
-                console.warn(`Invalid coordinates for spot: ${JSON.stringify(spot)}`);
-                return;
-            }
-
-            const markerStyle = {
-                radius: 10,
-                color: '#3366cc',
-                fillColor: '#99ccff',
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.8,
-            };
-
-            const marker = L.circleMarker([latitude, longitude], markerStyle)
-                .addTo(map.spotsLayer);
-
-            marker.bindTooltip(`${name} (${frequency} kHz)`, {
-                direction: 'top',
-                className: 'custom-tooltip',
-            });
-
-            marker.on('click', async function () {
-                this.closeTooltip();
-
-                const park = parks.find(p => p.reference === reference);
-                if (!park) {
-                    console.warn(`No park found for spot reference ${reference}`);
-                    return;
-                }
-
-                const popupContent = await fetchFullPopupContent(park, spot);
-                this.bindPopup(popupContent).openPopup();
-            });
-        });
-
-        console.log(`Displayed ${spots.length} spots on the map.`);
+        console.log(`Updated display of ${spots.length} active spots on the map.`);
     } catch (error) {
         console.error('Error fetching or displaying POTA spots:', error);
     }
 }
+
 
 /**
  * Fetches active POTA spots from the API, filters them to the current map bounds,
