@@ -12,7 +12,9 @@ let previousMapState = {
 };
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
-const appVersion = "20250412"; // manually update as needed
+const appVersion = "20250412a"; // manually update as needed
+const cacheDuration = 24 * 60 * 60 * 1000; // 1 day in milliseconds
+
 
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
@@ -2548,7 +2550,7 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     let parks = [];
 
     // Force a full fetch for now (you can restore the caching logic later)
-    if (true) {
+    if (!lastFullFetch || (now - lastFullFetch > cacheDuration)) {
         console.log('Fetching full park data from JSON...');
         const response = await fetch(jsonUrl);
         if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
@@ -2691,7 +2693,6 @@ async function setLastModifiedHeader(key, value) {
  */
 async function setupPOTAMap() {
     const csvUrl = '/potamap/data/allparks.json';
-    const cacheDuration = 24 * 60 * 60 * 1000; // 1 day in milliseconds
 
     try {
         // Fetch and cache parks data
