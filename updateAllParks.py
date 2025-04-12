@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+
 BASE_DIR = Path(__file__).parent
 LOCAL_FILE = BASE_DIR / 'allparks.json'
 CHANGES_FILE = BASE_DIR / 'changes.json'
