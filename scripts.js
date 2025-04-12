@@ -1185,30 +1185,30 @@ async function getParksFromIndexedDB() {
  * @param {Array} parks - Array of park objects to save.
  * @returns {Promise<void>}
  */
-async function saveParksToIndexedDB(parks) {
-    const db = await getDatabase();
-    const transaction = db.transaction('parks', 'readwrite');
-    const store = transaction.objectStore('parks');
-
-    // Clear existing parks to prevent duplicates
-   // store.clear();
-
-    return new Promise((resolve, reject) => {
-        parks.forEach(park => {
-            store.put(park);
-        });
-
-        transaction.oncomplete = () => {
-            console.log('Parks saved successfully to IndexedDB.');
-            resolve();
-        };
-
-        transaction.onerror = (event) => {
-            console.error('Error saving parks to IndexedDB:', event.target.error);
-            reject(event.target.error);
-        };
-    });
-}
+// async function saveParksToIndexedDB(parks) {
+//     const db = await getDatabase();
+//     const transaction = db.transaction('parks', 'readwrite');
+//     const store = transaction.objectStore('parks');
+//
+//     // Clear existing parks to prevent duplicates
+//    // store.clear();
+//
+//     return new Promise((resolve, reject) => {
+//         parks.forEach(park => {
+//             store.put(park);
+//         });
+//
+//         transaction.oncomplete = () => {
+//             console.log('Parks saved successfully to IndexedDB.');
+//             resolve();
+//         };
+//
+//         transaction.onerror = (event) => {
+//             console.error('Error saving parks to IndexedDB:', event.target.error);
+//             reject(event.target.error);
+//         };
+//     });
+// }
 
 /**
  * Parses CSV text into an array of objects using PapaParse.
@@ -2630,11 +2630,14 @@ async function upsertParksToIndexedDB(parks) {
     for (const park of parks) {
         const existing = await getFromStore(store, park.reference);
 
+        const isTrulyNew = !existing;
+
         const merged = {
             ...existing,
             ...park,
-            created: park.created || existing?.created || new Date().toISOString()
+            created: park.created || existing?.created || (isTrulyNew ? new Date().toISOString() : undefined)
         };
+
 
         console.log(`Merged ${park.reference}`, merged);
         store.put(merged);
