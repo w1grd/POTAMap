@@ -2693,13 +2693,16 @@ async function setupPOTAMap() {
     try {
         // Fetch and cache parks data
         const parksData = await fetchAndCacheParks(csvUrl, cacheDuration);
-        parks = parksData.map(park => ({
-            reference: park.reference,
-            name: park.name,
-            latitude: parseFloat(park.latitude),
-            longitude: parseFloat(park.longitude),
-            activations: parseInt(park.activations, 10) || 0
-        }));
+        parks = parksData;
+        console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
+
+        // parks = parksData.map(park => ({
+        //     reference: park.reference,
+        //     name: park.name,
+        //     latitude: parseFloat(park.latitude),
+        //     longitude: parseFloat(park.longitude),
+        //     activations: parseInt(park.activations, 10) || 0
+        // }));
         console.log("Parks Loaded from IndexedDB:", parks); // Debugging
 
         // Retrieve activations from IndexedDB
