@@ -2454,36 +2454,38 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
-        const isNew = (Date.now() - new Date(park.created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
-//debugging
-        if (isNew) {
-            const delta = Date.now() - new Date(park.created).getTime();
-            console.log(`Park ${reference} created: ${park.created}, delta: ${delta}, isNew: ${delta <= 30 * 24 * 60 * 60 * 1000}`);
-        }
-        //to here
-        const markerColor = isNew
-            ? "#800080" // Purple for new parks
-            : isUserActivated
-                ? "#ffa500" // Orange
-                : parkActivationCount > 10
-                    ? "#ff6666" // Light red
-                    : parkActivationCount > 0
-                        ? "#90ee90" // Light green
-                        : "#0000ff"; // Blue
-
+        const isNew = (Date.now() - new Date(created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
         const currentActivation = spots?.find(spot => spot.reference === reference);
+        const isActive = !!currentActivation;
 
+        // Debugging
+        if (isNew) {
+            const delta = Date.now() - new Date(created).getTime();
+            console.log(`Park ${reference} created: ${created}, delta: ${delta}, isNew: true`);
+        }
 
-        const marker = isNew
+        // Determine marker class for animated divIcon
+        const markerClasses = [];
+        if (isNew) markerClasses.push('pulse-marker');
+        if (isActive) markerClasses.push('active-pulse-marker');
+        const markerClassName = markerClasses.join(' ');
+
+        const marker = markerClasses.length > 0
             ? L.marker([latitude, longitude], {
                 icon: L.divIcon({
-                    className: 'pulse-marker',
+                    className: markerClassName,
                     iconSize: [20, 20],
                 })
             })
             : L.circleMarker([latitude, longitude], {
                 radius: 6,
-                fillColor: markerColor,
+                fillColor: isUserActivated
+                    ? "#ffa500" // Orange
+                    : parkActivationCount > 10
+                        ? "#ff6666" // Light red
+                        : parkActivationCount > 0
+                            ? "#90ee90" // Light green
+                            : "#0000ff", // Blue
                 color: "#000",
                 weight: 1,
                 opacity: 1,
