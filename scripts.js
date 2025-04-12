@@ -2450,7 +2450,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     layerGroup.clearLayers(); // Clear existing markers before adding new ones
 
     parks.forEach((park) => {
-        const { reference, name, latitude, longitude, activations: parkActivationCount } = park;
+        const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
         const isNew = (Date.now() - new Date(park.created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
 
