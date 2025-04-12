@@ -2542,8 +2542,9 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     const now = Date.now();
     const lastFullFetch = await getLastFetchTimestamp('allparks.json');
     let parks = [];
-if (true) {
-    // if (!lastFullFetch || (now - lastFullFetch > cacheDuration)) {
+
+    // Force a full fetch for now (you can restore the caching logic later)
+    if (true) {
         console.log('Fetching full park data from JSON...');
         const response = await fetch(jsonUrl);
         if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
@@ -2556,6 +2557,7 @@ if (true) {
             latitude: parseFloat(park.latitude),
             longitude: parseFloat(park.longitude),
             activations: parseInt(park.activations, 10) || 0
+            // ⛔️ no `.created` here!
         }));
 
         await upsertParksToIndexedDB(parks);
@@ -2601,14 +2603,15 @@ if (true) {
         console.warn('Failed to apply park changes:', err);
     }
 
+    // Build the return list, only tagging `.new` if created exists and is recent
     const finalList = await getAllParksFromIndexedDB();
-    console.log('finalList:', finalList, 'typeof:', typeof finalList, 'isArray:', Array.isArray(finalList));
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
     return finalList.map(park => {
-        const created = new Date(park.created).getTime();
+        const created = new Date(park.created || 0).getTime();
         return {
             ...park,
-            new: (now - created) < 30 * 24 * 60 * 60 * 1000
+            new: created && (now - created < thirtyDaysMs)
         };
     });
 }
@@ -2630,16 +2633,12 @@ async function upsertParksToIndexedDB(parks) {
     for (const park of parks) {
         const existing = await getFromStore(store, park.reference);
 
-        const isTrulyNew = !existing;
-
         const merged = {
             ...existing,
             ...park,
-            created: park.created || existing?.created || (isTrulyNew ? new Date().toISOString() : undefined)
+            created: park.created ?? existing?.created // ✅ Only update if explicitly provided
         };
 
-
-        console.log(`Merged ${park.reference}`, merged);
         store.put(merged);
     }
 
