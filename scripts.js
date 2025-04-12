@@ -2453,13 +2453,14 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
         const isNew = (Date.now() - new Date(park.created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
-debug
+//debug
         if (!park.created) {
             console.warn(`Missing 'created' for ${reference}`);
         } else {
             const delta = Date.now() - new Date(park.created).getTime();
             console.log(`Park ${reference} created: ${park.created}, delta: ${delta}, isNew: ${delta <= 30 * 24 * 60 * 60 * 1000}`);
         }
+        //to here
         const markerColor = isNew
             ? "#800080" // Purple for new parks
             : isUserActivated
