@@ -2496,19 +2496,19 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
         marker.park = park;
         marker.currentActivation = currentActivation;
+        const tooltipText = currentActivation
+            ? `${reference}: ${name} — ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` — ${currentActivation.comments}` : ''}`
+            : `${reference}: ${name} (${parkActivationCount} activations)`;
 
         marker
             .addTo(layerGroup)
             .bindPopup("<b>Loading park info...</b>")
-            .bindTooltip(
-                `${reference}: ${name} (${parkActivationCount} activations)`,
-                {
-                    direction: "top",
-                    opacity: 0.9,
-                    sticky: false,
-                    className: "custom-tooltip",
-                }
-            )
+            .bindTooltip(tooltipText, {
+                direction: "top",
+                opacity: 0.9,
+                sticky: false,
+                className: "custom-tooltip",
+            })
             .on('click', function () {
                 this.closeTooltip();
             });
