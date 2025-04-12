@@ -2454,7 +2454,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
-        const isNew = (Date.now() - new Date(created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
+        const createdTime = created ? new Date(created).getTime() : null;
+        const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
+//        const isNew = (Date.now() - new Date(created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
         const currentActivation = spots?.find(spot => spot.reference === reference);
         const isActive = !!currentActivation;
 
