@@ -2499,7 +2499,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         //Set up data block
         //
         const tooltipText = currentActivation
-            ? `${reference}: ${name} — ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` — ${currentActivation.comments}` : ''}`
+            ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` — ${currentActivation.comments}` : ''}`
             : `${reference}: ${name} (${parkActivationCount} activations)`;
 
         marker
