@@ -1987,50 +1987,51 @@ async function updateActivationsInView() {
         return;
     }
 
-    // Ensure 'activations' is an array
-    if (!Array.isArray(activations)) {
-        console.error("Activations is not an array:", activations);
-        activations = []; // Fallback to an empty array
-    } else {
-        console.log("Activations is a valid array with length:", activations.length); // Debugging
-    }
-
     const bounds = getCurrentMapBounds();
-    console.log("Current Map Bounds:", bounds.toBBoxString()); // Debugging
-
-    //Make sure we have current data in order to pick up .changed field
     const allParks = await getAllParksFromIndexedDB();
-    const parksInBounds = allParks.filter(park => {
 
+    const parksInBounds = allParks.filter(park => {
         if (park.latitude && park.longitude) {
             const latLng = L.latLng(park.latitude, park.longitude);
             return bounds.contains(latLng);
         }
-       // console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
         return false;
     });
 
-    console.log("Parks in Current View:", parksInBounds); // Debugging
-
-    // Clear existing markers
     if (map.activationsLayer) {
         map.activationsLayer.clearLayers();
-        console.log("Cleared existing markers."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
-        console.log("Created activationsLayer."); // Debugging
     }
 
-    // Determine which parks are activated by the user within bounds
-    const activatedReferences = activations
-        .filter(act => parksInBounds.some(p => p.reference === act.reference))
-        .map(act => act.reference);
+    const userActivatedReferences = activations.map(act => act.reference);
+    const onAirReferences = spots.map(spot => spot.reference);
 
-    console.log("Activated References in Current View:", activatedReferences); // Debugging
+    let parksToDisplay = parksInBounds;
 
-    // Display activated parks within current view
-    displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
-    console.log("Displayed activated parks within current view."); // Debugging
+    switch (activationToggleState) {
+        case 1: // Show just user's activations
+            parksToDisplay = parksInBounds.filter(park =>
+                userActivatedReferences.includes(park.reference)
+            );
+            break;
+
+        case 2: // Show all spots except user's activations
+            parksToDisplay = parksInBounds.filter(park =>
+                !userActivatedReferences.includes(park.reference)
+            );
+            break;
+
+        case 3: // Show only currently active parks (on air)
+            parksToDisplay = parksInBounds.filter(park =>
+                onAirReferences.includes(park.reference)
+            );
+            break;
+
+        // case 0 and default: Show all parks in bounds
+    }
+
+    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
 }
 
 /**
