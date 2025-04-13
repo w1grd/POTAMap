@@ -2796,6 +2796,7 @@ async function setupPOTAMap() {
                 if (toggleButton && toggleButton.classList.contains('active')) {
                     console.log("Toggle is active. Displaying activations on load."); // Debugging
                     await updateActivationsInView(); // Display activations immediately
+                    applyActivationToggleState();
                     displayCallsign();
                 } else {
                     // Display all parks without highlighting activations
@@ -2820,6 +2821,42 @@ async function setupPOTAMap() {
         alert('Failed to set up the POTA map. Please try again later.');
     }
 }
+
+function applyActivationToggleState() {
+    const toggleButton = document.getElementById('toggleActivations');
+    const userActivatedReferences = activations.map((act) => act.reference);
+
+    const buttonTexts = [
+        "Show My Activations",
+        "Hide My Activations",
+        "Show Currently On Air",
+        "Show All Spots",
+    ];
+
+    if (toggleButton) {
+        toggleButton.innerText = buttonTexts[activationToggleState];
+    }
+
+    switch (activationToggleState) {
+        case 0:
+            displayParksOnMap(map, parks, userActivatedReferences, map.activationsLayer);
+            break;
+        case 1:
+            const userParks = parks.filter(p => userActivatedReferences.includes(p.reference));
+            displayParksOnMap(map, userParks, userActivatedReferences, map.activationsLayer);
+            break;
+        case 2:
+            const nonUserParks = parks.filter(p => !userActivatedReferences.includes(p.reference));
+            displayParksOnMap(map, nonUserParks, [], map.activationsLayer);
+            break;
+        case 3:
+            const onAirRefs = spots.map(s => s.reference);
+            const onAirParks = parks.filter(p => onAirRefs.includes(p.reference));
+            displayParksOnMap(map, onAirParks, userActivatedReferences, map.activationsLayer);
+            break;
+    }
+}
+
 /**
  * Fetches active POTA spots from the API and displays them on the map.
  */
