@@ -1272,7 +1272,8 @@ async function toggleActivations() {
 
     // Cycle through states: 0 -> 1 -> 2 -> 3 -> back to 0
     activationToggleState = (activationToggleState + 1) % 4;
-
+// 🧠 Persist it
+    localStorage.setItem('activationToggleState', activationToggleState);
     // Update button text for clarity
     const buttonTexts = [
         "Show My Activations",
@@ -2142,6 +2143,24 @@ function resetParkDisplay() {
  */
 async function initializeActivationsDisplay() {
     try {
+        // Restore activation toggle state from localStorage (if available)
+        const savedToggleState = parseInt(localStorage.getItem('activationToggleState'), 10);
+        if (!isNaN(savedToggleState) && savedToggleState >= 0 && savedToggleState <= 3) {
+            activationToggleState = savedToggleState;
+
+            // Update button label accordingly
+            const toggleButton = document.getElementById('toggleActivations');
+            const buttonTexts = [
+                "Show My Activations",
+                "Hide My Activations",
+                "Show Currently On Air",
+                "Show All Spots",
+            ];
+            if (toggleButton) {
+                toggleButton.innerText = buttonTexts[activationToggleState];
+            }
+        }
+
         const storedActivations = await getActivationsFromIndexedDB();
         if (storedActivations.length > 0) {
             // Set the toggle button to active if activations exist.
@@ -2399,38 +2418,57 @@ function initializeMap(lat, lng) {
     // Determine if the device is mobile based on screen width
     const isMobile = window.innerWidth <= 600;
 
+    // Check for saved map center and zoom in localStorage
+    let savedCenter = localStorage.getItem("mapCenter");
+    let savedZoom = localStorage.getItem("mapZoom");
+
+    if (savedCenter) {
+        try {
+            savedCenter = JSON.parse(savedCenter);
+        } catch (e) {
+            savedCenter = null;
+        }
+    }
+
+    if (savedZoom) {
+        savedZoom = parseInt(savedZoom, 10);
+    }
+
     const mapInstance = L.map("map", {
-        center: [lat, lng],
-        zoom: isMobile ? 12 : 10, // Higher zoom on mobile for better detail
-        zoomControl: !isMobile, // Optionally disable zoom controls on mobile
+        center: savedCenter || [lat, lng],
+        zoom: savedZoom || (isMobile ? 12 : 10),
+        zoomControl: !isMobile,
         attributionControl: true,
     });
 
-    console.log("Initialized map at:", lat, lng); // Debugging
+    console.log("Initialized map at:", mapInstance.getCenter(), "zoom:", mapInstance.getZoom());
 
     // Add OpenStreetMap tiles
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; OpenStreetMap contributors',
     }).addTo(mapInstance);
 
-    console.log("Added OpenStreetMap tiles."); // Debugging
+    console.log("Added OpenStreetMap tiles.");
 
     // Add marker for user's location with adjusted icon size
     L.marker([lat, lng], {
         icon: L.icon({
             iconUrl:
                 "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-            iconSize: [30, 30], // Increased icon size for better visibility on mobile
+            iconSize: [30, 30],
             iconAnchor: [15, 30],
             popupAnchor: [0, -30],
         }),
-    })
-        .addTo(mapInstance)
-//Remove initial popup
-//        .bindPopup("Your Location")
-//        .openPopup();
+    }).addTo(mapInstance);
+    console.log("Added user location marker.");
 
-    console.log("Added user location marker."); // Debugging
+    // Save center and zoom to localStorage whenever map is moved or zoomed
+    mapInstance.on("moveend zoomend", () => {
+        const center = mapInstance.getCenter();
+        localStorage.setItem("mapCenter", JSON.stringify([center.lat, center.lng]));
+        localStorage.setItem("mapZoom", mapInstance.getZoom());
+        localStorage.setItem("mapSavedAt", Date.now().toString());
+    });
 
     // Attach dynamic spot fetching to map movement
     mapInstance.on(
@@ -2438,7 +2476,7 @@ function initializeMap(lat, lng) {
         debounce(() => {
             console.log("Map moved or zoomed. Updating spots...");
             fetchAndDisplaySpotsInCurrentBounds(mapInstance);
-        }, 300) // Debounce to reduce API calls
+        }, 300)
     );
 
     return mapInstance;
