@@ -117,21 +117,32 @@ function initializeMenu() {
 }
 
 async function displayVersionInfo() {
-//    const appVersion = "20250408"; // manually update as needed
-
+    let appDate = "unknown";
     let parksDate = "unknown";
     let changesDate = "unknown";
 
+    // Get last-modified date of scripts.js
     try {
-        const parksResponse = await fetch("/potamap/data/allparks.json", { method: 'HEAD' });
-        const parksHeader = parksResponse.headers.get("last-modified");
-        if (parksHeader) {
-            parksDate = formatAsYYYYMMDD(new Date(parksHeader));
+        const response = await fetch("/potamap/scripts.js", { method: 'HEAD' });
+        const header = response.headers.get("last-modified");
+        if (header) {
+            appDate = formatAsYYYYMMDD(new Date(header));
         }
     } catch (e) {
-        console.warn("Could not fetch allparks.json HEAD:", e);
+        console.warn("Could not fetch scripts.js HEAD:", e);
     }
 
+    // Get locally stored fetch timestamp for allparks.json
+    try {
+        const timestamp = await getLastFetchTimestamp('allparks.json');
+        if (timestamp) {
+            parksDate = formatAsYYYYMMDD(new Date(timestamp));
+        }
+    } catch (e) {
+        console.warn("Could not get timestamp for allparks.json:", e);
+    }
+
+    // Get last-modified header for changes.json
     try {
         const changesResponse = await fetch("/potamap/data/changes.json", { method: 'HEAD' });
         const changesHeader = changesResponse.headers.get("last-modified");
@@ -142,7 +153,7 @@ async function displayVersionInfo() {
         console.warn("Could not fetch changes.json HEAD:", e);
     }
 
-    const versionString = `<center>App-${appVersion} <br/> Parks-${parksDate} <br/>Delta-${changesDate}</center>`;
+    const versionString = `<center>App-${appDate}<br/>Parks-${parksDate}<br/>Delta-${changesDate}</center>`;
     document.getElementById("versionInfo").innerHTML = versionString;
 }
 
