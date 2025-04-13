@@ -2749,14 +2749,6 @@ async function setupPOTAMap() {
         const parksData = await fetchAndCacheParks(csvUrl, cacheDuration);
         parks = parksData;
         console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
-
-        // parks = parksData.map(park => ({
-        //     reference: park.reference,
-        //     name: park.name,
-        //     latitude: parseFloat(park.latitude),
-        //     longitude: parseFloat(park.longitude),
-        //     activations: parseInt(park.activations, 10) || 0
-        // }));
         console.log("Parks Loaded from IndexedDB:", parks); // Debugging
 
         // Retrieve activations from IndexedDB
@@ -2791,31 +2783,19 @@ async function setupPOTAMap() {
                 }, 300));
                 console.log("Attached moveend event listener with debounce."); // Debugging
 
-                // Initial display based on toggle state
-                const toggleButton = document.getElementById('toggleActivations');
-                if (toggleButton && toggleButton.classList.contains('active')) {
-                    console.log("Toggle is active. Displaying activations on load."); // Debugging
-                    await updateActivationsInView(); // Display activations immediately
-                    applyActivationToggleState();
-                    displayCallsign();
-                } else {
-                    // Display all parks without highlighting activations
-                    if (map.activationsLayer) {
-                        map.activationsLayer.clearLayers();
-                        console.log("Cleared activationsLayer."); // Debugging
-                    }
-                    displayParksOnMap(map, parks, [], map.activationsLayer);
-                    console.log("Displayed all parks without activated highlights."); // Debugging
-                }
-                //ISSUE 16 display active parks on map load
-                fetchAndDisplaySpots();
+                // Fetch active spots before applying toggle state
+                await fetchAndDisplaySpots(); // ✅ Ensure spots[] is populated first
+
+                applyActivationToggleState(); // ✅ Now apply correct filtered view
+                displayCallsign();            // ✅ Optionally show callsign
             },
             (error) => {
                 console.error('Error getting location:', error.message);
                 alert('Unable to retrieve your location.');
             }
         );
-        console.log('XX Displaying active spots')
+
+        console.log('XX Displaying active spots');
     } catch (error) {
         console.error('Error setting up POTA map:', error.message);
         alert('Failed to set up the POTA map. Please try again later.');
@@ -2850,10 +2830,18 @@ function applyActivationToggleState() {
             displayParksOnMap(map, nonUserParks, [], map.activationsLayer);
             break;
         case 3:
+            if (!Array.isArray(spots) || spots.length === 0) {
+                console.warn("No spots available — cannot display 'On Air' parks.");
+                displayParksOnMap(map, [], userActivatedReferences, map.activationsLayer);
+                return;
+            }
             const onAirRefs = spots.map(s => s.reference);
             const onAirParks = parks.filter(p => onAirRefs.includes(p.reference));
             displayParksOnMap(map, onAirParks, userActivatedReferences, map.activationsLayer);
             break;
+        default:
+            console.warn(`Unknown activationToggleState: ${activationToggleState}`);
+            displayParksOnMap(map, parks, userActivatedReferences, map.activationsLayer);
     }
 }
 
