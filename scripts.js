@@ -2607,14 +2607,19 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
 
         const parsed = await response.json();
 
-        parks = parsed.map(park => ({
-            reference: park.reference,
-            name: park.name,
-            latitude: parseFloat(park.latitude),
-            longitude: parseFloat(park.longitude),
-            activations: parseInt(park.activations, 10) || 0
-            // ⛔️ no `.created` here!
-        }));
+        const cachedRefs = new Set((await getAllParksFromIndexedDB()).map(p => p.reference));
+
+        parks = parsed.map(park => {
+            const isNewlyDiscovered = !cachedRefs.has(park.reference);
+            return {
+                reference: park.reference,
+                name: park.name,
+                latitude: parseFloat(park.latitude),
+                longitude: parseFloat(park.longitude),
+                activations: parseInt(park.activations, 10) || 0,
+                created: isNewlyDiscovered ? now : undefined
+            };
+        });
 
         await upsertParksToIndexedDB(parks);
         await setLastFetchTimestamp('allparks.json', now);
