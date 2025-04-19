@@ -2659,6 +2659,7 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     } catch (err) {
         console.warn('Failed to apply park changes:', err);
     }
+    return parks;
 }
 
 function getFromStore(store, key) {
