@@ -2607,19 +2607,15 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
 
         const parsed = await response.json();
 
-        const cachedRefs = new Set((await getAllParksFromIndexedDB()).map(p => p.reference));
-
-        parks = parsed.map(park => {
-            const isNewlyDiscovered = !cachedRefs.has(park.reference);
-            return {
-                reference: park.reference,
-                name: park.name,
-                latitude: parseFloat(park.latitude),
-                longitude: parseFloat(park.longitude),
-                activations: parseInt(park.activations, 10) || 0,
-                created: isNewlyDiscovered ? now : undefined
-            };
-        });
+        // Don't assign "created" here — allparks.json is the baseline
+        parks = parsed.map(park => ({
+            reference: park.reference,
+            name: park.name,
+            latitude: parseFloat(park.latitude),
+            longitude: parseFloat(park.longitude),
+            activations: parseInt(park.activations, 10) || 0
+            // No `created` field at all
+        }));
 
         await upsertParksToIndexedDB(parks);
         await setLastFetchTimestamp('allparks.json', now);
@@ -2647,7 +2643,7 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
                     attempts: park.attempts,
                     activations: park.activations,
                     qsos: park.qsos,
-                    created: isNew ? park.timestamp : undefined,
+                    created: isNew ? park.timestamp || now : undefined,
                     change: park.change
                 };
             });
@@ -2663,18 +2659,6 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     } catch (err) {
         console.warn('Failed to apply park changes:', err);
     }
-
-    // Build the return list, only tagging `.new` if created exists and is recent
-    const finalList = await getAllParksFromIndexedDB();
-    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-
-    return finalList.map(park => {
-        const created = new Date(park.created || 0).getTime();
-        return {
-            ...park,
-            new: created && (now - created < thirtyDaysMs)
-        };
-    });
 }
 
 function getFromStore(store, key) {
