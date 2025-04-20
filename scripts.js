@@ -73,6 +73,10 @@ function initializeMenu() {
     />
 </div>
 -->
+<li id="callsignDisplay" style="text-align: center; font-weight: bold; padding: 0.5em; font-size: 0.75em;">
+    Callsign: <span id="callsignText">please set</span>
+</li>
+
 <li>
 <div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
 </li>
@@ -1911,41 +1915,20 @@ function filterParksByActivations(maxActivations) {
 
 
 /**
- * Displays the callsign(s) of the user's activations near the upper left of the page.
+ * Displays the callsign(s) of the user's activations in the hamburger menu.
  */
 function displayCallsign() {
-    const menu = document.querySelector('#menu');
-    if (!menu) {
-        console.warn("Menu not found.");
-        return;
-    }
+    const el = document.getElementById('callsignText');
+    if (!el) return;
 
-    // Remove existing callsign if present
-    let existing = document.getElementById('callsignDisplay');
-    if (existing) {
-        existing.remove();
-    }
-
-    // Extract callsign(s)
     const uniqueCallsigns = [...new Set(activations
         .filter(act => act.activeCallsign)
         .map(act => act.activeCallsign.trim())
     )];
 
-    if (uniqueCallsigns.length === 0) return;
-
-    // Create li and append it at the bottom of the menu
-    const li = document.createElement('li');
-    li.id = 'callsignDisplay';
-    li.style.textAlign = 'center';
-    li.style.padding = '0.5em';
-    li.style.fontSize = '0.9em';
-    li.style.fontWeight = 'bold';
-    li.style.color = '#1c3a4f';  // Customize this if needed
-
-    li.textContent = `Callsign: ${uniqueCallsigns.join(', ')}`;
-
-    menu.appendChild(li); // Place at bottom of menu
+    el.textContent = uniqueCallsigns.length > 0
+        ? uniqueCallsigns.join(', ')
+        : 'please set';
 }
 
 /**
