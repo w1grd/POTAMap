@@ -1920,17 +1920,18 @@ function displayCallsign() {
         return;
     }
 
-    // Remove existing one if present (to re-append at end)
-    let callsignLi = document.getElementById('callsignDisplay');
-    if (callsignLi) {
-        menu.removeChild(callsignLi);
+    // Remove if it exists (to re-insert at end)
+    let existing = document.getElementById('callsignDisplay');
+    if (existing) {
+        existing.remove();
     }
 
-    // Recreate it and append
-    callsignLi = document.createElement('li');
-    callsignLi.id = 'callsignDisplay';
-    callsignLi.style.fontSize = '0.85em';
-    callsignLi.style.color = '#444';
+    const li = document.createElement('li');
+    li.id = 'callsignDisplay';
+    li.style.fontSize = '0.85em';
+    li.style.color = '#444';
+    li.style.textAlign = 'center';
+    li.style.marginTop = '1em';
 
     const uniqueCallsigns = [...new Set(activations
         .filter(act => act.activeCallsign)
@@ -1938,8 +1939,8 @@ function displayCallsign() {
     )];
 
     if (uniqueCallsigns.length > 0) {
-        callsignLi.innerHTML = `<strong>Callsign:</strong> ${uniqueCallsigns.join(', ')}`;
-        menu.appendChild(callsignLi);
+        li.innerHTML = `<strong>Callsign:</strong> ${uniqueCallsigns.join(', ')}`;
+        menu.appendChild(li);  // This ensures it is *last* in the menu
     }
 }
 
