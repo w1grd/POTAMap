@@ -1915,8 +1915,9 @@ function filterParksByActivations(maxActivations) {
  */
 function displayCallsign() {
     const menu = document.querySelector('#menu');
-    if (!menu) {
-        console.warn("Menu container not found.");
+    const versionInfo = document.querySelector('#versionInfo');
+    if (!menu || !versionInfo) {
+        console.warn("Menu or versionInfo not found.");
         return;
     }
 
@@ -1926,7 +1927,8 @@ function displayCallsign() {
         callsignLi.id = 'callsignDisplay';
         callsignLi.style.fontSize = '0.85em';
         callsignLi.style.color = '#444';
-        menu.appendChild(callsignLi);
+        // Insert it *before* the version info
+        versionInfo.parentNode.insertBefore(callsignLi, versionInfo);
     }
 
     const uniqueCallsigns = [...new Set(activations
