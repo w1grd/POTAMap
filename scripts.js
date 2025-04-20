@@ -73,8 +73,19 @@ function initializeMenu() {
     />
 </div>
 -->
-<li id="callsignDisplay" style="text-align: center; font-weight: bold; padding: 0.5em; font-size: 0.75em;">
+<li id="callsignDisplay" style="
+    text-align: center;
+    font-weight: bold;
+    padding: 0.5em;
+    font-size: 0.75em;
+    background: #f0f0f0;
+    margin-top: 0.5em;
+">
     Callsign: <span id="callsignText">please set</span>
+</li>
+
+<li>
+    <div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
 </li>
 
 <li>

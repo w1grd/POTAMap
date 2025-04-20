@@ -34,10 +34,8 @@
     box-sizing: border-box;
 }
 #callsignDisplay {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    background-color: rgba(255, 0, 0, 0.1);  /* temp visual aid */
+    word-break: break-word;
+    max-width: 100%;
 }
 
 .active-pulse-marker {
