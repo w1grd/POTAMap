@@ -31,6 +31,12 @@
 #menu li {
     display: block;
     width: 100%;
+    box-sizing: border-box;
+}
+#callsignDisplay {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .active-pulse-marker {
