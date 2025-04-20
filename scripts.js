@@ -2680,9 +2680,9 @@ async function fetchAndApplyUserActivations(callsign = "W1GRD") {
 
         const newActivations = recent.map(act => ({
             reference: act.reference.trim(),
-            name: act.name.trim(),
+            name: (act.park || "").trim(),
             qso_date: act.date.trim(),  // already YYYY-MM-DD
-            activeCallsign: act.callsign.trim(),
+            activeCallsign: callsign,
             totalQSOs: parseInt(act.total, 10) || 0,
             qsosCW: parseInt(act.cw, 10) || 0,
             qsosDATA: parseInt(act.data, 10) || 0,
@@ -2690,6 +2690,7 @@ async function fetchAndApplyUserActivations(callsign = "W1GRD") {
             attempts: parseInt(act.total, 10) || 0,
             activations: parseInt(act.total, 10) || 0
         }));
+
 
         // Merge with existing IndexedDB activations
         const existing = await getActivationsFromIndexedDB();
