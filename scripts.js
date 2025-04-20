@@ -1915,21 +1915,22 @@ function filterParksByActivations(maxActivations) {
  */
 function displayCallsign() {
     const menu = document.querySelector('#menu');
-    const versionInfo = document.querySelector('#versionInfo');
-    if (!menu || !versionInfo) {
-        console.warn("Menu or versionInfo not found.");
+    if (!menu) {
+        console.warn("Menu not found.");
         return;
     }
 
+    // Remove existing one if present (to re-append at end)
     let callsignLi = document.getElementById('callsignDisplay');
-    if (!callsignLi) {
-        callsignLi = document.createElement('li');
-        callsignLi.id = 'callsignDisplay';
-        callsignLi.style.fontSize = '0.85em';
-        callsignLi.style.color = '#444';
-        // Insert it *before* the version info
-        versionInfo.parentNode.insertBefore(callsignLi, versionInfo);
+    if (callsignLi) {
+        menu.removeChild(callsignLi);
     }
+
+    // Recreate it and append
+    callsignLi = document.createElement('li');
+    callsignLi.id = 'callsignDisplay';
+    callsignLi.style.fontSize = '0.85em';
+    callsignLi.style.color = '#444';
 
     const uniqueCallsigns = [...new Set(activations
         .filter(act => act.activeCallsign)
@@ -1938,8 +1939,7 @@ function displayCallsign() {
 
     if (uniqueCallsigns.length > 0) {
         callsignLi.innerHTML = `<strong>Callsign:</strong> ${uniqueCallsigns.join(', ')}`;
-    } else {
-        callsignLi.innerHTML = '';
+        menu.appendChild(callsignLi);
     }
 }
 
