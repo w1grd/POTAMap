@@ -37,6 +37,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    background-color: rgba(255, 0, 0, 0.1);  /* temp visual aid */
 }
 
 .active-pulse-marker {
