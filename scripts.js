@@ -1914,24 +1914,30 @@ function filterParksByActivations(maxActivations) {
  * Displays the callsign(s) of the user's activations near the upper left of the page.
  */
 function displayCallsign() {
-    // Create or update the callsign display element
-    let callsignDiv = document.getElementById('callsignDisplay');
-    if (!callsignDiv) {
-        callsignDiv = document.createElement('div');
-        callsignDiv.id = 'callsignDisplay';
-        document.body.appendChild(callsignDiv);
+    const menu = document.querySelector('#menu');
+    if (!menu) {
+        console.warn("Menu container not found.");
+        return;
     }
 
-    // Extract unique callsigns from activations within the current filter
+    let callsignLi = document.getElementById('callsignDisplay');
+    if (!callsignLi) {
+        callsignLi = document.createElement('li');
+        callsignLi.id = 'callsignDisplay';
+        callsignLi.style.fontSize = '0.85em';
+        callsignLi.style.color = '#444';
+        menu.appendChild(callsignLi);
+    }
+
     const uniqueCallsigns = [...new Set(activations
         .filter(act => act.activeCallsign)
         .map(act => act.activeCallsign.trim())
     )];
 
     if (uniqueCallsigns.length > 0) {
-        callsignDiv.innerHTML = `<strong>Callsign:</strong> ${uniqueCallsigns.join(', ')}`;
+        callsignLi.innerHTML = `<strong>Callsign:</strong> ${uniqueCallsigns.join(', ')}`;
     } else {
-        callsignDiv.innerHTML = '';
+        callsignLi.innerHTML = '';
     }
 }
 
