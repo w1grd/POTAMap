@@ -1920,28 +1920,32 @@ function displayCallsign() {
         return;
     }
 
-    // Remove if it exists (to re-insert at end)
+    // Remove existing callsign if present
     let existing = document.getElementById('callsignDisplay');
     if (existing) {
         existing.remove();
     }
 
-    const li = document.createElement('li');
-    li.id = 'callsignDisplay';
-    li.style.fontSize = '0.85em';
-    li.style.color = '#444';
-    li.style.textAlign = 'center';
-    li.style.marginTop = '1em';
-
+    // Extract callsign(s)
     const uniqueCallsigns = [...new Set(activations
         .filter(act => act.activeCallsign)
         .map(act => act.activeCallsign.trim())
     )];
 
-    if (uniqueCallsigns.length > 0) {
-        li.innerHTML = `<strong>Callsign:</strong> ${uniqueCallsigns.join(', ')}`;
-        menu.appendChild(li);  // This ensures it is *last* in the menu
-    }
+    if (uniqueCallsigns.length === 0) return;
+
+    // Create li and append it at the bottom of the menu
+    const li = document.createElement('li');
+    li.id = 'callsignDisplay';
+    li.style.textAlign = 'center';
+    li.style.padding = '0.5em';
+    li.style.fontSize = '0.9em';
+    li.style.fontWeight = 'bold';
+    li.style.color = '#1c3a4f';  // Customize this if needed
+
+    li.textContent = `Callsign: ${uniqueCallsigns.join(', ')}`;
+
+    menu.appendChild(li); // Place at bottom of menu
 }
 
 /**
