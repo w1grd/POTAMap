@@ -2661,8 +2661,22 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     }
     return parks;
 }
+async function fetchAndApplyUserActivations(callsign = null) {
+    // Try to load stored callsign
+    if (!callsign) {
+        callsign = localStorage.getItem("pota_user_callsign");
+    }
 
-async function fetchAndApplyUserActivations(callsign = "W1GRD") {
+    // Prompt the user if still not available
+    if (!callsign) {
+        callsign = prompt("Enter your callsign to load your POTA activations:");
+        if (!callsign) {
+            console.warn("No callsign provided; skipping user activation fetch.");
+            return;
+        }
+        localStorage.setItem("pota_user_callsign", callsign.trim().toUpperCase());
+    }
+
     const url = `https://api.pota.app/profile/${callsign}`;
     try {
         const response = await fetch(url);
@@ -2681,7 +2695,7 @@ async function fetchAndApplyUserActivations(callsign = "W1GRD") {
         const newActivations = recent.map(act => ({
             reference: act.reference.trim(),
             name: (act.park || "").trim(),
-            qso_date: act.date.trim(),  // already YYYY-MM-DD
+            qso_date: act.date.trim(),
             activeCallsign: callsign,
             totalQSOs: parseInt(act.total, 10) || 0,
             qsosCW: parseInt(act.cw, 10) || 0,
@@ -2691,8 +2705,6 @@ async function fetchAndApplyUserActivations(callsign = "W1GRD") {
             activations: parseInt(act.total, 10) || 0
         }));
 
-
-        // Merge with existing IndexedDB activations
         const existing = await getActivationsFromIndexedDB();
         const map = new Map(existing.map(act => [act.reference, act]));
 
