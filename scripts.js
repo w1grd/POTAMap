@@ -2861,23 +2861,23 @@ async function setupPOTAMap() {
         alert('Failed to set up the POTA map. Please try again later.');
     }
 }
-// function getCurrentUserCallsign() {
-//     const validCallsigns = activations
-//         .map(act => act.activeCallsign)
-//         .filter(cs => cs && typeof cs === "string" && cs.trim().length > 0);
-//
-//     const unique = [...new Set(validCallsigns.map(cs => cs.trim()))];
-//
-//     if (unique.length === 1) {
-//         return unique[0]; // ✅ Found a single consistent callsign
-//     } else if (unique.length > 1) {
-//         console.warn("Multiple callsigns found in activations:", unique);
-//         return unique[0]; // Still return one, fallback behavior
-//     }
-//
-//     console.warn("No valid callsign found in activations.");
-//     return null;
-// }
+function getCurrentUserCallsign() {
+    const validCallsigns = activations
+        .map(act => act.activeCallsign)
+        .filter(cs => cs && typeof cs === "string" && cs.trim().length > 0);
+
+    const unique = [...new Set(validCallsigns.map(cs => cs.trim()))];
+
+    if (unique.length === 1) {
+        return unique[0]; // ✅ Found a single consistent callsign
+    } else if (unique.length > 1) {
+        console.warn("Multiple callsigns found in activations:", unique);
+        return unique[0]; // Still return one, fallback behavior
+    }
+
+    console.warn("No valid callsign found in activations.");
+    return null;
+}
 async function getOrPromptUserCallsign() {
     let stored = localStorage.getItem("userCallsign");
     if (stored) return stored;
