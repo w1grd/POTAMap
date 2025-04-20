@@ -2816,11 +2816,11 @@ async function setupPOTAMap() {
                 console.warn(`Activation reference ${act.reference} does not match any park.`);
             }
         });
-        const userCallsign = getCurrentUserCallsign();
+        const userCallsign = await getOrPromptUserCallsign();
         if (userCallsign) {
             await fetchAndApplyUserActivations(userCallsign);
         } else {
-            console.log("Skipping user activation fetch: no valid callsign found.");
+            console.log("No callsign provided. Skipping live user activation fetch.");
         }
 
         // Initialize the map with user's location
@@ -2861,21 +2861,42 @@ async function setupPOTAMap() {
         alert('Failed to set up the POTA map. Please try again later.');
     }
 }
-function getCurrentUserCallsign() {
-    const validCallsigns = activations
-        .map(act => act.activeCallsign)
-        .filter(cs => cs && typeof cs === "string" && cs.trim().length > 0);
+// function getCurrentUserCallsign() {
+//     const validCallsigns = activations
+//         .map(act => act.activeCallsign)
+//         .filter(cs => cs && typeof cs === "string" && cs.trim().length > 0);
+//
+//     const unique = [...new Set(validCallsigns.map(cs => cs.trim()))];
+//
+//     if (unique.length === 1) {
+//         return unique[0]; // ✅ Found a single consistent callsign
+//     } else if (unique.length > 1) {
+//         console.warn("Multiple callsigns found in activations:", unique);
+//         return unique[0]; // Still return one, fallback behavior
+//     }
+//
+//     console.warn("No valid callsign found in activations.");
+//     return null;
+// }
+async function getOrPromptUserCallsign() {
+    let stored = localStorage.getItem("userCallsign");
+    if (stored) return stored;
 
-    const unique = [...new Set(validCallsigns.map(cs => cs.trim()))];
-
-    if (unique.length === 1) {
-        return unique[0]; // ✅ Found a single consistent callsign
-    } else if (unique.length > 1) {
-        console.warn("Multiple callsigns found in activations:", unique);
-        return unique[0]; // Still return one, fallback behavior
+    // Try to extract from activations
+    const fromActivations = getCurrentUserCallsign();
+    if (fromActivations) {
+        localStorage.setItem("userCallsign", fromActivations);
+        return fromActivations;
     }
 
-    console.warn("No valid callsign found in activations.");
+    // Otherwise, ask the user
+    const input = prompt("Enter your callsign to show your POTA activations:");
+    if (input && input.trim().length > 0) {
+        const callsign = input.trim().toUpperCase();
+        localStorage.setItem("userCallsign", callsign);
+        return callsign;
+    }
+
     return null;
 }
 
