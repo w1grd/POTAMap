@@ -2662,6 +2662,70 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     return parks;
 }
 
+async function fetchAndApplyUserActivations(callsign = "W1GRD") {
+    const url = `https://api.pota.app/profile/${callsign}`;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch activations: ${response.statusText}`);
+        }
+
+        const profile = await response.json();
+        const recent = profile.activations || [];
+
+        if (recent.length === 0) {
+            console.log("No recent activations returned.");
+            return;
+        }
+
+        const newActivations = recent.map(act => ({
+            reference: act.reference.trim(),
+            name: act.name.trim(),
+            qso_date: act.date.trim(),  // already YYYY-MM-DD
+            activeCallsign: act.callsign.trim(),
+            totalQSOs: parseInt(act.total, 10) || 0,
+            qsosCW: parseInt(act.cw, 10) || 0,
+            qsosDATA: parseInt(act.data, 10) || 0,
+            qsosPHONE: parseInt(act.phone, 10) || 0,
+            attempts: parseInt(act.total, 10) || 0,
+            activations: parseInt(act.total, 10) || 0
+        }));
+
+        // Merge with existing IndexedDB activations
+        const existing = await getActivationsFromIndexedDB();
+        const map = new Map(existing.map(act => [act.reference, act]));
+
+        newActivations.forEach(act => {
+            const ref = act.reference;
+            if (map.has(ref)) {
+                const merged = {
+                    ...map.get(ref),
+                    ...act,
+                    totalQSOs: map.get(ref).totalQSOs + act.totalQSOs,
+                    qsosCW: map.get(ref).qsosCW + act.qsosCW,
+                    qsosDATA: map.get(ref).qsosDATA + act.qsosDATA,
+                    qsosPHONE: map.get(ref).qsosPHONE + act.qsosPHONE,
+                    activations: map.get(ref).activations + act.activations
+                };
+                map.set(ref, merged);
+            } else {
+                map.set(ref, act);
+            }
+        });
+
+        activations = Array.from(map.values());
+        await saveActivationsToIndexedDB(activations);
+        console.log(`Fetched and merged ${newActivations.length} recent activations.`);
+
+        updateActivationsInView();
+        displayCallsign();
+
+    } catch (error) {
+        console.error("Error fetching or processing user activations:", error);
+    }
+}
+
+
 function getFromStore(store, key) {
     return new Promise((resolve, reject) => {
         const request = store.get(key);
@@ -2752,6 +2816,12 @@ async function setupPOTAMap() {
                 console.warn(`Activation reference ${act.reference} does not match any park.`);
             }
         });
+        const userCallsign = getCurrentUserCallsign();
+        if (userCallsign) {
+            await fetchAndApplyUserActivations(userCallsign);
+        } else {
+            console.log("Skipping user activation fetch: no valid callsign found.");
+        }
 
         // Initialize the map with user's location
         navigator.geolocation.getCurrentPosition(
@@ -2790,6 +2860,23 @@ async function setupPOTAMap() {
         console.error('Error setting up POTA map:', error.message);
         alert('Failed to set up the POTA map. Please try again later.');
     }
+}
+function getCurrentUserCallsign() {
+    const validCallsigns = activations
+        .map(act => act.activeCallsign)
+        .filter(cs => cs && typeof cs === "string" && cs.trim().length > 0);
+
+    const unique = [...new Set(validCallsigns.map(cs => cs.trim()))];
+
+    if (unique.length === 1) {
+        return unique[0]; // ✅ Found a single consistent callsign
+    } else if (unique.length > 1) {
+        console.warn("Multiple callsigns found in activations:", unique);
+        return unique[0]; // Still return one, fallback behavior
+    }
+
+    console.warn("No valid callsign found in activations.");
+    return null;
 }
 
 function applyActivationToggleState() {
