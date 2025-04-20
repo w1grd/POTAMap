@@ -2513,10 +2513,10 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const isActive = !!currentActivation;
 
         // Debugging
-        if (isNew) {
-            const delta = Date.now() - new Date(created).getTime();
-            console.log(`Park ${reference} created: ${created}, delta: ${delta}, isNew: true`);
-        }
+        // if (isNew) {
+        //     const delta = Date.now() - new Date(created).getTime();
+        //     console.log(`Park ${reference} created: ${created}, delta: ${delta}, isNew: true`);
+        // }
 
         // Determine marker class for animated divIcon
         const markerClasses = [];
