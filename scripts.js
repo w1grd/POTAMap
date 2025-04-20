@@ -2671,7 +2671,7 @@ async function fetchAndApplyUserActivations(callsign = "W1GRD") {
         }
 
         const profile = await response.json();
-        const recent = profile.recentActivity.activations || [];
+        const recent = profile.recent_activity.activations || [];
 
         if (recent.length === 0) {
             console.log("No recent activations returned.");
