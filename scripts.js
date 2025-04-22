@@ -1490,36 +1490,52 @@ function centerMapOnGeolocation() {
 
     navigator.geolocation.getCurrentPosition(
         (position) => {
-            const { latitude, longitude } = position.coords;
+            userLat = position.coords.latitude;
+            userLng = position.coords.longitude;
+            console.log(`Centering map on geolocation: ${userLat}, ${userLng}`);
 
             if (map) {
-                map.setView([latitude, longitude], 12, {
+                map.setView([userLat, userLng], 12, {
                     animate: true,
-                    duration: 1.5, // Smooth animation to the location
+                    duration: 1.5,
                 });
-                console.log(`Map centered on user location: [${latitude}, ${longitude}]`);
-            } else {
-                console.error("Map instance is not initialized.");
             }
         },
         (error) => {
-            console.error("Geolocation error:", error.message);
-            switch (error.code) {
-                case error.PERMISSION_DENIED:
-                    alert("Permission to access location was denied.");
-                    break;
-                case error.POSITION_UNAVAILABLE:
-                    alert("Location information is unavailable.");
-                    break;
-                case error.TIMEOUT:
-                    alert("Request to get user location timed out.");
-                    break;
-                default:
-                    alert("An unknown error occurred while retrieving your location.");
-                    break;
+            console.warn("Geolocation error:", error.message);
+
+            // Attempt fallback to saved location
+            const saved = localStorage.getItem("mapCenter");
+            if (saved) {
+                try {
+                    const [lat, lng] = JSON.parse(saved);
+                    console.log("Fallback to saved center:", lat, lng);
+                    map.setView([lat, lng], 10, {
+                        animate: true,
+                        duration: 1.5,
+                    });
+                } catch {
+                    console.warn("Could not parse saved center. Falling back to default.");
+                    fallbackToDefaultLocation();
+                }
+            } else {
+                fallbackToDefaultLocation();
             }
+
+            alert("Unable to determine your location. Showing fallback.");
         }
     );
+}
+
+function fallbackToDefaultLocation() {
+    if (!map) return;
+    userLat = 39.8283;
+    userLng = -98.5795;
+    map.setView([userLat, userLng], 5, {
+        animate: true,
+        duration: 1.5,
+    });
+    console.log("Map centered on default fallback location.");
 }
 
 /**
@@ -2855,30 +2871,41 @@ async function setupPOTAMap() {
             async (position) => {
                 userLat = position.coords.latitude;
                 userLng = position.coords.longitude;
-                console.log(`User Location: Latitude ${userLat}, Longitude ${userLng}`); // Debugging
+                console.log(`User location acquired: ${userLat}, ${userLng}`);
 
                 map = initializeMap(userLat, userLng);
-
-                // Create a layer group for activations
                 map.activationsLayer = L.layerGroup().addTo(map);
-                console.log("Created activationsLayer."); // Debugging
 
-                // Attach event listener for map view changes with debouncing
-                map.on('moveend', debounce(() => {
-                    console.log("Map moved or zoomed."); // Debugging
-                    updateActivationsInView();
-                }, 300));
-                console.log("Attached moveend event listener with debounce."); // Debugging
-
-                // Fetch active spots before applying toggle state
-                await fetchAndDisplaySpots(); // ✅ Ensure spots[] is populated first
-
-                applyActivationToggleState(); // ✅ Now apply correct filtered view
-                displayCallsign();            // ✅ Optionally show callsign
+                await fetchAndDisplaySpots();
+                applyActivationToggleState();
+                displayCallsign();
             },
-            (error) => {
-                console.error('Error getting location:', error.message);
-                alert('Unable to retrieve your location.');
+            async (error) => {
+                console.warn('Geolocation failed:', error.message);
+
+                // Try to use last saved location from localStorage
+                const saved = localStorage.getItem("mapCenter");
+                if (saved) {
+                    try {
+                        [userLat, userLng] = JSON.parse(saved);
+                        console.log(`Using last known map center from localStorage: ${userLat}, ${userLng}`);
+                    } catch (e) {
+                        console.warn("Failed to parse saved map center, falling back to default.");
+                        userLat = 39.8283; // Center of CONUS
+                        userLng = -98.5795;
+                    }
+                } else {
+                    console.log("No saved map center, using default center of U.S.");
+                    userLat = 39.8283;
+                    userLng = -98.5795;
+                }
+
+                map = initializeMap(userLat, userLng);
+                map.activationsLayer = L.layerGroup().addTo(map);
+
+                await fetchAndDisplaySpots();
+                applyActivationToggleState();
+                displayCallsign();
             }
         );
 
