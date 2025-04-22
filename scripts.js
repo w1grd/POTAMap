@@ -2513,7 +2513,12 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     parks.forEach((park) => {
         const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
         const isUserActivated = userActivatedReferences.includes(reference);
-        const createdTime = created ? new Date(created).getTime() : null;
+        let createdTime = null;
+        if (created) {
+            createdTime = typeof created === 'number'
+                ? created
+                : new Date(created).getTime();
+        }
         const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
 //        const isNew = (Date.now() - new Date(created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
         const currentActivation = spots?.find(spot => spot.reference === reference);
@@ -2650,7 +2655,9 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
                     attempts: park.attempts,
                     activations: park.activations,
                     qsos: park.qsos,
-                    created: isNew ? park.timestamp || now : undefined,
+                    created: isNew
+                        ? (park.timestamp ? new Date(park.timestamp).getTime() : now)
+                        : undefined,
                     change: park.change
                 };
             });
