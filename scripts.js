@@ -1976,6 +1976,12 @@ function removeCallsignDisplay() {
 function getCurrentMapBounds() {
     return map.getBounds();
 }
+function getParksInBounds(parks) {
+    const bounds = getCurrentMapBounds();
+    return parks.filter(p =>
+        p.latitude && p.longitude && bounds.contains([p.latitude, p.longitude])
+    );
+}
 
 /**
  * Filters activated parks that are within the current map bounds.
@@ -2969,32 +2975,34 @@ function applyActivationToggleState() {
         toggleButton.innerText = buttonTexts[activationToggleState];
     }
 
+    let parksInBounds = getParksInBounds(parks);
+    let parksToDisplay = [];
+
     switch (activationToggleState) {
-        case 0:
-            displayParksOnMap(map, parks, userActivatedReferences, map.activationsLayer);
+        case 0: // Show all parks in bounds
+            parksToDisplay = parksInBounds;
             break;
-        case 1:
-            const userParks = parks.filter(p => userActivatedReferences.includes(p.reference));
-            displayParksOnMap(map, userParks, userActivatedReferences, map.activationsLayer);
+
+        case 1: // Show just user's activations in bounds
+            parksToDisplay = parksInBounds.filter(p => userActivatedReferences.includes(p.reference));
             break;
-        case 2:
-            const nonUserParks = parks.filter(p => !userActivatedReferences.includes(p.reference));
-            displayParksOnMap(map, nonUserParks, [], map.activationsLayer);
+
+        case 2: // Show parks not activated by user
+            parksToDisplay = parksInBounds.filter(p => !userActivatedReferences.includes(p.reference));
             break;
-        case 3:
-            if (!Array.isArray(spots) || spots.length === 0) {
-                console.warn("No spots available — cannot display 'On Air' parks.");
-                displayParksOnMap(map, [], userActivatedReferences, map.activationsLayer);
-                return;
-            }
+
+        case 3: // Show only currently active parks (on air)
             const onAirRefs = spots.map(s => s.reference);
-            const onAirParks = parks.filter(p => onAirRefs.includes(p.reference));
-            displayParksOnMap(map, onAirParks, userActivatedReferences, map.activationsLayer);
+            parksToDisplay = parksInBounds.filter(p => onAirRefs.includes(p.reference));
             break;
+
         default:
             console.warn(`Unknown activationToggleState: ${activationToggleState}`);
-            displayParksOnMap(map, parks, userActivatedReferences, map.activationsLayer);
+            parksToDisplay = parksInBounds;
+            break;
     }
+
+    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
 }
 
 /**
@@ -3024,12 +3032,7 @@ async function fetchAndDisplaySpots() {
 
         const activatedReferences = activations.map(act => act.reference);
 
-        //Only work on references that are within the viewport
-        const bounds = map.getBounds();
-        const parksInBounds = parks.filter(p => {
-            return p.latitude && p.longitude && bounds.contains([p.latitude, p.longitude]);
-        });
-
+        const parksInBounds = getParksInBounds(parks);
         displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
 
         console.log(`Updated display of ${spots.length} active spots on the map.`);
@@ -3198,7 +3201,8 @@ function refreshMapActivations() {
         console.log("Activated References in Refresh:", activatedReferences); // Debugging
     }
     // Display parks with the current activations
-    displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
+    const parksInBounds = getParksInBounds(parks);
+    displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
     console.log("Displayed activated parks (if any) based on refresh."); // Debugging
 }
 
