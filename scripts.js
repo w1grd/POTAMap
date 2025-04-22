@@ -3023,7 +3023,14 @@ async function fetchAndDisplaySpots() {
         }
 
         const activatedReferences = activations.map(act => act.reference);
-        displayParksOnMap(map, parks, activatedReferences, map.activationsLayer);
+
+        //Only work on references that are within the viewport
+        const bounds = map.getBounds();
+        const parksInBounds = parks.filter(p => {
+            return p.latitude && p.longitude && bounds.contains([p.latitude, p.longitude]);
+        });
+
+        displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
 
         console.log(`Updated display of ${spots.length} active spots on the map.`);
     } catch (error) {
