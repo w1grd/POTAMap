@@ -40,6 +40,7 @@ def fetch_remote_data():
 
     return combined
 
+
 def compare_parks(old_parks, new_parks):
     changes = []
     timestamp = datetime.utcnow().isoformat()
