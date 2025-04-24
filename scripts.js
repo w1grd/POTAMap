@@ -13,7 +13,7 @@ let previousMapState = {
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
 const appVersion = "20250412a"; // manually update as needed
-const cacheDuration = 24 * 60 * 60 * 1000; // 1 day in milliseconds
+const cacheDuration = (24 * 60 * 60 * 1000) * 8; // 8 days in milliseconds
 
 
 /**
