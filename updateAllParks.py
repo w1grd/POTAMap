@@ -15,6 +15,7 @@ API_ENDPOINTS = [
     'https://api.pota.app/program/parks/US',
     'https://api.pota.app/program/parks/CA',
     'https://api.pota.app/program/parks/GB',
+    'https://api.pota.app/program/parks/NO'
 ]
 
 def load_local_data(filename):
