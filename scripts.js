@@ -2505,7 +2505,8 @@ function initializeMap(lat, lng) {
         "moveend",
         debounce(() => {
             console.log("Map moved or zoomed. Updating spots...");
-            fetchAndDisplaySpotsInCurrentBounds(mapInstance);
+            fetchAndDisplaySpotsInCurrentBounds(mapInstance)
+                .then(() => applyActivationToggleState());
         }, 300)
     );
 
@@ -3301,6 +3302,7 @@ addEventListener('DOMContentLoaded', () => {
 window.addEventListener('resize', debounce(() => {
     if (map) {
         map.invalidateSize();
-        console.log("Map size invalidated on window resize."); // Debugging
+        console.log("Map size invalidated on window resize.");
+        applyActivationToggleState();
     }
 }, 300));
