@@ -2849,8 +2849,9 @@ async function setupPOTAMap() {
 
     try {
         // Fetch and cache parks data
-        const parksData = await fetchAndCacheParks(csvUrl, cacheDuration);
-        parks = parksData;
+        await fetchAndCacheParks(csvUrl, cacheDuration);
+        // Now reload from IndexedDB, which will include merged changes
+        parks = await getAllParksFromIndexedDB();
         console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
         console.log("Parks Loaded from IndexedDB:", parks); // Debugging
 
