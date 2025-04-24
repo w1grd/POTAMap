@@ -32,6 +32,12 @@ def fetch_remote_data():
         response.raise_for_status()
         for park in response.json():
             combined[park['reference']] = park
+    # Debug: Print how many NO- parks we got
+    no_parks = [p for p in combined.values() if p['reference'].startswith('NO-')]
+    print(f"Fetched {len(no_parks)} NO- parks")
+    if no_parks:
+        print(no_parks[:3])  # show first 3 for a sanity check
+
     return combined
 
 def compare_parks(old_parks, new_parks):
