@@ -1456,30 +1456,6 @@ function mapSliderValue(value) {
 }
 
 /**
- * Handles changes to the activation slider.
- * @param {Event} event - The input event from the slider.
- */
-function handleSliderChange(event) {
-    const slider = event.target;
-    const linearValue = parseInt(slider.value, 10);
-    const nonLinearValue = mapSliderValue(linearValue);
-
-    // Update the slider's data-value attribute for display
-    slider.setAttribute('data-value', nonLinearValue);
-
-    console.log(`Slider Linear Value: ${linearValue}, Mapped Non-Linear Value: ${nonLinearValue}`);
-
-    // Apply filtering logic
-    if (nonLinearValue === 'All') {
-        displayParksOnMap(map, parks, activations.map((act) => act.reference), map.activationsLayer);
-    } else {
-        const filteredParks = parks.filter((park) => park.activations <= nonLinearValue);
-        const activatedReferences = activations.map((act) => act.reference);
-        displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
-    }
-}
-
-/**
  * Centers the map on the user's current geolocation.
  */
 function centerMapOnGeolocation() {
@@ -1935,7 +1911,8 @@ function filterParksByActivations(maxActivations) {
     console.log("Activated References in Filtered View:", activatedReferences); // Debugging
 
     // Display activated parks within current view based on slider
-    displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
+    //displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
+    applyActivationToggleState();
     console.log("Displayed activated parks within filtered view."); // Debugging
 }
 
@@ -2060,7 +2037,8 @@ async function updateActivationsInView() {
         // case 0 and default: Show all parks in bounds
     }
 
-    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
+//    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
+        applyActivationToggleState();
 }
 
 /**
@@ -2090,7 +2068,8 @@ function updateMapWithFilteredParks(filteredParks) {
     console.log("Activated References in Filtered Search:", activatedReferences); // Debugging
 
     // Display the filtered parks on the map
-    displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
+    //displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
+    applyActivationToggleState();
     console.log("Displayed filtered parks on the map."); // Debugging
 }
 function clearSearchInput() {
@@ -2111,8 +2090,8 @@ function clearSearchInput() {
 
         // Display the previously shown parks
         const activatedReferences = activations.map((act) => act.reference);
-        displayParksOnMap(map, previousMapState.displayedParks, activatedReferences, map.activationsLayer);
-
+        //displayParksOnMap(map, previousMapState.displayedParks, activatedReferences, map.activationsLayer);
+        applyActivationToggleState();
         console.log("Map view restored to prior state."); // Debugging
 
         // Clear the saved state
@@ -3035,8 +3014,8 @@ async function fetchAndDisplaySpots() {
         const activatedReferences = activations.map(act => act.reference);
 
         const parksInBounds = getParksInBounds(parks);
-        displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
-
+//        displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
+        applyActivationToggleState();
         console.log(`Updated display of ${spots.length} active spots on the map.`);
     } catch (error) {
         console.error('Error fetching or displaying POTA spots:', error);
@@ -3086,7 +3065,8 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
         }
 
         const activatedReferences = activations.map(act => act.reference);
-        displayParksOnMap(mapInstance, parks, activatedReferences, mapInstance.activationsLayer);
+        //displayParksOnMap(mapInstance, parks, activatedReferences, mapInstance.activationsLayer);
+        applyActivationToggleState();
 
     } catch (error) {
         console.error("Error fetching or displaying POTA spots:", error);
@@ -3204,7 +3184,8 @@ function refreshMapActivations() {
     }
     // Display parks with the current activations
     const parksInBounds = getParksInBounds(parks);
-    displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
+//    displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
+    applyActivationToggleState();
     console.log("Displayed activated parks (if any) based on refresh."); // Debugging
 }
 
