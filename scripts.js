@@ -1763,7 +1763,10 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
 
     // Start building popup content
     const activationCount = parkActivations.length;
-    let popupContent = `${potaAppLink}<br>Activations: ${activationCount}`;
+    //See if nfers exist
+    const hasNfer = park.nfer && Array.isArray(park.nfer) && park.nfer.length > 0;
+    let popupContent = `${potaAppLink}<br>Activations: ${activationCount}${hasNfer ? ' *' : ''}`;
+
     if (directionsLink) popupContent += `<br>${directionsLink}`;
 
     if (parkActivations.length > 0) {
@@ -2835,6 +2838,9 @@ async function setupPOTAMap() {
         console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
         console.log("Parks Loaded from IndexedDB:", parks); // Debugging
 
+        //Pull nfer data from backend
+        await loadAndApplyNferData(); // ✅ Inject NFER links into park objects
+
         // Retrieve activations from IndexedDB
         activations = await getActivationsFromIndexedDB();
         console.log("Initial Activations:", activations); // Debugging
@@ -2902,6 +2908,62 @@ async function setupPOTAMap() {
         alert('Failed to set up the POTA map. Please try again later.');
     }
 }
+
+async function loadAndApplyNferData() {
+    try {
+        const response = await fetch('/potamap/data/nfer_from_top_activators.json');
+        if (!response.ok) throw new Error(`Failed to fetch NFER data: ${response.statusText}`);
+
+        const raw = await response.json();
+
+        // Map from park reference -> Set of co-activated parks
+        const nferMap = {};
+
+        for (const entry of raw) {
+            const refs = entry.references;
+            for (const park of refs) {
+                if (!nferMap[park]) nferMap[park] = new Set();
+                for (const other of refs) {
+                    if (other !== park) {
+                        nferMap[park].add(other);
+                    }
+                }
+            }
+        }
+
+        const db = await getDatabase();
+        const tx = db.transaction('parks', 'readwrite');
+        const store = tx.objectStore('parks');
+
+        const updatePromises = [];
+
+        for (const [reference, nferSet] of Object.entries(nferMap)) {
+            updatePromises.push(
+                new Promise((resolve, reject) => {
+                    const getReq = store.get(reference);
+                    getReq.onsuccess = () => {
+                        const park = getReq.result;
+                        if (park) {
+                            park.nfer = Array.from(nferSet).sort();
+                            store.put(park);
+                        }
+                        resolve();
+                    };
+                    getReq.onerror = () => {
+                        console.warn(`Failed to read park ${reference} from IndexedDB`);
+                        resolve(); // Don't block on errors
+                    };
+                })
+            );
+        }
+
+        await Promise.all(updatePromises);
+        console.log("NFER relationships applied to parks in IndexedDB.");
+    } catch (err) {
+        console.error("Error loading or applying NFER data:", err);
+    }
+}
+
 function getCurrentUserCallsign() {
     const validCallsigns = activations
         .map(act => act.activeCallsign)
