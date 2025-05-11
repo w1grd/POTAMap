@@ -1764,8 +1764,15 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
     // Start building popup content
     const activationCount = parkActivations.length;
     //See if nfers exist
-    const hasNfer = park.nfer && Array.isArray(park.nfer) && park.nfer.length > 0;
-    let popupContent = `${potaAppLink}<br>Activations: ${activationCount}${hasNfer ? ' *' : ''}`;
+    let popupContent = `${potaAppLink}<br>Activations: ${activationCount}`;
+
+// If park has NFERs, add them as clickable links
+    if (park.nfer && Array.isArray(park.nfer) && park.nfer.length > 0) {
+        const links = park.nfer.map(ref => {
+            return `<a href="#" onclick="zoomToParkByReference('${ref}'); return false;">${ref}</a>`;
+        }).join(', ');
+        popupContent += `<br>Possible NFERs: ${links}`;
+    }
 
     if (directionsLink) popupContent += `<br>${directionsLink}`;
 
@@ -1807,6 +1814,17 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
 
     return popupContent.trim();
 }
+
+async function zoomToParkByReference(reference) {
+    const allParks = await getAllParksFromIndexedDB();
+    const targetPark = allParks.find(p => p.reference === reference);
+    if (targetPark) {
+        zoomToPark(targetPark);
+    } else {
+        alert(`Park ${reference} not found.`);
+    }
+}
+
 
 /**
  * Zooms the map to fit all searched parks within the view and increases the zoom level by one.
