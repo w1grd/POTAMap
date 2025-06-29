@@ -2598,10 +2598,19 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
             : `${reference}: ${name} (${parkActivationCount} activations)`;
 
-        marker
-            .addTo(layerGroup)
-            .bindPopup("<b>Loading park info...</b>")
-            .bindTooltip(tooltipText, {
+            marker
+                .addTo(layerGroup)
+                .bindPopup("<b>Loading park info...</b>", {
+                        // keep the popup fully in view
+                        keepInView: true,
+                        autoPan: true,
+                        // add a little breathing room around the popup
+                            autoPanPadding: [20, 20],
+                        // cap its width on small screens
+                            maxWidth: 280
+                })
+
+    .bindTooltip(tooltipText, {
                 direction: "top",
                 opacity: 0.9,
                 sticky: false,
