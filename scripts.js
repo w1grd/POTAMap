@@ -15,6 +15,12 @@ let spots = []; //holds spot info
 const appVersion = "20250412a"; // manually update as needed
 const cacheDuration = (24 * 60 * 60 * 1000) * 8; // 8 days in milliseconds
 
+// See if we are in desktop mode
+const urlParams = new URLSearchParams(window.location.search);
+const isDesktopMode = urlParams.get('desktop') === '1';
+if (isDesktopMode) {
+    document.body.classList.add('desktop-mode');
+}
 
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
@@ -2501,14 +2507,16 @@ function initializeMap(lat, lng) {
     });
 
     // Attach dynamic spot fetching to map movement
-    mapInstance.on(
-        "moveend",
-        debounce(() => {
-            console.log("Map moved or zoomed. Updating spots...");
-            fetchAndDisplaySpotsInCurrentBounds(mapInstance)
-                .then(() => applyActivationToggleState());
-        }, 300)
-    );
+    if (!isDesktopMode) {
+           mapInstance.on(
+                "moveend",
+               debounce(() => {
+                     console.log("Map moved or zoomed. Updating spots...");
+                     fetchAndDisplaySpotsInCurrentBounds(mapInstance)
+                       .then(() => applyActivationToggleState());
+                   }, 300)
+           );
+    }
 
     return mapInstance;
 }
@@ -3158,8 +3166,11 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
  * Initializes the recurring fetch for POTA spots.
  */
 function initializeSpotFetching() {
-    fetchAndDisplaySpots(); // Initial fetch
-    setInterval(fetchAndDisplaySpots, 5 * 60 * 1000); // Fetch every 5 minutes
+    fetchAndDisplaySpots(); // Initial
+    // in initializeSpotFetching()
+    if (!isDesktopMode) {
+        setInterval(fetchAndDisplaySpots, 5 * 60 * 1000);
+    }
 }
 
 // Ensure spots fetching starts when the DOM is fully loaded

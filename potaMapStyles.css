@@ -104,3 +104,16 @@
 .active-pulse-marker {
     -webkit-animation: pulse-ring-live 1.8s ease-out infinite;
 }
+/* Disable pulsing entirely in desktop-mode */
+.desktop-mode .pulse-marker,
+.desktop-mode .active-pulse-marker {
+    animation: none !important;
+    -webkit-animation: none !important;
+}
+
+/* Optionally disable tooltips or any other hover effects */
+.desktop-mode .custom-tooltip,
+.desktop-mode .leaflet-tooltip {
+    display: none !important;
+}
+
