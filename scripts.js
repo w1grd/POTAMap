@@ -18,6 +18,7 @@ const cacheDuration = (24 * 60 * 60 * 1000) * 8; // 8 days in milliseconds
 // See if we are in desktop mode
 const urlParams = new URLSearchParams(window.location.search);
 const isDesktopMode = urlParams.get('desktop') === '1';
+console.log('Reading desktop param: ' + isDesktopMode)
 if (isDesktopMode) {
     document.body.classList.add('desktop-mode');
 }
