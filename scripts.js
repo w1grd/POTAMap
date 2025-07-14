@@ -67,6 +67,9 @@ function initializeMenu() {
                 <li>
                 <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Review</button>
             </li>
+                <li>
+                <button id="mapHelpButton" onclick="window.open('https://pota.review/howto/how-to-use-the-potamap/', '_blank')">Get help with the map</button>
+            </li>
             <!-- Removing slider functionality for now, it doesn't seem useful (also listener))
 <div id="activationSliderContainer">
     <label for="activationSlider">Maximum Activations to Display:</label>
