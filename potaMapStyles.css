@@ -56,7 +56,7 @@
 }
 
 .active-pulse-marker.mode-ssb {
-    --pulse-shadow-color: 173, 216, 230; /* light blue */
+    --pulse-shadow-color: 255, 255, 0; /* vivid yellow */
 }
 
 .active-pulse-marker.mode-data {
