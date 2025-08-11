@@ -2568,7 +2568,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         // Determine marker class for animated divIcon
         const markerClasses = [];
         if (isNew) markerClasses.push('pulse-marker');
-        if (isActive) markerClasses.push('active-pulse-marker');
+        if (isActive) {
+            markerClasses.push('active-pulse-marker');
+            const mode = currentActivation.mode ? currentActivation.mode.toUpperCase() : '';
+            if (mode === 'CW') markerClasses.push('mode-cw');
+            else if (mode === 'SSB') markerClasses.push('mode-ssb');
+            else if (mode === 'DATA') markerClasses.push('mode-data');
+        }
         const markerClassName = markerClasses.join(' ');
 
         const marker = markerClasses.length > 0

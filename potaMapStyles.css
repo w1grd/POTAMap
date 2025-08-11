@@ -41,25 +41,37 @@
 .active-pulse-marker {
     width: 20px;
     height: 20px;
-    background-color: #00bbff; /* orange/red for 'live' */
     border-radius: 50%;
     border: 2px solid black;
-    box-shadow: 0 0 8px rgba(0, 89, 255, 0.7);
     opacity: 1;
     z-index: 1001;
     transform: translate(-10px, -10px);
+    background-color: rgb(var(--pulse-shadow-color, 0, 187, 255));
+    box-shadow: 0 0 8px rgba(var(--pulse-shadow-color, 0, 187, 255), 0.7);
     animation: pulse-ring-live 1.8s ease-out infinite;
+}
+
+.active-pulse-marker.mode-cw {
+    --pulse-shadow-color: 144, 238, 144; /* light green */
+}
+
+.active-pulse-marker.mode-ssb {
+    --pulse-shadow-color: 173, 216, 230; /* light blue */
+}
+
+.active-pulse-marker.mode-data {
+    --pulse-shadow-color: 255, 102, 102; /* light red */
 }
 
 @keyframes pulse-ring-live {
     0% {
-        box-shadow: 0 0 0 0 rgba(255, 69, 0, 0.5);
+        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.5);
     }
     70% {
-        box-shadow: 0 0 0 20px rgba(255, 69, 0, 0);
+        box-shadow: 0 0 0 20px rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
     }
     100% {
-        box-shadow: 0 0 0 0 rgba(255, 69, 0, 0);
+        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
     }
 }
 
@@ -87,13 +99,13 @@
 
 @-webkit-keyframes pulse-ring-live {
     0% {
-        box-shadow: 0 0 0 0 rgba(255, 69, 0, 0.5);
+        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.5);
     }
     70% {
-        box-shadow: 0 0 0 20px rgba(255, 69, 0, 0);
+        box-shadow: 0 0 0 20px rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
     }
     100% {
-        box-shadow: 0 0 0 0 rgba(255, 69, 0, 0);
+        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
     }
 }
 
