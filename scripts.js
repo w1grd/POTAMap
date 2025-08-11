@@ -2573,7 +2573,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             const mode = currentActivation.mode ? currentActivation.mode.toUpperCase() : '';
             if (mode === 'CW') markerClasses.push('mode-cw');
             else if (mode === 'SSB') markerClasses.push('mode-ssb');
-            else if (mode === 'DATA') markerClasses.push('mode-data');
+            else if (mode === 'FT8') markerClasses.push('mode-data');
+            else if (mode === 'FT4') markerClasses.push('mode-data');
         }
         const markerClassName = markerClasses.join(' ');
 
