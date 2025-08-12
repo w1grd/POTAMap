@@ -51,13 +51,19 @@ if (!('greenMax' in potaThresholds)) {
 function savePotaFilters() { localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); }
 function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
 
-function shouldDisplayParkFlags(flags) {
-    // flags: { isUserActivated, isActive, isNew }
+function shouldDisplayParkFlags(flags){
+    if (potaFilters.allParks) return true;
     const anySpecific = potaFilters.myActivations || potaFilters.currentlyActivating || potaFilters.newParks;
-    if (potaFilters.allParks || !anySpecific) return true;
+    if (!anySpecific) return false;
     return (potaFilters.myActivations && flags.isUserActivated)
         || (potaFilters.currentlyActivating && flags.isActive)
         || (potaFilters.newParks && flags.isNew);
+}
+const anySpecific = potaFilters.myActivations || potaFilters.currentlyActivating || potaFilters.newParks;
+if (potaFilters.allParks || !anySpecific) return true;
+return (potaFilters.myActivations && flags.isUserActivated)
+    || (potaFilters.currentlyActivating && flags.isActive)
+    || (potaFilters.newParks && flags.isNew);
 }
 
 function getMarkerColorConfigured(activations, isUserActivated, created) {
@@ -84,11 +90,30 @@ function buildFiltersPanel() {
     if (oldToggle) oldToggle.style.display = 'none';
 
     const li = document.createElement('li');
+    // Remove any previously inserted filters panel or legacy copies
+    const oldPanels = menu.querySelectorAll('.filters-panel');
+    oldPanels.forEach(p => p.parentElement && p.parentElement.remove());
     li.id = 'filtersPanelContainer';
     li.innerHTML = `
     
+    
     <div class="filters-panel">
         <div class="filters-title">Filters</div>
+        <div class="filters-grid">
+            <button class="filter-chip" id="chipMyActs" type="button" aria-pressed="false">My activations</button>
+            <button class="filter-chip" id="chipOnAir" type="button" aria-pressed="false">Currently activating</button>
+            <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New parks</button>
+            <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All spots</button>
+        </div>
+
+        <div class="filters-subtitle">Spot color threshold</div>
+        <div class="threshold-row">
+            <label for="greenMaxInput" class="threshold-label">Green ≤</label>
+            <input type="number" id="greenMaxInput" min="1" max="999" step="1" class="threshold-input">
+            <span class="hint">activations (red if &gt; this)</span>
+        </div>
+    </div>
+
 
         <button class="filter-chip" id="chipMyActs" type="button" aria-pressed="false">My activations</button>
         <button class="filter-chip" id="chipOnAir" type="button" aria-pressed="false">Currently activating</button>
@@ -294,6 +319,7 @@ function initializeMenu() {
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
     buildFiltersPanel();
+    initializeFilterChips && initializeFilterChips();
     console.log("Hamburger menu initialized."); // Debugging
 
     // Add enhanced hamburger menu styles for mobile
@@ -3557,3 +3583,70 @@ window.addEventListener('resize', debounce(() => {
         applyActivationToggleState();
     }
 }, 300));
+
+
+function initializeFilterChips(){
+    const pairs = [
+        ['chipMyActs','myActivations'],
+        ['chipOnAir','currentlyActivating'],
+        ['chipNewParks','newParks'],
+        ['chipAllParks','allParks'],
+    ];
+
+    function setChip(btn, on){ btn.classList.toggle('active', !!on); btn.setAttribute('aria-pressed', !!on); }
+
+    function updateChipStates(){
+        const allOn = !!potaFilters.allParks;
+        const chipAll = document.getElementById('chipAllParks');
+        if (chipAll) setChip(chipAll, allOn);
+
+        // If 'All spots' is on, visually reflect ON for the others too.
+        [['chipMyActs','myActivations'],['chipOnAir','currentlyActivating'],['chipNewParks','newParks']].forEach(([id,key])=>{
+            const el = document.getElementById(id);
+            if (!el) return;
+            setChip(el, allOn || !!potaFilters[key]);
+        });
+    }
+
+    // Initialize states
+    updateChipStates();
+
+    // Wire individual chips
+    const chipMy = document.getElementById('chipMyActs');
+    const chipOnAir = document.getElementById('chipOnAir');
+    const chipNew = document.getElementById('chipNewParks');
+    const chipAll = document.getElementById('chipAllParks');
+
+    if (chipMy) chipMy.addEventListener('click', ()=>{
+        potaFilters.myActivations = !potaFilters.myActivations;
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+    if (chipOnAir) chipOnAir.addEventListener('click', ()=>{
+        potaFilters.currentlyActivating = !potaFilters.currentlyActivating;
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+    if (chipNew) chipNew.addEventListener('click', ()=>{
+        potaFilters.newParks = !potaFilters.newParks;
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+    if (chipAll) chipAll.addEventListener('click', ()=>{
+        // Toggling 'All spots' ON should also turn on the other filters
+        const willBeOn = !potaFilters.allParks;
+        potaFilters.allParks = willBeOn;
+        if (willBeOn){
+            potaFilters.myActivations = true;
+            potaFilters.currentlyActivating = true;
+            potaFilters.newParks = true;
+        }
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+}
+
