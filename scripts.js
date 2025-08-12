@@ -151,11 +151,11 @@ function buildFiltersPanel() {
 
         if (enabled) {
             // Show "Green ≤" and reveal input (CSS handles visibility when .active)
-            thresholdLabel.textContent = 'Green ≤';
+            thresholdLabel.textContent = 'Max A:';
             greenInline.value = potaThresholds.greenMax;
         } else {
             // Hide input (via CSS) and show "Threshold"
-            thresholdLabel.textContent = 'Threshold';
+            thresholdLabel.textContent = 'Max A';
         }
     };
 
