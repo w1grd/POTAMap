@@ -125,15 +125,13 @@ function buildFiltersPanel() {
     </div>
   `;
 
-    // Insert near top of menu (just under the first item if present)
+    // Insert near top of menu
     menu.insertBefore(li, menu.firstChild?.nextSibling || null);
 
     // ----- Threshold chip behavior -----
-    // Ensure potaThresholds exists
     if (typeof window.potaThresholds !== 'object' || window.potaThresholds === null) {
         window.potaThresholds = {};
     }
-    // Defaults
     if (typeof potaThresholds.greenMax !== 'number') potaThresholds.greenMax = 5;
     if (typeof potaThresholds.thresholdEnabled !== 'boolean') potaThresholds.thresholdEnabled = true;
 
@@ -146,8 +144,10 @@ function buildFiltersPanel() {
         if (!thresholdChip) return;
         if (getEnabled()) {
             thresholdChip.textContent = `Green ≤ ${potaThresholds.greenMax ?? 5}`;
+            thresholdChip.classList.add('active');
         } else {
             thresholdChip.textContent = 'Threshold';
+            thresholdChip.classList.remove('active');
         }
     };
 
@@ -156,12 +156,11 @@ function buildFiltersPanel() {
         greenMini.classList.toggle('show', !!show);
         if (show) {
             greenMini.value = potaThresholds.greenMax;
-            // slight delay to ensure visibility before focusing
             setTimeout(() => greenMini.focus(), 0);
         }
     };
 
-    // Initialize UI state
+    // Initialize
     if (greenMini) greenMini.value = potaThresholds.greenMax;
     if (thresholdChip) {
         thresholdChip.setAttribute('aria-pressed', String(getEnabled()));
@@ -169,7 +168,7 @@ function buildFiltersPanel() {
         showMini(getEnabled());
     }
 
-    // Toggle chip on/off
+    // Toggle chip
     thresholdChip?.addEventListener('click', () => {
         potaThresholds.thresholdEnabled = !getEnabled();
         if (typeof savePotaThresholds === 'function') savePotaThresholds();
@@ -179,7 +178,7 @@ function buildFiltersPanel() {
         if (typeof refreshMarkers === 'function') refreshMarkers();
     });
 
-    // Apply numeric value
+    // Value change
     const applyGreen = (val) => {
         const v = Math.max(1, Math.min(999, parseInt(val, 10)));
         if (!isNaN(v)) {
@@ -195,6 +194,7 @@ function buildFiltersPanel() {
         if (e.key === 'Enter') e.currentTarget.blur();
     });
 }
+
 
 
 // Lightweight refresh: clear and redraw current view using existing flow
