@@ -58,15 +58,7 @@ function shouldDisplayParkFlags(flags){
     return (potaFilters.myActivations && flags.isUserActivated)
         || (potaFilters.currentlyActivating && flags.isActive)
         || (potaFilters.newParks && flags.isNew);
-}
-const anySpecific = potaFilters.myActivations || potaFilters.currentlyActivating || potaFilters.newParks;
-if (potaFilters.allParks || !anySpecific) return true;
-return (potaFilters.myActivations && flags.isUserActivated)
-    || (potaFilters.currentlyActivating && flags.isActive)
-    || (potaFilters.newParks && flags.isNew);
-}
-
-function getMarkerColorConfigured(activations, isUserActivated, created) {
+}function getMarkerColorConfigured(activations, isUserActivated, created) {
     try {
         const now = new Date();
         const createdDate = new Date(created);
