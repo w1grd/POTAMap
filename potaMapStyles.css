@@ -1,5 +1,7 @@
 /* potaMapStyles.css */
 
+/* ================= Pulsing markers ================= */
+
 .pulse-marker {
     width: 20px;
     height: 20px;
@@ -11,19 +13,59 @@
     z-index: 1000;
     transform: translate(-10px, -10px);
     animation: pulse-ring 2.5s ease-out infinite;
+    -webkit-animation: pulse-ring 2.5s ease-out infinite;
 }
 
 @keyframes pulse-ring {
-    0% {
-        box-shadow: 0 0 0 0 rgba(128, 0, 128, 0.5);
-    }
-    70% {
-        box-shadow: 0 0 0 15px rgba(128, 0, 128, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(128, 0, 128, 0);
-    }
+    0%   { box-shadow: 0 0 0 0 rgba(128, 0, 128, 0.5); }
+    70%  { box-shadow: 0 0 0 15px rgba(128, 0, 128, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(128, 0, 128, 0); }
 }
+@-webkit-keyframes pulse-ring {
+    0%   { box-shadow: 0 0 0 0 rgba(128, 0, 128, 0.5); }
+    70%  { box-shadow: 0 0 0 15px rgba(128, 0, 128, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(128, 0, 128, 0); }
+}
+
+.active-pulse-marker {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid black;
+    opacity: 1;
+    z-index: 1001;
+    transform: translate(-10px, -10px);
+    background-color: rgb(var(--pulse-shadow-color, 0, 187, 255));
+    box-shadow: 0 0 8px rgba(var(--pulse-shadow-color, 0, 187, 255), 0.7);
+    animation: pulse-ring-live 1.8s ease-out infinite;
+    -webkit-animation: pulse-ring-live 1.8s ease-out infinite;
+}
+
+/* Darker shadow tones for better visibility */
+.active-pulse-marker.mode-cw   { --pulse-shadow-color: 0, 100, 0;    } /* dark green */
+.active-pulse-marker.mode-ssb  { --pulse-shadow-color: 204, 153, 0;  } /* dark goldenrod */
+.active-pulse-marker.mode-data { --pulse-shadow-color: 255, 102, 102;} /* light red */
+
+@keyframes pulse-ring-live {
+    0%   { box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.9); }
+    70%  { box-shadow: 0 0 0 20px rgba(var(--pulse-shadow-color, 0, 187, 255), 0); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0); }
+}
+@-webkit-keyframes pulse-ring-live {
+    0%   { box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.9); }
+    70%  { box-shadow: 0 0 0 20px rgba(var(--pulse-shadow-color, 0, 187, 255), 0); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0); }
+}
+
+/* Disable pulsing entirely in desktop-mode */
+.desktop-mode .pulse-marker,
+.desktop-mode .active-pulse-marker {
+    animation: none !important;
+    -webkit-animation: none !important;
+}
+
+/* ================= General layout ================= */
+
 #menu {
     display: flex;
     flex-direction: column;
@@ -38,47 +80,7 @@
     max-width: 100%;
 }
 
-.active-pulse-marker {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    border: 2px solid black;
-    opacity: 1;
-    z-index: 1001;
-    transform: translate(-10px, -10px);
-    background-color: rgb(var(--pulse-shadow-color, 0, 187, 255));
-    box-shadow: 0 0 8px rgba(var(--pulse-shadow-color, 0, 187, 255), 0.7);
-    animation: pulse-ring-live 1.8s ease-out infinite;
-}
-
-.active-pulse-marker.mode-cw {
-    /* darker green */
-    --pulse-shadow-color: 0, 100, 0; /* dark green */
-}
-
-.active-pulse-marker.mode-ssb {
-    /* darker yellow/orange for better visibility */
-    --pulse-shadow-color: 204, 153, 0; /* dark goldenrod */
-}
-
-.active-pulse-marker.mode-data {
-    --pulse-shadow-color: 255, 102, 102; /* light red */
-}
-
-@keyframes pulse-ring-live {
-    0% {
-        /* start with a darker, stronger glow */
-        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.9);
-    }
-    70% {
-        /* fade outward */
-        box-shadow: 0 0 0 20px rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
-    }
-}
-
+/* Tooltips */
 .custom-tooltip {
     font-size: 0.85em;
     font-weight: 500;
@@ -87,248 +89,93 @@
     padding: 4px 6px;
     border-radius: 4px;
 }
-/* WebKit prefixed versions for Safari */
-
-@-webkit-keyframes pulse-ring {
-    0% {
-        box-shadow: 0 0 0 0 rgba(128, 0, 128, 0.5);
-    }
-    70% {
-        box-shadow: 0 0 0 15px rgba(128, 0, 128, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(128, 0, 128, 0);
-    }
-}
-
-@-webkit-keyframes pulse-ring-live {
-    0% {
-        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.9);
-    }
-    70% {
-        box-shadow: 0 0 0 20px rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
-    }
-}
-
-.pulse-marker {
-    -webkit-animation: pulse-ring 2.5s ease-out infinite;
-}
-
-.active-pulse-marker {
-    -webkit-animation: pulse-ring-live 1.8s ease-out infinite;
-}
-/* Disable pulsing entirely in desktop-mode */
-.desktop-mode .pulse-marker,
-.desktop-mode .active-pulse-marker {
-    animation: none !important;
-    -webkit-animation: none !important;
-}
-
-/* Optionally disable tooltips or any other hover effects */
 .desktop-mode .custom-tooltip,
 .desktop-mode .leaflet-tooltip {
     display: none !important;
 }
 
+/* ================= Filters panel & chips ================= */
 
-
-/* ==== Filters chip-style buttons (update v2) ==== */
-.filters-panel{padding:10px;border:1px solid rgba(0,0,0,0.12);border-radius:12px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.06);}
-.filters-title{font-weight:700;margin-bottom:8px;}
-.filters-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
-
-.filter-chip{display:block;width:100%;text-align:center;padding:8px 10px;border:1px solid #cbd5e1;border-radius:12px;background:#f8fafc;color:#0f172a;font-weight:700;cursor:pointer;transition:transform .02s ease, background .15s ease, border-color .15s ease, color .15s ease;outline: none;white-space:nowrap;}
-.filter-chip:hover{background:#f1f5f9;}
-.filter-chip:active{transform:scale(0.995);}
-.filter-chip.active{background:#14532d;color:#fff;border-color:#14532d;box-shadow:inset 0 1px 0 rgba(255,255,255,0.08);}
-
-/* Threshold card + stepper */
-.threshold-card{
-    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-    padding:10px; border:1px solid #e2e8f0; border-radius:10px;
-    background:#f8fafc;
-}
-
-.threshold-label{font-weight:700; min-width:auto; margin-right:4px;}
-
-.stepper{
-    display:inline-flex; align-items:center; border:1px solid #94a3b8;
-    border-radius:10px; overflow:hidden; background:#fff;
-    box-shadow:0 1px 0 rgba(0,0,0,0.02);
-}
-
-.stepper .btn-mini{
-    appearance:none; border:none; padding:0 10px; height:34px;
-    background:#e2e8f0; cursor:pointer; font-weight:800; line-height:34px;
-    transition:background .15s ease, transform .02s ease;
-}
-.stepper .btn-mini:hover{ background:#dbe3ea; }
-.stepper .btn-mini:active{ transform:scale(0.98); }
-
-.stepper .threshold-input{
-    width:64px; height:34px; border:0; text-align:center; font-weight:700;
-    padding:0 8px; outline:none;
-}
-
-/* Standalone input style (fallback / Safari tweaks) */
-.threshold-input{
-    width:5.5em; padding:8px 10px; border:1px solid #cbd5e1; border-radius:8px;
-    background:#fff; font-weight:600; text-align:center;
-    transition:border-color .15s ease, box-shadow .15s ease;
-}
-.threshold-input:focus{
-    border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.15);
-}
-
-/* Hide number spinners (Safari/Chromium) */
-.threshold-input::-webkit-outer-spin-button,
-.threshold-input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
-.threshold-input{ -moz-appearance:textfield; } /* Firefox */
-
-
-.filters-subtitle{grid-column:1 / -1;font-weight:600;margin:8px 0 2px;}
-.threshold-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin:4px 0;flex-wrap:wrap;}
-.threshold-label{min-width:auto;}
-
-@media (max-width: 480px){
-    .filters-grid{grid-template-columns:1fr;gap:6px;}
-    .filters-panel{padding:8px;}
-    .filter-chip{padding:8px 10px;}
-}
-/* ==== end chip buttons ==== */
-.filters-panel{padding:8px 10px;border:1px solid rgba(0,0,0,0.1);border-radius:12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,0.05);}
-.filters-title{font-weight:600;margin-bottom:6px;}
-.filters-subtitle{font-weight:600;margin-top:10px;margin-bottom:4px;}
-.filters-row,.threshold-row{display:flex;align-items:center;gap:8px;margin:6px 0;}
-.switch{position:relative;display:inline-block;width:40px;height:22px;}
-.switch input{opacity:0;width:0;height:0;}
-.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;transition:.2s;border-radius:22px;}
-.slider:before{position:absolute;content:"";height:18px;width:18px;left:2px;bottom:2px;background:white;transition:.2s;border-radius:50%;}
-.switch input:checked + .slider{background:#4CAF50;}
-.switch input:checked + .slider:before{transform:translateX(18px);}
-.switch-label{min-width:160px}
-.hint{font-size:.85em;color:#666}
-
-/* Compact threshold row */
-.threshold-inline{
-    display:flex; align-items:center; gap:8px; margin:6px 0;
-}
-
-.threshold-prefix{
-    font-weight:700;
-    white-space:nowrap;
-}
-
-/* Tiny inline number input shown when Threshold chip is active */
-.threshold-mini {
-    display:none;
-    width: 4.2ch;
-    padding: 6px 8px;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
+.filters-panel {
+    padding: 10px;
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 12px;
     background: #fff;
-    text-align: center;
-    font-weight: 700;
-    line-height: 1;
-    height: 32px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
-.threshold-mini.show { display:inline-block; }
+.filters-title {
+    font-weight: 700;
+    margin-bottom: 8px;
+}
 
-/* hide native spinners */
-.threshold-mini::-webkit-outer-spin-button,
-.threshold-mini::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
-.threshold-mini { -moz-appearance:textfield; }
+/* Two-column grid; collapses to one on very narrow screens */
+.filters-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
 
+/* Compact, consistent chips matching other buttons */
+.filter-chip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 34px;                  /* fixed, even chip height */
+    padding: 0 12px;               /* horizontal only */
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: transform .02s ease, background .15s ease, border-color .15s ease, color .15s ease;
+    outline: none;
+}
+.filter-chip:hover { background: #f1f5f9; }
+.filter-chip:active { transform: scale(0.995); }
+.filter-chip.active {
+    background: #14532d;
+    color: #fff;
+    border-color: #14532d;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+/* Inline Threshold number input INSIDE the chip (only visible when active) */
 .filter-chip .threshold-inline-input {
     display: none;
-    width: 3.8ch;
-    margin-left: 4px;
-    padding: 0;
-    border: none;
+    width: 3.2ch;                  /* compact width; fits 1–3 digits well */
+    height: 22px;                  /* visually centered within 34px chip */
+    margin-left: 6px;
+    padding: 0 4px;
+    border: 1px solid rgba(0,0,0,0.25);
+    border-radius: 4px;
     background: transparent;
-    font: inherit;
-    font-weight: 700;
-    text-align: center;
     color: inherit;
+    font: inherit;
+    font-weight: 600;
+    text-align: center;
+    line-height: 22px;
 }
-.filter-chip.active .threshold-inline-input { display: inline-block; }
+
+/* Show the inline input only when the chip is active; adjust outline on dark bg */
+.filter-chip.active .threshold-inline-input {
+    display: inline-block;
+    border-color: rgba(255,255,255,0.5);
+}
+
+/* Remove native spinners on number inputs */
 .threshold-inline-input::-webkit-outer-spin-button,
 .threshold-inline-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .threshold-inline-input { -moz-appearance: textfield; }
 
-/* “Pill” number input with tiny +/- nudgers */
-.ninput{
-    display:inline-flex; align-items:center;
-    border:1px solid #94a3b8; border-radius:9999px; background:#fff;
-    overflow:hidden;
+@media (max-width: 480px) {
+    .filters-grid { grid-template-columns: 1fr; gap: 6px; }
+    .filters-panel { padding: 8px; }
 }
 
-.ninput .nbtn{
-    appearance:none; border:0; padding:0 10px; height:30px;
-    background:#eef2f7; font-weight:800; cursor:pointer; line-height:30px;
-    transition:background .15s ease, transform .02s ease;
-}
-.ninput .nbtn:hover{ background:#e6ebf2; }
-.ninput .nbtn:active{ transform:scale(0.98); }
-
-/* Compact numeric field */
-.threshold-input{
-    width:4ch; height:30px; border:0; text-align:center; font-weight:700;
-    padding:0 6px; outline:none; background:#fff;
-}
-
-/* Focus ring on the whole control */
-.ninput:has(.threshold-input:focus){
-    box-shadow:0 0 0 3px rgba(37,99,235,.15);
-    border-color:#2563eb;
-}
-
-/* Hide native spinners */
-.threshold-input::-webkit-outer-spin-button,
-.threshold-input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
-.threshold-input{ -moz-appearance:textfield; }
-
-/* ==== end Filters panel styles ==== */
-/* === Compact filter chips to match other buttons === */
-.filters-grid {
-    gap: 6px;                     /* tighten spacing a touch */
-}
-
-.filter-chip{
-    /* size + typography to match your other buttons */
-    padding: 6px 10px;            /* was 8px 10px */
-    font-size: 0.95rem;           /* less shouty */
-    font-weight: 600;             /* match other buttons */
-    border-radius: 10px;          /* slightly tighter pill */
-    line-height: 1.1;
-}
-
-/* Active (green) state stays consistent */
-.filter-chip.active{
-    background:#14532d;
-    color:#fff;
-    border-color:#14532d;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,0.08);
-}
-
-/* Inline threshold input inside the chip: size + alignment */
-.filter-chip .threshold-inline-input{
-    width: 3.4ch;                 /* a bit narrower so the chip stays compact */
-    margin-left: 6px;
-    font-weight: 600;             /* match chip text */
-    height: 24px;                 /* align visually with chip height */
-    line-height: 24px;
-}
-
-/* When active, give the inline input a subtle boundary for legibility on green */
-.filter-chip.active .threshold-inline-input{
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.35);
-    border-radius: 6px;
-    padding: 0 6px;
-}
-
-#menu .switch, #menu .switch-label { display:none !important; }
+/* Hide legacy switches if any are still in the DOM */
+#menu .switch,
+#menu .switch-label { display: none !important; }
