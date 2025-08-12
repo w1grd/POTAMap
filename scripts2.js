@@ -161,24 +161,83 @@ function buildFiltersPanel() {
 }
 
 // Lightweight refresh: clear and redraw current view using existing flow
-function refreshMarkers() {
-    if (!map) return;
-    if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
-    map.activationsLayer.clearLayers();
-    // We rely on existing functions that repopulate markers in current bounds.
-    // Prefer applyActivationToggleState if present, else trigger a generic reset.
-    try {
-        // Force full redraw using generic path so filter flags apply everywhere
-        if (typeof filterParksByActivations === 'function') {
-            filterParksByActivations(99999);
-            return;
+
+/* === Direct redraw path that respects potaFilters (Ada v7) === */
+async function redrawMarkersWithFilters(){
+    try{
+        if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
+        if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
+        map.activationsLayer.clearLayers();
+
+        const bounds = getCurrentMapBounds();
+        const userActivatedReferences = (activations || []).map(a => a.reference);
+
+        // Build a quick index for current spots by reference
+        const spotByRef = {};
+        if (Array.isArray(spots)) {
+            for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
         }
-    } catch(e){}
-    // Fallback: approximate by filtering parks by any activations threshold (no-op) to force redraw.
-    if (typeof filterParksByActivations === 'function') {
-        filterParksByActivations(99999);
+
+        parks.forEach((park) => {
+            const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+            if (!(latitude && longitude)) return;
+            const latLng = L.latLng(latitude, longitude);
+            if (!bounds.contains(latLng)) return;
+
+            const isUserActivated = userActivatedReferences.includes(reference);
+            let createdTime = null;
+            if (created) {
+                createdTime = typeof created === 'number' ? created : new Date(created).getTime();
+            }
+            const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
+            const currentActivation = spotByRef[reference];
+            const isActive = !!currentActivation;
+
+            if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+
+            // Choose marker: prefer circleMarker (keeps your colors); you still have divIcon branch elsewhere for segmented markers
+            const marker = L.circleMarker([latitude, longitude], {
+                radius: 6,
+                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.9,
+            });
+
+            const tooltipText = currentActivation
+                ? `${reference}: ${name}`
+                : `${reference}: ${name} (${parkActivationCount} activations)`;
+
+            marker
+                .addTo(map.activationsLayer)
+                .bindPopup("<b>Loading park info...</b>", { keepInView: true, autoPan: true, autoPanPadding: [20,20] })
+                .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
+                .on('click', function(){ this.closeTooltip(); });
+
+            marker.on('popupopen', async function () {
+                try {
+                    const parkActivations = await fetchParkActivations(reference);
+                    await saveParkActivationsToIndexedDB(reference, parkActivations);
+                    let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                    this.setPopupContent(popupContent);
+                } catch (err) {
+                    this.setPopupContent("<b>Error loading park info.</b>");
+                    console.error(err);
+                }
+            });
+        });
+    }catch(e){
+        console.error("redrawMarkersWithFilters failed:", e);
     }
 }
+
+function refreshMarkers(){
+    if (!map) return;
+    redrawMarkersWithFilters();
+}
+/* ==== end Filters & Thresholds block ==== */
+
 /* ==== end Filters & Thresholds block ==== */
 
 /**
