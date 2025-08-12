@@ -149,8 +149,9 @@ function refreshMarkers() {
     // We rely on existing functions that repopulate markers in current bounds.
     // Prefer applyActivationToggleState if present, else trigger a generic reset.
     try {
-        if (typeof applyActivationToggleState === 'function') {
-            applyActivationToggleState();
+        // Force full redraw using generic path so filter flags apply everywhere
+        if (typeof filterParksByActivations === 'function') {
+            filterParksByActivations(99999);
             return;
         }
     } catch(e){}
