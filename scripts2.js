@@ -106,38 +106,54 @@ function buildFiltersPanel() {
     oldPanels.forEach(p => p.parentElement && p.parentElement.remove());
     li.id = 'filtersPanelContainer';
     li.innerHTML = `
-
-
-    <div class="filters-panel">
-        <div class="filters-title">Filters</div>
-        <div class="filters-grid">
-            <button class="filter-chip" id="chipMyActs" type="button" aria-pressed="false">Mine</button>
-            <button class="filter-chip" id="chipOnAir" type="button" aria-pressed="false">Active</button>
-            <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New</button>
-            <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All</button>
-        </div>
-
-        <div class="filters-subtitle">Spot color threshold</div>
-        <div class="threshold-row">
-            <label for="greenMaxInput" class="threshold-label">Green ≤</label>
-            <input type="number" id="greenMaxInput" min="1" max="999" step="1" class="threshold-input">
-            <span class="hint">activations (red if &gt; this)</span>
-        </div>
+  <div class="filters-panel">
+    <div class="filters-title">Filters</div>
+    <div class="filters-grid">
+      <button class="filter-chip" id="chipMyActs" type="button" aria-pressed="false">Mine</button>
+      <button class="filter-chip" id="chipOnAir" type="button" aria-pressed="false">Active</button>
+      <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New</button>
+      <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All</button>
     </div>
-    `
 
-    // Insert near top of menu
+    <div class="filters-subtitle">Spot color threshold</div>
+    <div class="threshold-row threshold-card">
+      <label for="greenMaxInput" class="threshold-label">Green ≤</label>
+
+      <div class="stepper" role="group" aria-label="Green threshold">
+        <button type="button" class="btn-mini" id="greenDec" aria-label="Decrease">–</button>
+        <input type="number" id="greenMaxInput" min="1" max="999" step="1" class="threshold-input" inputmode="numeric">
+        <button type="button" class="btn-mini" id="greenInc" aria-label="Increase">+</button>
+      </div>
+
+      <span class="hint">activations (red if &gt; this)</span>
+    </div>
+  </div>
+`;
+
     menu.insertBefore(li, menu.firstChild?.nextSibling || null);
 
-    // Initialize threshold input value and listener
+// Initialize threshold input value and listeners
     const greenInput = document.getElementById('greenMaxInput');
+    const applyGreen = (val) => {
+        const v = Math.max(1, Math.min(999, parseInt(val, 10)));
+        if (!isNaN(v)) { potaThresholds.greenMax = v; savePotaThresholds(); refreshMarkers(); }
+    };
+
     if (greenInput) {
         greenInput.value = potaThresholds.greenMax ?? 5;
-        greenInput.addEventListener('change', (e)=>{
-            const v = parseInt(e.target.value,10);
-            if (!isNaN(v) && v>=1){ potaThresholds.greenMax = v; savePotaThresholds(); refreshMarkers(); }
-        });
+        greenInput.addEventListener('change', (e) => applyGreen(e.target.value));
     }
+
+    const decBtn = document.getElementById('greenDec');
+    const incBtn = document.getElementById('greenInc');
+    if (decBtn && greenInput) decBtn.addEventListener('click', () => {
+        greenInput.value = Math.max(1, (parseInt(greenInput.value,10)||1) - 1);
+        applyGreen(greenInput.value);
+    });
+    if (incBtn && greenInput) incBtn.addEventListener('click', () => {
+        greenInput.value = Math.min(999, (parseInt(greenInput.value,10)||1) + 1);
+        applyGreen(greenInput.value);
+    });
 }
 
 // Lightweight refresh: clear and redraw current view using existing flow
