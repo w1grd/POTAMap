@@ -112,23 +112,21 @@ function buildFiltersPanel() {
       <button class="filter-chip" id="chipMyActs" type="button" aria-pressed="false">Mine</button>
       <button class="filter-chip" id="chipOnAir" type="button" aria-pressed="false">Active</button>
       <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New</button>
-      <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All</button>
+      <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All / Clr</button>
     </div>
 
-    <div class="filters-subtitle">Spot color threshold</div>
-    <div class="threshold-row threshold-card">
-      <label for="greenMaxInput" class="threshold-label">Green ≤</label>
-
-      <div class="stepper" role="group" aria-label="Green threshold">
-        <button type="button" class="btn-mini" id="greenDec" aria-label="Decrease">–</button>
-        <input type="number" id="greenMaxInput" min="1" max="999" step="1" class="threshold-input" inputmode="numeric">
-        <button type="button" class="btn-mini" id="greenInc" aria-label="Increase">+</button>
+    <div class="threshold-inline" role="group" aria-label="Spot color threshold">
+      <span class="threshold-prefix">Green ≤</span>
+      <div class="ninput">
+        <button type="button" class="nbtn" id="greenDec" aria-label="Decrease">–</button>
+        <input type="number" id="greenMaxInput" min="1" max="999" step="1"
+               class="threshold-input" inputmode="numeric" aria-label="Max activations for green">
+        <button type="button" class="nbtn" id="greenInc" aria-label="Increase">+</button>
       </div>
-
-      <span class="hint">activations (red if &gt; this)</span>
     </div>
   </div>
 `;
+
 
     menu.insertBefore(li, menu.firstChild?.nextSibling || null);
 
@@ -142,6 +140,15 @@ function buildFiltersPanel() {
     if (greenInput) {
         greenInput.value = potaThresholds.greenMax ?? 5;
         greenInput.addEventListener('change', (e) => applyGreen(e.target.value));
+    }
+    if (greenInput) {
+        greenInput.value = potaThresholds.greenMax ?? 5;
+        greenInput.addEventListener('change', (e)=> applyGreen(e.target.value));
+        greenInput.addEventListener('keydown', (e)=>{
+            if (e.key === 'ArrowUp') { e.preventDefault(); document.getElementById('greenInc').click(); }
+            if (e.key === 'ArrowDown') { e.preventDefault(); document.getElementById('greenDec').click(); }
+            if (e.key === 'Enter') { e.currentTarget.blur(); }
+        });
     }
 
     const decBtn = document.getElementById('greenDec');

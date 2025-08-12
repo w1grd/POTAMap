@@ -211,6 +211,49 @@
 .switch input:checked + .slider:before{transform:translateX(18px);}
 .switch-label{min-width:160px}
 .hint{font-size:.85em;color:#666}
+
+/* Compact threshold row */
+.threshold-inline{
+    display:flex; align-items:center; gap:8px; margin:6px 0;
+}
+
+.threshold-prefix{
+    font-weight:700;
+    white-space:nowrap;
+}
+
+/* “Pill” number input with tiny +/- nudgers */
+.ninput{
+    display:inline-flex; align-items:center;
+    border:1px solid #94a3b8; border-radius:9999px; background:#fff;
+    overflow:hidden;
+}
+
+.ninput .nbtn{
+    appearance:none; border:0; padding:0 10px; height:30px;
+    background:#eef2f7; font-weight:800; cursor:pointer; line-height:30px;
+    transition:background .15s ease, transform .02s ease;
+}
+.ninput .nbtn:hover{ background:#e6ebf2; }
+.ninput .nbtn:active{ transform:scale(0.98); }
+
+/* Compact numeric field */
+.threshold-input{
+    width:4ch; height:30px; border:0; text-align:center; font-weight:700;
+    padding:0 6px; outline:none; background:#fff;
+}
+
+/* Focus ring on the whole control */
+.ninput:has(.threshold-input:focus){
+    box-shadow:0 0 0 3px rgba(37,99,235,.15);
+    border-color:#2563eb;
+}
+
+/* Hide native spinners */
+.threshold-input::-webkit-outer-spin-button,
+.threshold-input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+.threshold-input{ -moz-appearance:textfield; }
+
 /* ==== end Filters panel styles ==== */
 
 #menu .switch, #menu .switch-label { display:none !important; }
