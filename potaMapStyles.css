@@ -222,6 +222,26 @@
     white-space:nowrap;
 }
 
+/* Tiny inline number input shown when Threshold chip is active */
+.threshold-mini {
+    display:none;
+    width: 4.2ch;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #fff;
+    text-align: center;
+    font-weight: 700;
+    line-height: 1;
+    height: 32px;
+}
+.threshold-mini.show { display:inline-block; }
+
+/* hide native spinners */
+.threshold-mini::-webkit-outer-spin-button,
+.threshold-mini::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+.threshold-mini { -moz-appearance:textfield; }
+
 /* “Pill” number input with tiny +/- nudgers */
 .ninput{
     display:inline-flex; align-items:center;

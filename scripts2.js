@@ -96,72 +96,106 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
 function buildFiltersPanel() {
     const menu = document.getElementById('menu');
     if (!menu) return;
+
     // Hide old toggle button if present
     const oldToggle = document.getElementById('toggleActivations');
     if (oldToggle) oldToggle.style.display = 'none';
 
-    const li = document.createElement('li');
     // Remove any previously inserted filters panel or legacy copies
     const oldPanels = menu.querySelectorAll('.filters-panel');
     oldPanels.forEach(p => p.parentElement && p.parentElement.remove());
-    li.id = 'filtersPanelContainer';
-    li.innerHTML = `
-  <div class="filters-panel">
-    <div class="filters-title">Filters</div>
-    <div class="filters-grid">
-      <button class="filter-chip" id="chipMyActs" type="button" aria-pressed="false">Mine</button>
-      <button class="filter-chip" id="chipOnAir" type="button" aria-pressed="false">Active</button>
-      <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New</button>
-      <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All / Clr</button>
-    </div>
 
-    <div class="threshold-inline" role="group" aria-label="Spot color threshold">
-      <span class="threshold-prefix">Green ≤</span>
-      <div class="ninput">
-        <button type="button" class="nbtn" id="greenDec" aria-label="Decrease">–</button>
-        <input type="number" id="greenMaxInput" min="1" max="999" step="1"
-               class="threshold-input" inputmode="numeric" aria-label="Max activations for green">
-        <button type="button" class="nbtn" id="greenInc" aria-label="Increase">+</button>
+    const li = document.createElement('li');
+    li.id = 'filtersPanelContainer';
+
+    li.innerHTML = `
+    <div class="filters-panel">
+      <div class="filters-title">Filters</div>
+      <div class="filters-grid">
+        <button class="filter-chip" id="chipMyActs"   type="button" aria-pressed="false">Mine</button>
+        <button class="filter-chip" id="chipOnAir"    type="button" aria-pressed="false">Active</button>
+        <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New</button>
+        <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All / Clr</button>
+
+        <!-- Threshold as a chip with tiny inline input -->
+        <button class="filter-chip" id="chipThreshold" type="button" aria-pressed="false">Threshold</button>
+        <input type="number" id="greenMiniInput" min="1" max="999" step="1"
+               class="threshold-mini" inputmode="numeric" aria-label="Max activations for green">
       </div>
     </div>
-  </div>
-`;
+  `;
 
-
+    // Insert near top of menu (just under the first item if present)
     menu.insertBefore(li, menu.firstChild?.nextSibling || null);
 
-// Initialize threshold input value and listeners
-    const greenInput = document.getElementById('greenMaxInput');
-    const applyGreen = (val) => {
-        const v = Math.max(1, Math.min(999, parseInt(val, 10)));
-        if (!isNaN(v)) { potaThresholds.greenMax = v; savePotaThresholds(); refreshMarkers(); }
+    // ----- Threshold chip behavior -----
+    // Ensure potaThresholds exists
+    if (typeof window.potaThresholds !== 'object' || window.potaThresholds === null) {
+        window.potaThresholds = {};
+    }
+    // Defaults
+    if (typeof potaThresholds.greenMax !== 'number') potaThresholds.greenMax = 5;
+    if (typeof potaThresholds.thresholdEnabled !== 'boolean') potaThresholds.thresholdEnabled = true;
+
+    const thresholdChip = document.getElementById('chipThreshold');
+    const greenMini     = document.getElementById('greenMiniInput');
+
+    const getEnabled = () => !!potaThresholds.thresholdEnabled;
+
+    const setChipLabel = () => {
+        if (!thresholdChip) return;
+        if (getEnabled()) {
+            thresholdChip.textContent = `Green ≤ ${potaThresholds.greenMax ?? 5}`;
+        } else {
+            thresholdChip.textContent = 'Threshold';
+        }
     };
 
-    if (greenInput) {
-        greenInput.value = potaThresholds.greenMax ?? 5;
-        greenInput.addEventListener('change', (e) => applyGreen(e.target.value));
-    }
-    if (greenInput) {
-        greenInput.value = potaThresholds.greenMax ?? 5;
-        greenInput.addEventListener('change', (e)=> applyGreen(e.target.value));
-        greenInput.addEventListener('keydown', (e)=>{
-            if (e.key === 'ArrowUp') { e.preventDefault(); document.getElementById('greenInc').click(); }
-            if (e.key === 'ArrowDown') { e.preventDefault(); document.getElementById('greenDec').click(); }
-            if (e.key === 'Enter') { e.currentTarget.blur(); }
-        });
+    const showMini = (show) => {
+        if (!greenMini) return;
+        greenMini.classList.toggle('show', !!show);
+        if (show) {
+            greenMini.value = potaThresholds.greenMax;
+            // slight delay to ensure visibility before focusing
+            setTimeout(() => greenMini.focus(), 0);
+        }
+    };
+
+    // Initialize UI state
+    if (greenMini) greenMini.value = potaThresholds.greenMax;
+    if (thresholdChip) {
+        thresholdChip.setAttribute('aria-pressed', String(getEnabled()));
+        setChipLabel();
+        showMini(getEnabled());
     }
 
-    const decBtn = document.getElementById('greenDec');
-    const incBtn = document.getElementById('greenInc');
-    if (decBtn && greenInput) decBtn.addEventListener('click', () => {
-        greenInput.value = Math.max(1, (parseInt(greenInput.value,10)||1) - 1);
-        applyGreen(greenInput.value);
+    // Toggle chip on/off
+    thresholdChip?.addEventListener('click', () => {
+        potaThresholds.thresholdEnabled = !getEnabled();
+        if (typeof savePotaThresholds === 'function') savePotaThresholds();
+        thresholdChip.setAttribute('aria-pressed', String(getEnabled()));
+        setChipLabel();
+        showMini(getEnabled());
+        if (typeof refreshMarkers === 'function') refreshMarkers();
     });
-    if (incBtn && greenInput) incBtn.addEventListener('click', () => {
-        greenInput.value = Math.min(999, (parseInt(greenInput.value,10)||1) + 1);
-        applyGreen(greenInput.value);
+
+    // Apply numeric value
+    const applyGreen = (val) => {
+        const v = Math.max(1, Math.min(999, parseInt(val, 10)));
+        if (!isNaN(v)) {
+            potaThresholds.greenMax = v;
+            if (typeof savePotaThresholds === 'function') savePotaThresholds();
+            setChipLabel();
+            if (typeof refreshMarkers === 'function') refreshMarkers();
+        }
+    };
+
+    greenMini?.addEventListener('change', (e) => applyGreen(e.target.value));
+    greenMini?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
     });
 }
+
 
 // Lightweight refresh: clear and redraw current view using existing flow
 
