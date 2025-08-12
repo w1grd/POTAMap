@@ -86,8 +86,23 @@ function buildFiltersPanel() {
     const li = document.createElement('li');
     li.id = 'filtersPanelContainer';
     li.innerHTML = `
+    
     <div class="filters-panel">
         <div class="filters-title">Filters</div>
+
+        <button class="filter-chip" id="chipMyActs" type="button" aria-pressed="false">My activations</button>
+        <button class="filter-chip" id="chipOnAir" type="button" aria-pressed="false">Currently activating</button>
+        <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New parks</button>
+        <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All parks</button>
+
+        <div class="filters-subtitle">Spot color threshold</div>
+        <div class="threshold-row">
+            <label for="greenMaxInput" class="threshold-label">Green ≤</label>
+            <input type="number" id="greenMaxInput" min="1" max="999" step="1" class="threshold-input">
+            <span class="hint">activations (red if &gt; this)</span>
+        </div>
+    </div>
+
         <div class="filters-row">
             <label class="switch">
                 <input type="checkbox" id="fltMyActs">
@@ -128,25 +143,30 @@ function buildFiltersPanel() {
     menu.insertBefore(li, menu.firstChild?.nextSibling || null);
 
     // Initialize control states
-    document.getElementById('fltMyActs').checked = !!potaFilters.myActivations;
-    document.getElementById('fltOnAir').checked = !!potaFilters.currentlyActivating;
-    document.getElementById('fltNewParks').checked = !!potaFilters.newParks;
-    document.getElementById('fltAllParks').checked = !!potaFilters.allParks;
-    document.getElementById('greenMaxInput').value = potaThresholds.greenMax ?? 5;
-
-    // Wire events
-    document.getElementById('fltMyActs').addEventListener('change', (e)=>{
-        potaFilters.myActivations = e.target.checked; savePotaFilters(); refreshMarkers();
-    });
-    document.getElementById('fltOnAir').addEventListener('change', (e)=>{
-        potaFilters.currentlyActivating = e.target.checked; savePotaFilters(); refreshMarkers();
-    });
-    document.getElementById('fltNewParks').addEventListener('change', (e)=>{
-        potaFilters.newParks = e.target.checked; savePotaFilters(); refreshMarkers();
-    });
-    document.getElementById('fltAllParks').addEventListener('change', (e)=>{
-        potaFilters.allParks = e.target.checked; savePotaFilters(); refreshMarkers();
-    });
+    (function(){
+        const btn = document.getElementById('chipMyActs');
+        const setUI = ()=>{ const on = !!potaFilters.myActivations; btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', on); };
+        setUI();
+        btn.addEventListener('click', ()=>{ potaFilters.myActivations = !potaFilters.myActivations; savePotaFilters(); setUI(); refreshMarkers(); });
+    })();
+    (function(){
+        const btn = document.getElementById('chipOnAir');
+        const setUI = ()=>{ const on = !!potaFilters.currentlyActivating; btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', on); };
+        setUI();
+        btn.addEventListener('click', ()=>{ potaFilters.currentlyActivating = !potaFilters.currentlyActivating; savePotaFilters(); setUI(); refreshMarkers(); });
+    })();
+    (function(){
+        const btn = document.getElementById('chipNewParks');
+        const setUI = ()=>{ const on = !!potaFilters.newParks; btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', on); };
+        setUI();
+        btn.addEventListener('click', ()=>{ potaFilters.newParks = !potaFilters.newParks; savePotaFilters(); setUI(); refreshMarkers(); });
+    })();
+    (function(){
+        const btn = document.getElementById('chipAllParks');
+        const setUI = ()=>{ const on = !!potaFilters.allParks; btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', on); };
+        setUI();
+        btn.addEventListener('click', ()=>{ potaFilters.allParks = !potaFilters.allParks; savePotaFilters(); setUI(); refreshMarkers(); });
+    })();
     document.getElementById('greenMaxInput').addEventListener('change', (e)=>{
         const v = parseInt(e.target.value,10);
         if (!isNaN(v) && v>=1){ potaThresholds.greenMax = v; savePotaThresholds(); refreshMarkers(); }
