@@ -52,7 +52,7 @@
 }
 
 .active-pulse-marker.mode-cw {
-    --pulse-shadow-color: 144, 238, 144; /* light green */
+    --pulse-shadow-color: 0, 255, 0; /* green */
 }
 
 .active-pulse-marker.mode-ssb {
@@ -60,7 +60,7 @@
 }
 
 .active-pulse-marker.mode-data {
-    --pulse-shadow-color: 255, 102, 102; /* light red */
+    --pulse-shadow-color: 255, 0, 0; /* red */
 }
 
 @keyframes pulse-ring-live {

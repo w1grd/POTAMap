@@ -175,19 +175,40 @@ async function redrawMarkersWithFilters(){
 
             if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
 
-            // Choose marker: prefer circleMarker (keeps your colors); you still have divIcon branch elsewhere for segmented markers
-            const marker = L.circleMarker([latitude, longitude], {
-                radius: 6,
-                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
-                color: "#000",
-                weight: 1,
-                opacity: 1,
-                fillOpacity: 0.9,
-            });
+            // Determine marker class for animated divIcon
+            const markerClasses = [];
+            if (isNew) markerClasses.push('pulse-marker');
+            if (isActive) {
+                markerClasses.push('active-pulse-marker');
+                const mode = currentActivation.mode ? currentActivation.mode.toUpperCase() : '';
+                if (mode === 'CW') markerClasses.push('mode-cw');
+                else if (mode === 'SSB') markerClasses.push('mode-ssb');
+                else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
+            }
+            const markerClassName = markerClasses.join(' ');
+
+            const marker = markerClasses.length > 0
+                ? L.marker([latitude, longitude], {
+                    icon: L.divIcon({
+                        className: markerClassName,
+                        iconSize: [20, 20],
+                    })
+                })
+                : L.circleMarker([latitude, longitude], {
+                    radius: 6,
+                    fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
+                    color: "#000",
+                    weight: 1,
+                    opacity: 1,
+                    fillOpacity: 0.9,
+                });
 
             const tooltipText = currentActivation
-                ? `${reference}: ${name}`
+                ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
                 : `${reference}: ${name} (${parkActivationCount} activations)`;
+
+            marker.park = park;
+            marker.currentActivation = currentActivation;
 
             marker
                 .addTo(map.activationsLayer)
