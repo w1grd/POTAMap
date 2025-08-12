@@ -242,6 +242,23 @@
 .threshold-mini::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
 .threshold-mini { -moz-appearance:textfield; }
 
+.filter-chip .threshold-inline-input {
+    display: none;
+    width: 3.8ch;
+    margin-left: 4px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    font: inherit;
+    font-weight: 700;
+    text-align: center;
+    color: inherit;
+}
+.filter-chip.active .threshold-inline-input { display: inline-block; }
+.threshold-inline-input::-webkit-outer-spin-button,
+.threshold-inline-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.threshold-inline-input { -moz-appearance: textfield; }
+
 /* “Pill” number input with tiny +/- nudgers */
 .ninput{
     display:inline-flex; align-items:center;

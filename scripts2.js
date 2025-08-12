@@ -117,10 +117,12 @@ function buildFiltersPanel() {
         <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New</button>
         <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All / Clr</button>
 
-        <!-- Threshold as a chip with tiny inline input -->
-        <button class="filter-chip" id="chipThreshold" type="button" aria-pressed="false">Threshold</button>
-        <input type="number" id="greenMiniInput" min="1" max="999" step="1"
-               class="threshold-mini" inputmode="numeric" aria-label="Max activations for green">
+        <!-- Threshold chip with inline number input -->
+        <button class="filter-chip" id="chipThreshold" type="button" aria-pressed="false">
+          <span id="thresholdLabel">Threshold</span>
+          <input type="number" id="greenInlineInput" min="1" max="999" step="1"
+                 class="threshold-inline-input" inputmode="numeric" aria-label="Max activations for green">
+        </button>
       </div>
     </div>
   `;
@@ -128,72 +130,70 @@ function buildFiltersPanel() {
     // Insert near top of menu
     menu.insertBefore(li, menu.firstChild?.nextSibling || null);
 
-    // ----- Threshold chip behavior -----
+    // Ensure state object exists + defaults
     if (typeof window.potaThresholds !== 'object' || window.potaThresholds === null) {
         window.potaThresholds = {};
     }
     if (typeof potaThresholds.greenMax !== 'number') potaThresholds.greenMax = 5;
     if (typeof potaThresholds.thresholdEnabled !== 'boolean') potaThresholds.thresholdEnabled = true;
 
+    // Elements
     const thresholdChip = document.getElementById('chipThreshold');
-    const greenMini     = document.getElementById('greenMiniInput');
+    const thresholdLabel = document.getElementById('thresholdLabel');
+    const greenInline = document.getElementById('greenInlineInput');
 
     const getEnabled = () => !!potaThresholds.thresholdEnabled;
 
-    const setChipLabel = () => {
-        if (!thresholdChip) return;
-        if (getEnabled()) {
-            thresholdChip.textContent = `Green ≤ ${potaThresholds.greenMax ?? 5}`;
-            thresholdChip.classList.add('active');
-        } else {
-            thresholdChip.textContent = 'Threshold';
-            thresholdChip.classList.remove('active');
-        }
-    };
+    const updateChipState = () => {
+        const enabled = getEnabled();
+        thresholdChip.setAttribute('aria-pressed', String(enabled));
+        thresholdChip.classList.toggle('active', enabled);
 
-    const showMini = (show) => {
-        if (!greenMini) return;
-        greenMini.classList.toggle('show', !!show);
-        if (show) {
-            greenMini.value = potaThresholds.greenMax;
-            setTimeout(() => greenMini.focus(), 0);
+        if (enabled) {
+            // Show "Green ≤" and reveal input (CSS handles visibility when .active)
+            thresholdLabel.textContent = 'Green ≤';
+            greenInline.value = potaThresholds.greenMax;
+        } else {
+            // Hide input (via CSS) and show "Threshold"
+            thresholdLabel.textContent = 'Threshold';
         }
     };
 
     // Initialize
-    if (greenMini) greenMini.value = potaThresholds.greenMax;
-    if (thresholdChip) {
-        thresholdChip.setAttribute('aria-pressed', String(getEnabled()));
-        setChipLabel();
-        showMini(getEnabled());
-    }
+    updateChipState();
 
-    // Toggle chip
-    thresholdChip?.addEventListener('click', () => {
+    // Prevent chip toggle when interacting with the input
+    const stopToggle = (e) => e.stopPropagation();
+    ['mousedown', 'click', 'touchstart'].forEach(evt =>
+        greenInline.addEventListener(evt, stopToggle, { passive: true })
+    );
+
+    // Toggle chip (only when not clicking in the input)
+    thresholdChip.addEventListener('click', () => {
         potaThresholds.thresholdEnabled = !getEnabled();
         if (typeof savePotaThresholds === 'function') savePotaThresholds();
-        thresholdChip.setAttribute('aria-pressed', String(getEnabled()));
-        setChipLabel();
-        showMini(getEnabled());
+        updateChipState();
         if (typeof refreshMarkers === 'function') refreshMarkers();
+        if (getEnabled()) setTimeout(() => greenInline.focus(), 0);
     });
 
-    // Value change
+    // Apply numeric value (updates on change & blur)
     const applyGreen = (val) => {
         const v = Math.max(1, Math.min(999, parseInt(val, 10)));
         if (!isNaN(v)) {
             potaThresholds.greenMax = v;
             if (typeof savePotaThresholds === 'function') savePotaThresholds();
-            setChipLabel();
             if (typeof refreshMarkers === 'function') refreshMarkers();
         }
     };
 
-    greenMini?.addEventListener('change', (e) => applyGreen(e.target.value));
-    greenMini?.addEventListener('keydown', (e) => {
+    greenInline.addEventListener('change', (e) => applyGreen(e.target.value));
+    greenInline.addEventListener('blur', (e) => applyGreen(e.target.value));
+    greenInline.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') e.currentTarget.blur();
     });
 }
+
 
 
 
