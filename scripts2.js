@@ -105,57 +105,8 @@ function buildFiltersPanel() {
             <span class="hint">activations (red if &gt; this)</span>
         </div>
     </div>
+    `
 
-
-        <button class="filter-chip" id="chipMyActs" type="button" aria-pressed="false">My activations</button>
-        <button class="filter-chip" id="chipOnAir" type="button" aria-pressed="false">Currently activating</button>
-        <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New parks</button>
-        <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All parks</button>
-
-        <div class="filters-subtitle">Spot color threshold</div>
-        <div class="threshold-row">
-            <label for="greenMaxInput" class="threshold-label">Green ≤</label>
-            <input type="number" id="greenMaxInput" min="1" max="999" step="1" class="threshold-input">
-            <span class="hint">activations (red if &gt; this)</span>
-        </div>
-    </div>
-
-        <div class="filters-row">
-            <label class="switch">
-                <input type="checkbox" id="fltMyActs">
-                <span class="slider"></span>
-            </label>
-            <span class="switch-label">My activations</span>
-        </div>
-        <div class="filters-row">
-            <label class="switch">
-                <input type="checkbox" id="fltOnAir">
-                <span class="slider"></span>
-            </label>
-            <span class="switch-label">Currently activating</span>
-        </div>
-        <div class="filters-row">
-            <label class="switch">
-                <input type="checkbox" id="fltNewParks">
-                <span class="slider"></span>
-            </label>
-            <span class="switch-label">New parks</span>
-        </div>
-        <div class="filters-row">
-            <label class="switch">
-                <input type="checkbox" id="fltAllParks">
-                <span class="slider"></span>
-            </label>
-            <span class="switch-label">All parks</span>
-        </div>
-
-        <div class="filters-subtitle">Spot color threshold</div>
-        <div class="threshold-row">
-            <label for="greenMaxInput">Green ≤</label>
-            <input type="number" id="greenMaxInput" min="1" max="999" step="1" style="width: 5em;">
-            <span class="hint">activations (red if &gt; this)</span>
-        </div>
-    </div>`;
     // Insert near top of menu
     menu.insertBefore(li, menu.firstChild?.nextSibling || null);
 
