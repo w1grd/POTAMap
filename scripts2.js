@@ -32,6 +32,147 @@ document.addEventListener('DOMContentLoaded', async () => {
     await initializeActivationsDisplay(); // Check and display activations if available
 });
 
+
+
+/* ==== POTAmap Filters & Thresholds (Ada 2025-08-12) ==== */
+// Configurable filters (OR semantics). Defaults: All parks on.
+window.potaFilters = JSON.parse(localStorage.getItem('potaFilters') || '{}');
+if (!('allParks' in potaFilters)) {
+    potaFilters = { myActivations: false, currentlyActivating: false, newParks: false, allParks: true };
+}
+
+// Configurable color thresholds. 'greenMax' means 1..greenMax is green; >greenMax is red; 0 is blue.
+window.potaThresholds = JSON.parse(localStorage.getItem('potaThresholds') || '{}');
+if (!('greenMax' in potaThresholds)) {
+    potaThresholds = { greenMax: 5 }; // default per Perry's example
+}
+
+// Helpers
+function savePotaFilters() { localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); }
+function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
+
+function shouldDisplayParkFlags(flags) {
+    // flags: { isUserActivated, isActive, isNew }
+    const anySpecific = potaFilters.myActivations || potaFilters.currentlyActivating || potaFilters.newParks;
+    if (potaFilters.allParks || !anySpecific) return true;
+    return (potaFilters.myActivations && flags.isUserActivated)
+        || (potaFilters.currentlyActivating && flags.isActive)
+        || (potaFilters.newParks && flags.isNew);
+}
+
+function getMarkerColorConfigured(activations, isUserActivated, created) {
+    try {
+        const now = new Date();
+        const createdDate = new Date(created);
+        const ageInDays = isFinite(createdDate) ? ((now - createdDate) / (1000 * 60 * 60 * 24)) : Infinity;
+        if (ageInDays <= 30) return "#800080"; // New park: purple
+        if (isUserActivated) return "#ffa500"; // User activated: orange
+        if (typeof activations === 'number' && activations > (potaThresholds.greenMax ?? 5)) return "#ff6666"; // red
+        if (typeof activations === 'number' && activations > 0) return "#90ee90"; // green
+        return "#0000ff"; // blue
+    } catch(e) {
+        return "#0000ff";
+    }
+}
+
+// Build Filters UI inside the hamburger menu
+function buildFiltersPanel() {
+    const menu = document.getElementById('menu');
+    if (!menu) return;
+    // Hide old toggle button if present
+    const oldToggle = document.getElementById('toggleActivations');
+    if (oldToggle) oldToggle.style.display = 'none';
+
+    const li = document.createElement('li');
+    li.id = 'filtersPanelContainer';
+    li.innerHTML = `
+    <div class="filters-panel">
+        <div class="filters-title">Filters</div>
+        <div class="filters-row">
+            <label class="switch">
+                <input type="checkbox" id="fltMyActs">
+                <span class="slider"></span>
+            </label>
+            <span class="switch-label">My activations</span>
+        </div>
+        <div class="filters-row">
+            <label class="switch">
+                <input type="checkbox" id="fltOnAir">
+                <span class="slider"></span>
+            </label>
+            <span class="switch-label">Currently activating</span>
+        </div>
+        <div class="filters-row">
+            <label class="switch">
+                <input type="checkbox" id="fltNewParks">
+                <span class="slider"></span>
+            </label>
+            <span class="switch-label">New parks</span>
+        </div>
+        <div class="filters-row">
+            <label class="switch">
+                <input type="checkbox" id="fltAllParks">
+                <span class="slider"></span>
+            </label>
+            <span class="switch-label">All parks</span>
+        </div>
+
+        <div class="filters-subtitle">Spot color threshold</div>
+        <div class="threshold-row">
+            <label for="greenMaxInput">Green ≤</label>
+            <input type="number" id="greenMaxInput" min="1" max="999" step="1" style="width: 5em;">
+            <span class="hint">activations (red if &gt; this)</span>
+        </div>
+    </div>`;
+    // Insert near top of menu
+    menu.insertBefore(li, menu.firstChild?.nextSibling || null);
+
+    // Initialize control states
+    document.getElementById('fltMyActs').checked = !!potaFilters.myActivations;
+    document.getElementById('fltOnAir').checked = !!potaFilters.currentlyActivating;
+    document.getElementById('fltNewParks').checked = !!potaFilters.newParks;
+    document.getElementById('fltAllParks').checked = !!potaFilters.allParks;
+    document.getElementById('greenMaxInput').value = potaThresholds.greenMax ?? 5;
+
+    // Wire events
+    document.getElementById('fltMyActs').addEventListener('change', (e)=>{
+        potaFilters.myActivations = e.target.checked; savePotaFilters(); refreshMarkers();
+    });
+    document.getElementById('fltOnAir').addEventListener('change', (e)=>{
+        potaFilters.currentlyActivating = e.target.checked; savePotaFilters(); refreshMarkers();
+    });
+    document.getElementById('fltNewParks').addEventListener('change', (e)=>{
+        potaFilters.newParks = e.target.checked; savePotaFilters(); refreshMarkers();
+    });
+    document.getElementById('fltAllParks').addEventListener('change', (e)=>{
+        potaFilters.allParks = e.target.checked; savePotaFilters(); refreshMarkers();
+    });
+    document.getElementById('greenMaxInput').addEventListener('change', (e)=>{
+        const v = parseInt(e.target.value,10);
+        if (!isNaN(v) && v>=1){ potaThresholds.greenMax = v; savePotaThresholds(); refreshMarkers(); }
+    });
+}
+
+// Lightweight refresh: clear and redraw current view using existing flow
+function refreshMarkers() {
+    if (!map) return;
+    if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
+    map.activationsLayer.clearLayers();
+    // We rely on existing functions that repopulate markers in current bounds.
+    // Prefer applyActivationToggleState if present, else trigger a generic reset.
+    try {
+        if (typeof applyActivationToggleState === 'function') {
+            applyActivationToggleState();
+            return;
+        }
+    } catch(e){}
+    // Fallback: approximate by filtering parks by any activations threshold (no-op) to force redraw.
+    if (typeof filterParksByActivations === 'function') {
+        filterParksByActivations(99999);
+    }
+}
+/* ==== end Filters & Thresholds block ==== */
+
 /**
  * Initializes the hamburger menu.
  */
@@ -132,6 +273,7 @@ function initializeMenu() {
 
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
+    buildFiltersPanel();
     console.log("Hamburger menu initialized."); // Debugging
 
     // Add enhanced hamburger menu styles for mobile
@@ -2008,7 +2150,7 @@ function getActivatedParksInBounds(activations, parks, bounds) {
             console.log(`Park ${park.reference} (${park.name}) is within bounds: ${isWithin}`); // Debugging
             return isWithin;
         }
-       // console.warn(`Invalid park data for reference: ${activation.reference}`); // Debugging
+        // console.warn(`Invalid park data for reference: ${activation.reference}`); // Debugging
         return false;
     });
     console.log("Filtered Activated Parks:", filteredParks); // Debugging
@@ -2069,7 +2211,7 @@ async function updateActivationsInView() {
     }
 
 //    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
-        applyActivationToggleState();
+    applyActivationToggleState();
 }
 
 /**
@@ -2512,14 +2654,14 @@ function initializeMap(lat, lng) {
 
     // Attach dynamic spot fetching to map movement
     if (!isDesktopMode) {
-           mapInstance.on(
-                "moveend",
-               debounce(() => {
-                     console.log("Map moved or zoomed. Updating spots...");
-                     fetchAndDisplaySpotsInCurrentBounds(mapInstance)
-                       .then(() => applyActivationToggleState());
-                   }, 300)
-           );
+        mapInstance.on(
+            "moveend",
+            debounce(() => {
+                console.log("Map moved or zoomed. Updating spots...");
+                fetchAndDisplaySpotsInCurrentBounds(mapInstance)
+                    .then(() => applyActivationToggleState());
+            }, 300)
+        );
     }
 
     return mapInstance;
@@ -2559,6 +2701,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const currentActivation = spots?.find(spot => spot.reference === reference);
         const isActive = !!currentActivation;
 
+        // Apply Filters (OR semantics)
+        if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+
         // Debugging
         // if (isNew) {
         //     const delta = Date.now() - new Date(created).getTime();
@@ -2587,13 +2732,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             })
             : L.circleMarker([latitude, longitude], {
                 radius: 6,
-                fillColor: isUserActivated
-                    ? "#ffa500" // Orange
-                    : parkActivationCount > 10
-                        ? "#ff6666" // Light red
-                        : parkActivationCount > 0
-                            ? "#90ee90" // Light green
-                            : "#0000ff", // Blue
+                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
                 color: "#000",
                 weight: 1,
                 opacity: 1,
@@ -2608,19 +2747,19 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
             : `${reference}: ${name} (${parkActivationCount} activations)`;
 
-            marker
-                .addTo(layerGroup)
-                .bindPopup("<b>Loading park info...</b>", {
-                        // keep the popup fully in view
-                        keepInView: true,
-                        autoPan: true,
-                        // add a little breathing room around the popup
-                            autoPanPadding: [20, 20],
-                        // cap its width on small screens
-                            maxWidth: 280
-                })
+        marker
+            .addTo(layerGroup)
+            .bindPopup("<b>Loading park info...</b>", {
+                // keep the popup fully in view
+                keepInView: true,
+                autoPan: true,
+                // add a little breathing room around the popup
+                autoPanPadding: [20, 20],
+                // cap its width on small screens
+                maxWidth: 280
+            })
 
-    .bindTooltip(tooltipText, {
+            .bindTooltip(tooltipText, {
                 direction: "top",
                 opacity: 0.9,
                 sticky: false,
