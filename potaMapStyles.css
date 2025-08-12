@@ -52,11 +52,13 @@
 }
 
 .active-pulse-marker.mode-cw {
-    --pulse-shadow-color: 144, 238, 144; /* light green */
+    /* darker green */
+    --pulse-shadow-color: 0, 100, 0; /* dark green */
 }
 
 .active-pulse-marker.mode-ssb {
-    --pulse-shadow-color: 255, 255, 0; /* vivid yellow */
+    /* darker yellow/orange for better visibility */
+    --pulse-shadow-color: 204, 153, 0; /* dark goldenrod */
 }
 
 .active-pulse-marker.mode-data {
@@ -65,9 +67,11 @@
 
 @keyframes pulse-ring-live {
     0% {
-        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.5);
+        /* start with a darker, stronger glow */
+        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.9);
     }
     70% {
+        /* fade outward */
         box-shadow: 0 0 0 20px rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
     }
     100% {
@@ -99,7 +103,7 @@
 
 @-webkit-keyframes pulse-ring-live {
     0% {
-        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.5);
+        box-shadow: 0 0 0 0 rgba(var(--pulse-shadow-color, 0, 187, 255), 0.9);
     }
     70% {
         box-shadow: 0 0 0 20px rgba(var(--pulse-shadow-color, 0, 187, 255), 0);
