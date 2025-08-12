@@ -32,6 +32,272 @@ document.addEventListener('DOMContentLoaded', async () => {
     await initializeActivationsDisplay(); // Check and display activations if available
 });
 
+
+
+/* ==== POTAmap Filters & Thresholds (Ada 2025-08-12) ==== */
+// Configurable filters (OR semantics). Defaults: All parks on.
+window.potaFilters = JSON.parse(localStorage.getItem('potaFilters') || '{}');
+if (!('allParks' in potaFilters)) {
+    potaFilters = { myActivations: true, currentlyActivating: true, newParks: true, allParks: true };
+}
+
+// Configurable color thresholds. 'greenMax' means 1..greenMax is green; >greenMax is red; 0 is blue.
+window.potaThresholds = JSON.parse(localStorage.getItem('potaThresholds') || '{}');
+if (!('greenMax' in potaThresholds)) {
+    potaThresholds = { greenMax: 5 }; // default per Perry's example
+}
+
+// Helpers
+function savePotaFilters() { localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); }
+function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
+
+
+function shouldDisplayParkFlags(flags){
+    const isUserActivated = !!(flags && flags.isUserActivated);
+    const isActive = !!(flags && flags.isActive);
+    const isNew = !!(flags && flags.isNew);
+
+    // When "All spots" is ON: show everything EXCEPT any categories that are toggled OFF.
+    if (potaFilters.allParks){
+        if (potaFilters.myActivations === false && isUserActivated) return false;
+        if (potaFilters.currentlyActivating === false && isActive) return false;
+        if (potaFilters.newParks === false && isNew) return false;
+        return true; // otherwise include
+    }
+
+    // When "All spots" is OFF: OR together any categories that are toggled ON.
+    const anySpecific =
+        !!potaFilters.myActivations ||
+        !!potaFilters.currentlyActivating ||
+        !!potaFilters.newParks;
+
+    if (!anySpecific) return false;
+
+    return (potaFilters.myActivations && isUserActivated)
+        || (potaFilters.currentlyActivating && isActive)
+        || (potaFilters.newParks && isNew);
+}
+function getMarkerColorConfigured(activations, isUserActivated, created) {
+    try {
+        const now = new Date();
+        const createdDate = new Date(created);
+        const ageInDays = isFinite(createdDate) ? ((now - createdDate) / (1000 * 60 * 60 * 24)) : Infinity;
+        if (ageInDays <= 30) return "#800080"; // New park: purple
+        if (isUserActivated) return "#ffa500"; // User activated: orange
+        if (typeof activations === 'number' && activations > (potaThresholds.greenMax ?? 5)) return "#ff6666"; // red
+        if (typeof activations === 'number' && activations > 0) return "#90ee90"; // green
+        return "#0000ff"; // blue
+    } catch(e) {
+        return "#0000ff";
+    }
+}
+
+// Build Filters UI inside the hamburger menu
+function buildFiltersPanel() {
+    const menu = document.getElementById('menu');
+    if (!menu) return;
+
+    // Hide old toggle button if present
+    const oldToggle = document.getElementById('toggleActivations');
+    if (oldToggle) oldToggle.style.display = 'none';
+
+    // Remove any previously inserted filters panel or legacy copies
+    const oldPanels = menu.querySelectorAll('.filters-panel');
+    oldPanels.forEach(p => p.parentElement && p.parentElement.remove());
+
+    const li = document.createElement('li');
+    li.id = 'filtersPanelContainer';
+
+    li.innerHTML = `
+    <div class="filters-panel">
+      <div class="filters-title">Filters</div>
+      <div class="filters-grid">
+        <button class="filter-chip" id="chipMyActs"   type="button" aria-pressed="false">Mine</button>
+        <button class="filter-chip" id="chipOnAir"    type="button" aria-pressed="false">Active</button>
+        <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New</button>
+        <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All / Clr</button>
+
+        <!-- Threshold chip with inline number input -->
+        <button class="filter-chip" id="chipThreshold" type="button" aria-pressed="false">
+          <span id="thresholdLabel">Threshold</span>
+          <input type="number" id="greenInlineInput" min="1" max="999" step="1"
+                 class="threshold-inline-input" inputmode="numeric" aria-label="Max activations for green">
+        </button>
+      </div>
+    </div>
+  `;
+
+    // Insert near top of menu
+    menu.insertBefore(li, menu.firstChild?.nextSibling || null);
+
+    // Ensure state object exists + defaults
+    if (typeof window.potaThresholds !== 'object' || window.potaThresholds === null) {
+        window.potaThresholds = {};
+    }
+    if (typeof potaThresholds.greenMax !== 'number') potaThresholds.greenMax = 5;
+    if (typeof potaThresholds.thresholdEnabled !== 'boolean') potaThresholds.thresholdEnabled = true;
+
+    // Elements
+    const thresholdChip = document.getElementById('chipThreshold');
+    const thresholdLabel = document.getElementById('thresholdLabel');
+    const greenInline = document.getElementById('greenInlineInput');
+
+    const getEnabled = () => !!potaThresholds.thresholdEnabled;
+
+    const updateChipState = () => {
+        const enabled = getEnabled();
+        thresholdChip.setAttribute('aria-pressed', String(enabled));
+        thresholdChip.classList.toggle('active', enabled);
+
+        if (enabled) {
+            // Show "Green ≤" and reveal input (CSS handles visibility when .active)
+            thresholdLabel.textContent = 'Green ≤';
+            greenInline.value = potaThresholds.greenMax;
+        } else {
+            // Hide input (via CSS) and show "Threshold"
+            thresholdLabel.textContent = 'Threshold';
+        }
+    };
+
+    // Initialize
+    updateChipState();
+
+    // Prevent chip toggle when interacting with the input
+    const stopToggle = (e) => e.stopPropagation();
+    ['mousedown', 'click', 'touchstart'].forEach(evt =>
+        greenInline.addEventListener(evt, stopToggle, { passive: true })
+    );
+
+    // Toggle chip (only when not clicking in the input)
+    thresholdChip.addEventListener('click', () => {
+        potaThresholds.thresholdEnabled = !getEnabled();
+        if (typeof savePotaThresholds === 'function') savePotaThresholds();
+        updateChipState();
+        if (typeof refreshMarkers === 'function') refreshMarkers();
+        if (getEnabled()) setTimeout(() => greenInline.focus(), 0);
+    });
+
+    // Apply numeric value (updates on change & blur)
+    const applyGreen = (val) => {
+        const v = Math.max(1, Math.min(999, parseInt(val, 10)));
+        if (!isNaN(v)) {
+            potaThresholds.greenMax = v;
+            if (typeof savePotaThresholds === 'function') savePotaThresholds();
+            if (typeof refreshMarkers === 'function') refreshMarkers();
+        }
+    };
+
+    greenInline.addEventListener('change', (e) => applyGreen(e.target.value));
+    greenInline.addEventListener('blur', (e) => applyGreen(e.target.value));
+    greenInline.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+    });
+}
+
+
+
+
+// Lightweight refresh: clear and redraw current view using existing flow
+
+/* === Direct redraw path that respects potaFilters (Ada v7) === */
+async function redrawMarkersWithFilters(){
+    try{
+        if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
+        if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
+        map.activationsLayer.clearLayers();
+
+        const bounds = getCurrentMapBounds();
+        const userActivatedReferences = (activations || []).map(a => a.reference);
+
+        // Build a quick index for current spots by reference
+        const spotByRef = {};
+        if (Array.isArray(spots)) {
+            for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
+        }
+
+        parks.forEach((park) => {
+            const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+            if (!(latitude && longitude)) return;
+            const latLng = L.latLng(latitude, longitude);
+            if (!bounds.contains(latLng)) return;
+
+            const isUserActivated = userActivatedReferences.includes(reference);
+            let createdTime = null;
+            if (created) {
+                createdTime = typeof created === 'number' ? created : new Date(created).getTime();
+            }
+            const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
+            const currentActivation = spotByRef[reference];
+            const isActive = !!currentActivation;
+
+            if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+
+            // Determine marker class for animated divIcon
+            const markerClasses = [];
+            if (isNew) markerClasses.push('pulse-marker');
+            if (isActive) {
+                markerClasses.push('active-pulse-marker');
+                const mode = currentActivation.mode ? currentActivation.mode.toUpperCase() : '';
+                if (mode === 'CW') markerClasses.push('mode-cw');
+                else if (mode === 'SSB') markerClasses.push('mode-ssb');
+                else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
+            }
+            const markerClassName = markerClasses.join(' ');
+
+            const marker = markerClasses.length > 0
+                ? L.marker([latitude, longitude], {
+                    icon: L.divIcon({
+                        className: markerClassName,
+                        iconSize: [20, 20],
+                    })
+                })
+                : L.circleMarker([latitude, longitude], {
+                    radius: 6,
+                    fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
+                    color: "#000",
+                    weight: 1,
+                    opacity: 1,
+                    fillOpacity: 0.9,
+                });
+
+            const tooltipText = currentActivation
+                ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
+                : `${reference}: ${name} (${parkActivationCount} activations)`;
+
+            marker.park = park;
+            marker.currentActivation = currentActivation;
+
+            marker
+                .addTo(map.activationsLayer)
+                .bindPopup("<b>Loading park info...</b>", { keepInView: true, autoPan: true, autoPanPadding: [20,20] })
+                .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
+                .on('click', function(){ this.closeTooltip(); });
+
+            marker.on('popupopen', async function () {
+                try {
+                    const parkActivations = await fetchParkActivations(reference);
+                    await saveParkActivationsToIndexedDB(reference, parkActivations);
+                    let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                    this.setPopupContent(popupContent);
+                } catch (err) {
+                    this.setPopupContent("<b>Error loading park info.</b>");
+                    console.error(err);
+                }
+            });
+        });
+    }catch(e){
+        console.error("redrawMarkersWithFilters failed:", e);
+    }
+}
+
+function refreshMarkers(){
+    if (!map) return;
+    redrawMarkersWithFilters();
+}
+/* ==== end Filters & Thresholds block ==== */
+
+/* ==== end Filters & Thresholds block ==== */
+
 /**
  * Initializes the hamburger menu.
  */
@@ -132,6 +398,8 @@ function initializeMenu() {
 
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
+    buildFiltersPanel();
+    initializeFilterChips && initializeFilterChips();
     console.log("Hamburger menu initialized."); // Debugging
 
     // Add enhanced hamburger menu styles for mobile
@@ -2008,7 +2276,7 @@ function getActivatedParksInBounds(activations, parks, bounds) {
             console.log(`Park ${park.reference} (${park.name}) is within bounds: ${isWithin}`); // Debugging
             return isWithin;
         }
-       // console.warn(`Invalid park data for reference: ${activation.reference}`); // Debugging
+        // console.warn(`Invalid park data for reference: ${activation.reference}`); // Debugging
         return false;
     });
     console.log("Filtered Activated Parks:", filteredParks); // Debugging
@@ -2069,7 +2337,7 @@ async function updateActivationsInView() {
     }
 
 //    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
-        applyActivationToggleState();
+    applyActivationToggleState();
 }
 
 /**
@@ -2512,14 +2780,14 @@ function initializeMap(lat, lng) {
 
     // Attach dynamic spot fetching to map movement
     if (!isDesktopMode) {
-           mapInstance.on(
-                "moveend",
-               debounce(() => {
-                     console.log("Map moved or zoomed. Updating spots...");
-                     fetchAndDisplaySpotsInCurrentBounds(mapInstance)
-                       .then(() => applyActivationToggleState());
-                   }, 300)
-           );
+        mapInstance.on(
+            "moveend",
+            debounce(() => {
+                console.log("Map moved or zoomed. Updating spots...");
+                fetchAndDisplaySpotsInCurrentBounds(mapInstance)
+                    .then(() => applyActivationToggleState());
+            }, 300)
+        );
     }
 
     return mapInstance;
@@ -2559,6 +2827,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const currentActivation = spots?.find(spot => spot.reference === reference);
         const isActive = !!currentActivation;
 
+        // Apply Filters (OR semantics)
+        if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+
         // Debugging
         // if (isNew) {
         //     const delta = Date.now() - new Date(created).getTime();
@@ -2587,13 +2858,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             })
             : L.circleMarker([latitude, longitude], {
                 radius: 6,
-                fillColor: isUserActivated
-                    ? "#ffa500" // Orange
-                    : parkActivationCount > 10
-                        ? "#ff6666" // Light red
-                        : parkActivationCount > 0
-                            ? "#90ee90" // Light green
-                            : "#0000ff", // Blue
+                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
                 color: "#000",
                 weight: 1,
                 opacity: 1,
@@ -2608,19 +2873,19 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
             : `${reference}: ${name} (${parkActivationCount} activations)`;
 
-            marker
-                .addTo(layerGroup)
-                .bindPopup("<b>Loading park info...</b>", {
-                        // keep the popup fully in view
-                        keepInView: true,
-                        autoPan: true,
-                        // add a little breathing room around the popup
-                            autoPanPadding: [20, 20],
-                        // cap its width on small screens
-                            maxWidth: 280
-                })
+        marker
+            .addTo(layerGroup)
+            .bindPopup("<b>Loading park info...</b>", {
+                // keep the popup fully in view
+                keepInView: true,
+                autoPan: true,
+                // add a little breathing room around the popup
+                autoPanPadding: [20, 20],
+                // cap its width on small screens
+                maxWidth: 280
+            })
 
-    .bindTooltip(tooltipText, {
+            .bindTooltip(tooltipText, {
                 direction: "top",
                 opacity: 0.9,
                 sticky: false,
@@ -3398,3 +3663,71 @@ window.addEventListener('resize', debounce(() => {
         applyActivationToggleState();
     }
 }, 300));
+
+
+function initializeFilterChips(){
+    const pairs = [
+        ['chipMyActs','myActivations'],
+        ['chipOnAir','currentlyActivating'],
+        ['chipNewParks','newParks'],
+        ['chipAllParks','allParks'],
+    ];
+
+    function setChip(btn, on){ btn.classList.toggle('active', !!on); btn.setAttribute('aria-pressed', !!on); }
+
+    function updateChipStates(){
+        const chipAll = document.getElementById('chipAllParks');
+        if (chipAll) setChip(chipAll, !!potaFilters.allParks);
+
+        [['chipMyActs','myActivations'],['chipOnAir','currentlyActivating'],['chipNewParks','newParks']].forEach(([id,key])=>{
+            const el = document.getElementById(id);
+            if (!el) return;
+            setChip(el, !!potaFilters[key]);
+        });
+    }
+
+    // Initialize states
+    updateChipStates();
+
+    // Wire individual chips
+    const chipMy = document.getElementById('chipMyActs');
+    const chipOnAir = document.getElementById('chipOnAir');
+    const chipNew = document.getElementById('chipNewParks');
+    const chipAll = document.getElementById('chipAllParks');
+
+    if (chipMy) chipMy.addEventListener('click', ()=>{
+        potaFilters.myActivations = !potaFilters.myActivations;
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+    if (chipOnAir) chipOnAir.addEventListener('click', ()=>{
+        potaFilters.currentlyActivating = !potaFilters.currentlyActivating;
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+    if (chipNew) chipNew.addEventListener('click', ()=>{
+        potaFilters.newParks = !potaFilters.newParks;
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+    if (chipAll) chipAll.addEventListener('click', ()=>{
+        const willBeOn = !potaFilters.allParks;
+        potaFilters.allParks = willBeOn;
+        if (willBeOn){
+            potaFilters.myActivations = true;
+            potaFilters.currentlyActivating = true;
+            potaFilters.newParks = true;
+        } else {
+            potaFilters.myActivations = false;
+            potaFilters.currentlyActivating = false;
+            potaFilters.newParks = false;
+        }
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+}
+
