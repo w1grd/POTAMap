@@ -51,14 +51,33 @@ if (!('greenMax' in potaThresholds)) {
 function savePotaFilters() { localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); }
 function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
 
+
 function shouldDisplayParkFlags(flags){
-    if (potaFilters.allParks) return true;
-    const anySpecific = potaFilters.myActivations || potaFilters.currentlyActivating || potaFilters.newParks;
+    const isUserActivated = !!(flags && flags.isUserActivated);
+    const isActive = !!(flags && flags.isActive);
+    const isNew = !!(flags && flags.isNew);
+
+    // When "All spots" is ON: show everything EXCEPT any categories that are toggled OFF.
+    if (potaFilters.allParks){
+        if (potaFilters.myActivations === false && isUserActivated) return false;
+        if (potaFilters.currentlyActivating === false && isActive) return false;
+        if (potaFilters.newParks === false && isNew) return false;
+        return true; // otherwise include
+    }
+
+    // When "All spots" is OFF: OR together any categories that are toggled ON.
+    const anySpecific =
+        !!potaFilters.myActivations ||
+        !!potaFilters.currentlyActivating ||
+        !!potaFilters.newParks;
+
     if (!anySpecific) return false;
-    return (potaFilters.myActivations && flags.isUserActivated)
-        || (potaFilters.currentlyActivating && flags.isActive)
-        || (potaFilters.newParks && flags.isNew);
-}function getMarkerColorConfigured(activations, isUserActivated, created) {
+
+    return (potaFilters.myActivations && isUserActivated)
+        || (potaFilters.currentlyActivating && isActive)
+        || (potaFilters.newParks && isNew);
+}
+function getMarkerColorConfigured(activations, isUserActivated, created) {
     try {
         const now = new Date();
         const createdDate = new Date(created);
