@@ -292,5 +292,43 @@
 .threshold-input{ -moz-appearance:textfield; }
 
 /* ==== end Filters panel styles ==== */
+/* === Compact filter chips to match other buttons === */
+.filters-grid {
+    gap: 6px;                     /* tighten spacing a touch */
+}
+
+.filter-chip{
+    /* size + typography to match your other buttons */
+    padding: 6px 10px;            /* was 8px 10px */
+    font-size: 0.95rem;           /* less shouty */
+    font-weight: 600;             /* match other buttons */
+    border-radius: 10px;          /* slightly tighter pill */
+    line-height: 1.1;
+}
+
+/* Active (green) state stays consistent */
+.filter-chip.active{
+    background:#14532d;
+    color:#fff;
+    border-color:#14532d;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+/* Inline threshold input inside the chip: size + alignment */
+.filter-chip .threshold-inline-input{
+    width: 3.4ch;                 /* a bit narrower so the chip stays compact */
+    margin-left: 6px;
+    font-weight: 600;             /* match chip text */
+    height: 24px;                 /* align visually with chip height */
+    line-height: 24px;
+}
+
+/* When active, give the inline input a subtle boundary for legibility on green */
+.filter-chip.active .threshold-inline-input{
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.35);
+    border-radius: 6px;
+    padding: 0 6px;
+}
 
 #menu .switch, #menu .switch-label { display:none !important; }
