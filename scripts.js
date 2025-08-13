@@ -51,6 +51,13 @@ if (!('greenMax' in potaThresholds)) {
 function savePotaFilters() { localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); }
 function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
 
+// Mode filters for active spots
+window.modeFilters = JSON.parse(localStorage.getItem('modeFilters') || '{}');
+if (!('new' in modeFilters)) {
+    modeFilters = { new: true, data: true, cw: true, ssb: true, unk: true };
+}
+function saveModeFilters() { localStorage.setItem('modeFilters', JSON.stringify(modeFilters)); }
+
 
 function shouldDisplayParkFlags(flags){
     const isUserActivated = !!(flags && flags.isUserActivated);
@@ -76,6 +83,17 @@ function shouldDisplayParkFlags(flags){
     return (potaFilters.myActivations && isUserActivated)
         || (potaFilters.currentlyActivating && isActive)
         || (potaFilters.newParks && isNew);
+}
+
+function shouldDisplayByMode(isActive, isNew, mode){
+    if (!isActive) return true;
+    if (isNew && !modeFilters.new) return false;
+    let key = 'unk';
+    if (mode === 'CW') key = 'cw';
+    else if (mode === 'SSB') key = 'ssb';
+    else if (mode === 'FT8' || mode === 'FT4') key = 'data';
+    if (!modeFilters[key]) return false;
+    return true;
 }
 function getMarkerColorConfigured(activations, isUserActivated, created) {
     try {
@@ -127,8 +145,8 @@ function buildFiltersPanel() {
     </div>
   `;
 
-    // Insert near top of menu
-    menu.insertBefore(li, menu.firstChild?.nextSibling || null);
+    // Insert at top of menu
+    menu.insertBefore(li, menu.firstChild || null);
 
     // Ensure state object exists + defaults
     if (typeof window.potaThresholds !== 'object' || window.potaThresholds === null) {
@@ -194,6 +212,69 @@ function buildFiltersPanel() {
     });
 }
 
+function buildModeFilterPanel(){
+    const menu = document.getElementById('menu');
+    if (!menu) return;
+
+    // nuke old copy if present
+    const old = document.getElementById('modeFilterPanelContainer');
+    if (old) old.remove();
+
+    // find the Filters panel <li> so we can insert right after it
+    const anchor = document.getElementById('filtersPanelContainer');
+
+    const li = document.createElement('li');
+    li.id = 'modeFilterPanelContainer';
+    li.innerHTML = `
+  <div class="mode-filter-panel" role="group" aria-label="Activation mode filters">
+    <div class="mode-dots-row">
+      <button class="mode-dot dot-new"  data-mode="new"  aria-pressed="${modeFilters.new}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
+      <button class="mode-dot dot-data" data-mode="data" aria-pressed="${modeFilters.data}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
+      <button class="mode-dot dot-cw"   data-mode="cw"   aria-pressed="${modeFilters.cw}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
+      <button class="mode-dot dot-ssb"  data-mode="ssb"  aria-pressed="${modeFilters.ssb}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
+      <button class="mode-dot dot-unk"  data-mode="unk"  aria-pressed="${modeFilters.unk}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
+    </div>
+    <div class="mode-dots-labels">
+      <span>New</span><span>Data</span><span>CW</span><span>SSB</span><span>Unk</span>
+    </div>
+  </div>
+`;
+
+
+    // insert right after Filters panel; if not found, put at top
+    if (anchor?.nextSibling) menu.insertBefore(li, anchor.nextSibling);
+    else menu.insertBefore(li, menu.firstChild || null);
+
+    // initialize visual "off" state + interactions
+    li.querySelectorAll('.mode-dot').forEach(btn => {
+        const mode = btn.dataset.mode;
+        const isOn = !!modeFilters[mode];
+        btn.classList.toggle('off', !isOn);
+        btn.setAttribute('aria-pressed', String(isOn));
+
+        btn.addEventListener('click', () => {
+            const next = !modeFilters[mode];
+            modeFilters[mode] = next;
+            btn.classList.toggle('off', !next);
+            btn.setAttribute('aria-pressed', String(next));
+            saveModeFilters();
+            // redraw (uses shouldDisplayByMode)
+            if (typeof refreshMarkers === 'function') refreshMarkers();
+            else if (typeof redrawMarkersWithFilters === 'function') redrawMarkersWithFilters();
+
+        });
+    });
+}
 
 
 
@@ -229,15 +310,16 @@ async function redrawMarkersWithFilters(){
             const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
             const currentActivation = spotByRef[reference];
             const isActive = !!currentActivation;
+            const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
             if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+            if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
             // Determine marker class for animated divIcon
             const markerClasses = [];
             if (isNew) markerClasses.push('pulse-marker');
             if (isActive) {
                 markerClasses.push('active-pulse-marker');
-                const mode = currentActivation.mode ? currentActivation.mode.toUpperCase() : '';
                 if (mode === 'CW') markerClasses.push('mode-cw');
                 else if (mode === 'SSB') markerClasses.push('mode-ssb');
                 else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
@@ -399,6 +481,7 @@ function initializeMenu() {
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
     buildFiltersPanel();
+    buildModeFilterPanel();
     initializeFilterChips && initializeFilterChips();
     console.log("Hamburger menu initialized."); // Debugging
 
@@ -2826,9 +2909,11 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 //        const isNew = (Date.now() - new Date(created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
         const currentActivation = spots?.find(spot => spot.reference === reference);
         const isActive = !!currentActivation;
+        const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
         // Apply Filters (OR semantics)
         if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+        if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
         // Debugging
         // if (isNew) {
@@ -2841,11 +2926,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         if (isNew) markerClasses.push('pulse-marker');
         if (isActive) {
             markerClasses.push('active-pulse-marker');
-            const mode = currentActivation.mode ? currentActivation.mode.toUpperCase() : '';
             if (mode === 'CW') markerClasses.push('mode-cw');
             else if (mode === 'SSB') markerClasses.push('mode-ssb');
-            else if (mode === 'FT8') markerClasses.push('mode-data');
-            else if (mode === 'FT4') markerClasses.push('mode-data');
+            else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
         }
         const markerClassName = markerClasses.join(' ');
 
