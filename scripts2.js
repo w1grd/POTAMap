@@ -51,6 +51,13 @@ if (!('greenMax' in potaThresholds)) {
 function savePotaFilters() { localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); }
 function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
 
+// Mode filters for active spots
+window.modeFilters = JSON.parse(localStorage.getItem('modeFilters') || '{}');
+if (!('new' in modeFilters)) {
+    modeFilters = { new: true, data: true, cw: true, ssb: true, unk: true };
+}
+function saveModeFilters() { localStorage.setItem('modeFilters', JSON.stringify(modeFilters)); }
+
 
 function shouldDisplayParkFlags(flags){
     const isUserActivated = !!(flags && flags.isUserActivated);
@@ -76,6 +83,17 @@ function shouldDisplayParkFlags(flags){
     return (potaFilters.myActivations && isUserActivated)
         || (potaFilters.currentlyActivating && isActive)
         || (potaFilters.newParks && isNew);
+}
+
+function shouldDisplayByMode(isActive, isNew, mode){
+    if (!isActive) return true;
+    if (isNew && !modeFilters.new) return false;
+    let key = 'unk';
+    if (mode === 'CW') key = 'cw';
+    else if (mode === 'SSB') key = 'ssb';
+    else if (mode === 'FT8' || mode === 'FT4') key = 'data';
+    if (!modeFilters[key]) return false;
+    return true;
 }
 function getMarkerColorConfigured(activations, isUserActivated, created) {
     try {
@@ -127,8 +145,8 @@ function buildFiltersPanel() {
     </div>
   `;
 
-    // Insert near top of menu
-    menu.insertBefore(li, menu.firstChild?.nextSibling || null);
+    // Insert at top of menu
+    menu.insertBefore(li, menu.firstChild || null);
 
     // Ensure state object exists + defaults
     if (typeof window.potaThresholds !== 'object' || window.potaThresholds === null) {
@@ -151,11 +169,11 @@ function buildFiltersPanel() {
 
         if (enabled) {
             // Show "Green ≤" and reveal input (CSS handles visibility when .active)
-            thresholdLabel.textContent = 'Green ≤';
+            thresholdLabel.textContent = 'Max A:';
             greenInline.value = potaThresholds.greenMax;
         } else {
             // Hide input (via CSS) and show "Threshold"
-            thresholdLabel.textContent = 'Threshold';
+            thresholdLabel.textContent = 'Max A';
         }
     };
 
@@ -194,7 +212,48 @@ function buildFiltersPanel() {
     });
 }
 
+function buildModeFilterPanel() {
+    const menu = document.getElementById('menu');
+    if (!menu) return;
 
+    const old = document.getElementById('modeFilterPanelContainer');
+    if (old) old.remove();
+
+    const li = document.createElement('li');
+    li.id = 'modeFilterPanelContainer';
+    li.innerHTML = `
+      <div class="mode-filter-panel">
+        <div class="mode-filter-row">
+          <button class="mode-filter-btn" data-mode="new" aria-pressed="${modeFilters.new}"><span class="pulse-marker"></span></button>
+          <button class="mode-filter-btn" data-mode="data" aria-pressed="${modeFilters.data}"><span class="active-pulse-marker mode-data"></span></button>
+          <button class="mode-filter-btn" data-mode="cw" aria-pressed="${modeFilters.cw}"><span class="active-pulse-marker mode-cw"></span></button>
+          <button class="mode-filter-btn" data-mode="ssb" aria-pressed="${modeFilters.ssb}"><span class="active-pulse-marker mode-ssb"></span></button>
+          <button class="mode-filter-btn" data-mode="unk" aria-pressed="${modeFilters.unk}"><span class="active-pulse-marker"></span></button>
+        </div>
+        <div class="mode-filter-labels">
+          <span>New</span>
+          <span>Data</span>
+          <span>CW</span>
+          <span>SSB</span>
+          <span>Unk/QRT</span>
+        </div>
+      </div>
+    `;
+    menu.insertBefore(li, menu.firstChild?.nextSibling || null);
+
+    li.querySelectorAll('.mode-filter-btn').forEach(btn => {
+        const mode = btn.dataset.mode;
+        if (!modeFilters[mode]) btn.classList.add('off');
+        btn.addEventListener('click', () => {
+            const willBeOn = !modeFilters[mode];
+            modeFilters[mode] = willBeOn;
+            btn.classList.toggle('off', !willBeOn);
+            btn.setAttribute('aria-pressed', String(willBeOn));
+            saveModeFilters();
+            applyActivationToggleState();
+        });
+    });
+}
 
 
 // Lightweight refresh: clear and redraw current view using existing flow
@@ -229,15 +288,16 @@ async function redrawMarkersWithFilters(){
             const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
             const currentActivation = spotByRef[reference];
             const isActive = !!currentActivation;
+            const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
             if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+            if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
             // Determine marker class for animated divIcon
             const markerClasses = [];
             if (isNew) markerClasses.push('pulse-marker');
             if (isActive) {
                 markerClasses.push('active-pulse-marker');
-                const mode = currentActivation.mode ? currentActivation.mode.toUpperCase() : '';
                 if (mode === 'CW') markerClasses.push('mode-cw');
                 else if (mode === 'SSB') markerClasses.push('mode-ssb');
                 else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
@@ -399,6 +459,7 @@ function initializeMenu() {
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
     buildFiltersPanel();
+    buildModeFilterPanel();
     initializeFilterChips && initializeFilterChips();
     console.log("Hamburger menu initialized."); // Debugging
 
@@ -2826,9 +2887,11 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 //        const isNew = (Date.now() - new Date(created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
         const currentActivation = spots?.find(spot => spot.reference === reference);
         const isActive = !!currentActivation;
+        const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
         // Apply Filters (OR semantics)
         if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+        if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
         // Debugging
         // if (isNew) {
@@ -2841,11 +2904,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         if (isNew) markerClasses.push('pulse-marker');
         if (isActive) {
             markerClasses.push('active-pulse-marker');
-            const mode = currentActivation.mode ? currentActivation.mode.toUpperCase() : '';
             if (mode === 'CW') markerClasses.push('mode-cw');
             else if (mode === 'SSB') markerClasses.push('mode-ssb');
-            else if (mode === 'FT8') markerClasses.push('mode-data');
-            else if (mode === 'FT4') markerClasses.push('mode-data');
+            else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
         }
         const markerClassName = markerClasses.join(' ');
 
