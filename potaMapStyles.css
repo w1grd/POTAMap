@@ -253,3 +253,66 @@
 @media (prefers-reduced-motion: reduce) {
     .filter-chip { transition: none; }
 }
+/* ===== Mini mode filter panel (dots + labels) ===== */
+.mode-filter-panel{
+    padding: 8px 10px 6px;
+    margin-top: 8px;
+    margin-bottom: 6px;
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+}
+
+.mode-dots-row{
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    gap: 8px;
+}
+
+.mode-dot{
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #111;
+    display: inline-block;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+    -webkit-appearance: none;
+}
+
+.mode-dot:focus-visible{
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+}
+
+/* colors */
+.dot-new  { background: #800080; }             /* purple */
+.dot-data { background: #ff6666; }             /* red-ish */
+.dot-cw   { background: #008000; }             /* green */
+.dot-ssb  { background: #cc9900; }             /* yellow/goldenrod */
+.dot-unk  { background: #1e90ff; }             /* blue */
+
+/* "off" = dimmed */
+.mode-dot.off{
+    filter: grayscale(100%) brightness(45%);
+}
+
+/* labels row */
+.mode-dots-labels{
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 6px;
+    color: #334155;
+}
+
+/* keep it compact on very small phones */
+@media (max-width: 360px){
+    .mode-dot{ width: 14px; height: 14px; }
+    .mode-dots-labels{ font-size: 11px; }
+}

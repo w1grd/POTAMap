@@ -212,48 +212,57 @@ function buildFiltersPanel() {
     });
 }
 
-function buildModeFilterPanel() {
+function buildModeFilterPanel(){
     const menu = document.getElementById('menu');
     if (!menu) return;
 
+    // nuke old copy if present
     const old = document.getElementById('modeFilterPanelContainer');
     if (old) old.remove();
+
+    // find the Filters panel <li> so we can insert right after it
+    const anchor = document.getElementById('filtersPanelContainer');
 
     const li = document.createElement('li');
     li.id = 'modeFilterPanelContainer';
     li.innerHTML = `
-      <div class="mode-filter-panel">
-        <div class="mode-filter-row">
-          <button class="mode-filter-btn" data-mode="new" aria-pressed="${modeFilters.new}"><span class="pulse-marker"></span></button>
-          <button class="mode-filter-btn" data-mode="data" aria-pressed="${modeFilters.data}"><span class="active-pulse-marker mode-data"></span></button>
-          <button class="mode-filter-btn" data-mode="cw" aria-pressed="${modeFilters.cw}"><span class="active-pulse-marker mode-cw"></span></button>
-          <button class="mode-filter-btn" data-mode="ssb" aria-pressed="${modeFilters.ssb}"><span class="active-pulse-marker mode-ssb"></span></button>
-          <button class="mode-filter-btn" data-mode="unk" aria-pressed="${modeFilters.unk}"><span class="active-pulse-marker"></span></button>
-        </div>
-        <div class="mode-filter-labels">
-          <span>New</span>
-          <span>Data</span>
-          <span>CW</span>
-          <span>SSB</span>
-          <span>Unk/QRT</span>
-        </div>
+    <div class="mode-filter-panel" role="group" aria-label="Activation mode filters">
+      <div class="mode-dots-row">
+        <button class="mode-dot dot-new"  data-mode="new"  aria-pressed="${modeFilters.new}"></button>
+        <button class="mode-dot dot-data" data-mode="data" aria-pressed="${modeFilters.data}"></button>
+        <button class="mode-dot dot-cw"   data-mode="cw"   aria-pressed="${modeFilters.cw}"></button>
+        <button class="mode-dot dot-ssb"  data-mode="ssb"  aria-pressed="${modeFilters.ssb}"></button>
+        <button class="mode-dot dot-unk"  data-mode="unk"  aria-pressed="${modeFilters.unk}"></button>
       </div>
-    `;
-    menu.insertBefore(li, menu.firstChild?.nextSibling || null);
+      <div class="mode-dots-labels">
+        <span>New</span><span>Data</span><span>CW</span><span>SSB</span><span>Unk/QRT</span>
+      </div>
+    </div>
+  `;
 
-    li.querySelectorAll('.mode-filter-btn').forEach(btn => {
+    // insert right after Filters panel; if not found, put at top
+    if (anchor?.nextSibling) menu.insertBefore(li, anchor.nextSibling);
+    else menu.insertBefore(li, menu.firstChild || null);
+
+    // initialize visual "off" state + interactions
+    li.querySelectorAll('.mode-dot').forEach(btn => {
         const mode = btn.dataset.mode;
-        if (!modeFilters[mode]) btn.classList.add('off');
+        const isOn = !!modeFilters[mode];
+        btn.classList.toggle('off', !isOn);
+        btn.setAttribute('aria-pressed', String(isOn));
+
         btn.addEventListener('click', () => {
-            const willBeOn = !modeFilters[mode];
-            modeFilters[mode] = willBeOn;
-            btn.classList.toggle('off', !willBeOn);
-            btn.setAttribute('aria-pressed', String(willBeOn));
+            const next = !modeFilters[mode];
+            modeFilters[mode] = next;
+            btn.classList.toggle('off', !next);
+            btn.setAttribute('aria-pressed', String(next));
             saveModeFilters();
-            applyActivationToggleState();
+            // redraw (uses shouldDisplayByMode)
+            if (typeof refreshMarkers === 'function') refreshMarkers();
         });
     });
 }
+
 
 
 // Lightweight refresh: clear and redraw current view using existing flow
