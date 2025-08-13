@@ -264,24 +264,38 @@
     box-shadow: 0 1px 6px rgba(0,0,0,0.04);
 }
 
-.mode-dots-row{
-    display: flex;
-    justify-content: space-around;
+.mode-dots-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr); /* equal-width cells */
+    justify-items: center;                 /* center dots in each cell */
     align-items: center;
-    gap: 8px;
+    width: 100%;
+    margin-bottom: 4px; /* give a little space before labels */
 }
 
-.mode-dot{
-    width: 16px;
-    height: 16px;
+.mode-dots-labels {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr); /* match the dots row exactly */
+    justify-items: center;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 0; /* remove extra gap */
+}
+
+
+.mode-dot {
+    width: 18px;              /* same value as height for perfect circle */
+    height: 18px;
     border-radius: 50%;
     border: 2px solid #111;
-    display: inline-block;
-    padding: 0;
+    padding: 0;               /* kill default button padding */
     background: transparent;
+    display: inline-block;
     cursor: pointer;
-    -webkit-appearance: none;
+    -webkit-appearance: none; /* reset iOS button quirks */
+    aspect-ratio: 1 / 1;      /* ensure square no matter what */
 }
+
 
 .mode-dot:focus-visible{
     outline: 2px solid #2563eb;
@@ -300,16 +314,6 @@
     filter: grayscale(100%) brightness(45%);
 }
 
-/* labels row */
-.mode-dots-labels{
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 8px;
-    font-size: 12px;
-    text-align: center;
-    margin-top: 6px;
-    color: #334155;
-}
 
 /* keep it compact on very small phones */
 @media (max-width: 360px){
