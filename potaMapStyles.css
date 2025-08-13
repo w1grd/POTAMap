@@ -283,24 +283,33 @@
 }
 
 
-.mode-dot {
-    width: 18px;              /* same value as height for perfect circle */
-    height: 18px;
-    border-radius: 50%;
+/* Replace your .mode-dot rule with this */
+.mode-dot{
+    width: 20px;
+    height: 20px;
+    box-sizing: border-box;   /* keep border from changing the aspect */
     border: 2px solid #111;
-    padding: 0;               /* kill default button padding */
+    border-radius: 50%;
+    padding: 0;
+    margin: 0;
+
+    display: block;           /* avoid inline baseline weirdness */
+    line-height: 0;           /* kill font metrics */
+    font-size: 0;
+
     background: transparent;
-    display: inline-block;
     cursor: pointer;
-    -webkit-appearance: none; /* reset iOS button quirks */
-    aspect-ratio: 1 / 1;      /* ensure square no matter what */
+    appearance: none;
+    -webkit-appearance: none;
+    aspect-ratio: 1 / 1;      /* belt-and-suspenders */
 }
 
-
+/* keep */
 .mode-dot:focus-visible{
     outline: 2px solid #2563eb;
     outline-offset: 2px;
 }
+
 
 /* colors */
 .dot-new  { background: #800080; }             /* purple */
