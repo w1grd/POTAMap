@@ -211,11 +211,34 @@
 }
 
 /* ================= Mode filter panel ================= */
-.mode-filter-panel {
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
+/* Panel container stays the same */
+.mode-filter-panel{
+    padding: 8px 10px 6px;
+    margin-top: 8px;
+    margin-bottom: 6px;
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+}
+
+/* Dots row and labels: same 5-column grid for perfect alignment */
+.mode-dots-row{
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    justify-items: center;
     align-items: center;
+    width: 100%;
+    margin-bottom: 4px;
+}
+.mode-dots-labels{
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    justify-items: center;
+    width: 100%;
+    font-size: 12px;
+    line-height: 1.1;
+    margin-top: 0;
 }
 .mode-filter-row {
     display: flex;
@@ -253,51 +276,22 @@
 @media (prefers-reduced-motion: reduce) {
     .filter-chip { transition: none; }
 }
-/* ===== Mini mode filter panel (dots + labels) ===== */
-.mode-filter-panel{
-    padding: 8px 10px 6px;
-    margin-top: 8px;
-    margin-bottom: 6px;
-    border: 1px solid rgba(0,0,0,0.08);
-    border-radius: 10px;
-    background: #fff;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.04);
-}
 
-.mode-dots-row {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr); /* equal-width cells */
-    justify-items: center;                 /* center dots in each cell */
-    align-items: center;
-    width: 100%;
-    margin-bottom: 4px; /* give a little space before labels */
-}
-
-.mode-dots-labels {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr); /* match the dots row exactly */
-    justify-items: center;
-    font-size: 12px;
-    text-align: center;
-    margin-top: 0; /* remove extra gap */
-}
-
-
-/* Button container (square, no UA quirks) */
+/* Button container (no UA quirks) */
 .mode-dot{
-    width: 28px;                 /* tap target, adjust if you like */
+    width: 28px;                 /* tap target */
     height: 28px;
     padding: 0;
     margin: 0;
     border: 0;
     background: transparent;
-    display: block;
+    display: grid;               /* center the SVG */
+    place-items: center;
+    cursor: pointer;
     appearance: none;
     -webkit-appearance: none;
-    line-height: 0;
-    box-sizing: content-box;     /* keep the inner circle exact */
-    cursor: pointer;
 }
+
 /* The actual round dot */
 .mode-dot::after{
     content: "";
@@ -316,17 +310,38 @@
 .dot-ssb::after  { background: #cc9900; }  /* yellow/goldenrod */
 .dot-unk::after  { background: #1e90ff; }  /* blue */
 
+/* Colors per mode */
+.mode-dot.dot-new  { --dot-color: #800080; }  /* purple */
+.mode-dot.dot-data { --dot-color: #ff6666; }  /* red-ish */
+.mode-dot.dot-cw   { --dot-color: #008000; }  /* green */
+.mode-dot.dot-ssb  { --dot-color: #cc9900; }  /* goldenrod */
+.mode-dot.dot-unk  { --dot-color: #1e90ff; }  /* blue */
+
+/* Dim state */
+.mode-dot.off circle{
+    filter: grayscale(100%) brightness(45%);
+}
+
 /* Dimmed/off state */
 .mode-dot.off::after{
     filter: grayscale(100%) brightness(45%);
 }
-
-/* Focus ring */
+/* SVG circle — this is the actual dot */
+.mode-dot svg{
+    width: 18px;                 /* visual circle size */
+    height: 18px;
+    display: block;
+}
+.mode-dot circle{
+    cx: 9; cy: 9; r: 7;          /* keep stroke fully inside */
+    stroke: #111;
+    stroke-width: 2;
+    fill: var(--dot-color, #000);
+}
 .mode-dot:focus-visible{
     outline: 2px solid #2563eb;
     outline-offset: 2px;
 }
-
 
 /* colors */
 .dot-new  { background: #800080; }             /* purple */
@@ -341,8 +356,9 @@
 }
 
 
-/* keep it compact on very small phones */
+/* small phones */
 @media (max-width: 360px){
-    .mode-dot{ width: 14px; height: 14px; }
+    .mode-dot{ width: 24px; height: 24px; }
+    .mode-dot svg{ width: 16px; height: 16px; }
     .mode-dots-labels{ font-size: 11px; }
 }
