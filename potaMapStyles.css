@@ -277,51 +277,46 @@
     .filter-chip { transition: none; }
 }
 
-/* Button container (no UA quirks) */
+/* Make the button itself invisible so only the circle shows */
 .mode-dot{
-    width: 28px;                 /* tap target */
-    height: 28px;
-    padding: 0;
-    margin: 0;
-    border: 0;
-    background: transparent;
-    display: grid;               /* center the SVG */
-    place-items: center;
+    width: 28px; height: 28px;          /* tap target */
+    display: grid; place-items: center;  /* center the SVG */
+    padding: 0; margin: 0;
+
+    background: transparent !important;  /* kill UA backgrounds */
+    border: 0 !important;                /* no border box */
+    border-radius: 0 !important;         /* no rounded rect */
+    box-shadow: none !important;
+    appearance: none; -webkit-appearance: none;
+    -webkit-tap-highlight-color: transparent;
     cursor: pointer;
-    appearance: none;
-    -webkit-appearance: none;
 }
 
 
 
 /* Colors per mode */
-.mode-dot.dot-new  { --dot-color: #800080; }  /* purple */
-.mode-dot.dot-data { --dot-color: #ff6666; }  /* red-ish */
-.mode-dot.dot-cw   { --dot-color: #008000; }  /* green */
-.mode-dot.dot-ssb  { --dot-color: #cc9900; }  /* goldenrod */
-.mode-dot.dot-unk  { --dot-color: #1e90ff; }  /* blue */
+.mode-dot.dot-new  { --dot-color: #800080; }
+.mode-dot.dot-data { --dot-color: #ff6666; }
+.mode-dot.dot-cw   { --dot-color: #008000; }
+.mode-dot.dot-ssb  { --dot-color: #cc9900; }
+.mode-dot.dot-unk  { --dot-color: #1e90ff; }
 
 /* Dim state */
-.mode-dot.off circle{
-    filter: grayscale(100%) brightness(45%);
+.mode-dot.off circle{ filter: grayscale(100%) brightness(45%); }
+
+
+.mode-dot svg{ width: 18px; height: 18px; display: block; }
+.mode-dot circle{
+    cx: 9; cy: 9; r: 7;
+    stroke: #111; stroke-width: 2;
+    fill: var(--dot-color, #000);        /* color lives on the circle */
 }
 
-/* SVG circle — this is the actual dot */
-.mode-dot svg{
-    width: 18px;                 /* visual circle size */
-    height: 18px;
-    display: block;
-}
-.mode-dot circle{
-    cx: 9; cy: 9; r: 7;          /* keep stroke fully inside */
-    stroke: #111;
-    stroke-width: 2;
-    fill: var(--dot-color, #000);
-}
 .mode-dot:focus-visible{
     outline: 2px solid #2563eb;
     outline-offset: 2px;
 }
+
 
 /* colors */
 .dot-new  { background: #800080; }             /* purple */
@@ -336,9 +331,8 @@
 }
 
 
-/* small phones */
+/* Small phones */
 @media (max-width: 360px){
     .mode-dot{ width: 24px; height: 24px; }
     .mode-dot svg{ width: 16px; height: 16px; }
-    .mode-dots-labels{ font-size: 11px; }
 }
