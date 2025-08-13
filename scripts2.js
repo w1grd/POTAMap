@@ -270,6 +270,8 @@ function buildModeFilterPanel(){
             saveModeFilters();
             // redraw (uses shouldDisplayByMode)
             if (typeof refreshMarkers === 'function') refreshMarkers();
+            else if (typeof redrawMarkersWithFilters === 'function') redrawMarkersWithFilters();
+
         });
     });
 }
