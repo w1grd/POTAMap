@@ -226,19 +226,30 @@ function buildModeFilterPanel(){
     const li = document.createElement('li');
     li.id = 'modeFilterPanelContainer';
     li.innerHTML = `
-    <div class="mode-filter-panel" role="group" aria-label="Activation mode filters">
-      <div class="mode-dots-row">
-        <button class="mode-dot dot-new"  data-mode="new"  aria-pressed="${modeFilters.new}"></button>
-        <button class="mode-dot dot-data" data-mode="data" aria-pressed="${modeFilters.data}"></button>
-        <button class="mode-dot dot-cw"   data-mode="cw"   aria-pressed="${modeFilters.cw}"></button>
-        <button class="mode-dot dot-ssb"  data-mode="ssb"  aria-pressed="${modeFilters.ssb}"></button>
-        <button class="mode-dot dot-unk"  data-mode="unk"  aria-pressed="${modeFilters.unk}"></button>
-      </div>
-      <div class="mode-dots-labels">
-        <span>New</span><span>Data</span><span>CW</span><span>SSB</span><span>Unk/QRT</span>
-      </div>
+  <div class="mode-filter-panel" role="group" aria-label="Activation mode filters">
+    <div class="mode-dots-row">
+      <button class="mode-dot dot-new"  data-mode="new"  aria-pressed="${modeFilters.new}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
+      <button class="mode-dot dot-data" data-mode="data" aria-pressed="${modeFilters.data}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
+      <button class="mode-dot dot-cw"   data-mode="cw"   aria-pressed="${modeFilters.cw}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
+      <button class="mode-dot dot-ssb"  data-mode="ssb"  aria-pressed="${modeFilters.ssb}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
+      <button class="mode-dot dot-unk"  data-mode="unk"  aria-pressed="${modeFilters.unk}">
+        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+      </button>
     </div>
-  `;
+    <div class="mode-dots-labels">
+      <span>New</span><span>Data</span><span>CW</span><span>SSB</span><span>Unk</span>
+    </div>
+  </div>
+`;
+
 
     // insert right after Filters panel; if not found, put at top
     if (anchor?.nextSibling) menu.insertBefore(li, anchor.nextSibling);
