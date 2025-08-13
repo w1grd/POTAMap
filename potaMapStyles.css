@@ -42,8 +42,8 @@
 }
 
 /* Darker shadow tones for better visibility */
-.active-pulse-marker.mode-cw   { --pulse-shadow-color: 0, 100, 0;    } /* dark green */
-.active-pulse-marker.mode-ssb  { --pulse-shadow-color: 204, 153, 0;  } /* dark goldenrod */
+.active-pulse-marker.mode-cw   { --pulse-shadow-color: 0, 160, 0;    } /* dark green */
+.active-pulse-marker.mode-ssb  { --pulse-shadow-color: 230, 185, 0;  } /* dark goldenrod */
 .active-pulse-marker.mode-data { --pulse-shadow-color: 255, 102, 102;} /* light red */
 
 @keyframes pulse-ring-live {
