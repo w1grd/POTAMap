@@ -283,28 +283,45 @@
 }
 
 
-/* Replace your .mode-dot rule with this */
+/* Button container (square, no UA quirks) */
 .mode-dot{
-    width: 20px;
-    height: 20px;
-    box-sizing: border-box;   /* keep border from changing the aspect */
-    border: 2px solid #111;
-    border-radius: 50%;
+    width: 28px;                 /* tap target, adjust if you like */
+    height: 28px;
     padding: 0;
     margin: 0;
-
-    display: block;           /* avoid inline baseline weirdness */
-    line-height: 0;           /* kill font metrics */
-    font-size: 0;
-
+    border: 0;
     background: transparent;
-    cursor: pointer;
+    display: block;
     appearance: none;
     -webkit-appearance: none;
-    aspect-ratio: 1 / 1;      /* belt-and-suspenders */
+    line-height: 0;
+    box-sizing: content-box;     /* keep the inner circle exact */
+    cursor: pointer;
+}
+/* The actual round dot */
+.mode-dot::after{
+    content: "";
+    display: block;
+    width: 16px;                 /* the circle size */
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #111;
+    margin: 0 auto;              /* center in the button */
 }
 
-/* keep */
+/* Colors (apply to the circle) */
+.dot-new::after  { background: #800080; }  /* purple */
+.dot-data::after { background: #ff6666; }  /* red-ish */
+.dot-cw::after   { background: #008000; }  /* green */
+.dot-ssb::after  { background: #cc9900; }  /* yellow/goldenrod */
+.dot-unk::after  { background: #1e90ff; }  /* blue */
+
+/* Dimmed/off state */
+.mode-dot.off::after{
+    filter: grayscale(100%) brightness(45%);
+}
+
+/* Focus ring */
 .mode-dot:focus-visible{
     outline: 2px solid #2563eb;
     outline-offset: 2px;
