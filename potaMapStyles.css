@@ -63,7 +63,22 @@
     animation: none !important;
     -webkit-animation: none !important;
 }
+/* Desktop mode: shrink mode filter dots by ~20% */
+.desktop-mode .mode-dot {
+    width: 28px;   /* was 34px */
+    height: 28px;
+}
 
+.desktop-mode .mode-dot svg {
+    width: 18px;   /* was 22px */
+    height: 18px;
+}
+
+.desktop-mode .mode-dot circle {
+    cx: 9;
+    cy: 9;
+    r: 7;
+}
 /* ================= General layout ================= */
 
 #menu {
