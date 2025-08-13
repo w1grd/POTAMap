@@ -292,23 +292,7 @@
     -webkit-appearance: none;
 }
 
-/* The actual round dot */
-.mode-dot::after{
-    content: "";
-    display: block;
-    width: 16px;                 /* the circle size */
-    height: 16px;
-    border-radius: 50%;
-    border: 2px solid #111;
-    margin: 0 auto;              /* center in the button */
-}
 
-/* Colors (apply to the circle) */
-.dot-new::after  { background: #800080; }  /* purple */
-.dot-data::after { background: #ff6666; }  /* red-ish */
-.dot-cw::after   { background: #008000; }  /* green */
-.dot-ssb::after  { background: #cc9900; }  /* yellow/goldenrod */
-.dot-unk::after  { background: #1e90ff; }  /* blue */
 
 /* Colors per mode */
 .mode-dot.dot-new  { --dot-color: #800080; }  /* purple */
@@ -322,10 +306,6 @@
     filter: grayscale(100%) brightness(45%);
 }
 
-/* Dimmed/off state */
-.mode-dot.off::after{
-    filter: grayscale(100%) brightness(45%);
-}
 /* SVG circle — this is the actual dot */
 .mode-dot svg{
     width: 18px;                 /* visual circle size */
