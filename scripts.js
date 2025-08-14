@@ -3571,7 +3571,7 @@ async function checkAndUpdateModesAtStartup() {
 async function checkAndUpdateModesAtStartup() {
     try {
         // If you keep modes at a different URL/path, change it here:
-        await fetchAndCacheModes({ url: MODES_DEFAULT_URL, chunkSize: 1000 });
+        await fetchAndCacheModes({ url: MODES_URL, chunkSize: 1000 });
     } catch (err) {
         console.warn('[modes] update failed:', err);
     }
