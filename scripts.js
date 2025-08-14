@@ -3385,10 +3385,10 @@ async function fetchAndApplyUserActivations(callsign = null) {
 }
 // === Modes ingestion (initial + rolling updates) =============================
 
-const MODES_URL = '/potamap/data/modes.json';
+const MODES_URL = '/potamap/backend/modes.json';
 const MODES_CHANGES_URLS = [
-    '/potamap/data/modes-changes.json',     // your preferred name
-    '/potamap/data/mode-changes.json'       // fallback if you used the earlier name
+    '/potamap/backend/modes-changes.json',     // your preferred name
+    '/potamap/backend/modes-changes.json'       // fallback if you used the earlier name
 ];
 
 const MODES_KEYS = {
