@@ -14,14 +14,57 @@ let previousMapState = {
     displayedParks: [],
 };
 
-// --- PQL display filter helpers --------------------------------------------
-function _addSimpleParkMarkerTo(layer, park) {
+// --- PQL display filter helpers (highlight-only; keep base parks visible) --------
+function ensurePqlPulseCss() {
+    if (document.getElementById('pql-pulse-css')) return;
+    const css = `
+.pql-pulse-icon { pointer-events: auto; }
+.pql-pulse {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  margin-left: -14px;
+  margin-top: -14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 0, 0.95);
+  box-shadow: 0 0 0 2px #000 inset, 0 0 4px rgba(0,0,0,0.6);
+}
+.pql-pulse::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin-left: -14px;
+  margin-top: -14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 215, 0, 0.9);
+  animation: pqlPulse 1.8s ease-out infinite;
+}
+@keyframes pqlPulse {
+  0%   { transform: translate(-50%, -50%) scale(1.0); opacity: 0.9; }
+  70%  { transform: translate(-50%, -50%) scale(2.0); opacity: 0; }
+  100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+}`.trim();
+    const style = document.createElement('style');
+    style.id = 'pql-pulse-css';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
+
+function _addPqlHighlightMarker(layer, park) {
     if (!(park.latitude && park.longitude)) return;
-    const m = L.circleMarker([park.latitude, park.longitude], {
-        radius: 8, fillColor: '#ffff00', color: '#000', weight: 2, opacity: 1, fillOpacity: 0.8
-    }).addTo(layer);
-    const tooltipText = `${park.name} (${park.reference})`;
-    m.bindTooltip(tooltipText, { direction: 'top', className: 'custom-tooltip' });
+    ensurePqlPulseCss();
+    const icon = L.divIcon({
+        className: 'pql-pulse-icon',
+        html: '<div class="pql-pulse"></div>',
+        iconSize: [28,28],
+        iconAnchor: [14,14]
+    });
+    const m = L.marker([park.latitude, park.longitude], { icon, riseOnHover: true, keyboard: false }).addTo(layer);
+    const tip = `${park.name} (${park.reference})`;
+    m.bindTooltip(tip, { direction: 'top', className: 'custom-tooltip' });
     m.on('click', async () => {
         const html = await fetchFullPopupContent(park);
         m.bindPopup(html).openPopup();
@@ -32,29 +75,19 @@ function applyPqlFilterDisplay(matchedParks) {
     if (!map) return;
     map._pql = map._pql || {};
 
-    // Hide base parks layer(s) if we have a known layer reference
-    if (map.parksLayer && map.hasLayer(map.parksLayer)) {
-        map._pql.baseWasVisible = true;
-        map.removeLayer(map.parksLayer);
-    }
+    // Build/clear highlight layer (keep base parks visible for context)
+    if (!map._pql.highlightLayer) map._pql.highlightLayer = L.layerGroup().addTo(map);
+    map._pql.highlightLayer.clearLayers();
 
-    // Build/clear filter layer
-    if (!map._pql.filterLayer) map._pql.filterLayer = L.layerGroup().addTo(map);
-    map._pql.filterLayer.clearLayers();
-
-    for (const park of matchedParks) _addSimpleParkMarkerTo(map._pql.filterLayer, park);
+    for (const park of matchedParks) _addPqlHighlightMarker(map._pql.highlightLayer, park);
 }
 
 function clearPqlFilterDisplay() {
     if (!map) return;
     const P = map._pql || {};
-
-    if (P.filterLayer) {
-        P.filterLayer.clearLayers();
-        if (map.hasLayer(P.filterLayer)) map.removeLayer(P.filterLayer);
-    }
-    if (P.baseWasVisible && map.parksLayer && !map.hasLayer(map.parksLayer)) {
-        map.addLayer(map.parksLayer);
+    if (P.highlightLayer) {
+        P.highlightLayer.clearLayers();
+        if (map.hasLayer(P.highlightLayer)) map.removeLayer(P.highlightLayer);
     }
     map._pql = {};
 }
