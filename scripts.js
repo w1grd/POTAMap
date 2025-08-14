@@ -1883,20 +1883,19 @@ function fallbackToDefaultLocation() {
  * @param {Event} event - The input event from the search box.
  */
 function handleSearchInput(event) {
-    const query = normalizeString(event.target.value);
-    // Structured Query Language branch: only when input starts with '?' or '? '
-    if (event.target.value.trim().startsWith('?')) {
-        const raw = event.target.value;
+    const raw = event.target.value || '';
+    const trimmed = raw.trim();
+
+    // PQL branch — no auto-zoom while typing, and *return* so we don't fall through.
+    if (trimmed.startsWith('?')) {
         const parsed = parseStructuredQuery(raw);
-        // Save previous state if not already saved
-        if (!previousMapState.bounds) {
-            previousMapState = {
-                bounds: map.getBounds(),
-                displayedParks: [...parks],
-            };
-        }
+
+        // highlight layer
+        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
+        map.highlightLayer.clearLayers();
+
+        // context limited to current view
         const bounds = getCurrentMapBounds();
-        // Build spot index and user-activated set
         const spotByRef = {};
         if (Array.isArray(spots)) {
             for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
@@ -1905,109 +1904,78 @@ function handleSearchInput(event) {
         const now = Date.now();
         const ctx = { bounds, spotByRef, userActivatedRefs, now };
 
-        // Filter
+        // filter + highlight (no setView/fitBounds here)
         const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
-
-        // Clear old highlights layer
-        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
-        map.highlightLayer.clearLayers();
-
-        // Highlight matches and build bounds
-        const groupBounds = [];
-        matched.forEach((park) => {
-            const { latitude, longitude } = park;
-            const m = L.circleMarker([latitude, longitude], {
-                radius: 8,
-                fillColor: '#ffff00',
-                color: '#000',
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.8
-            }).addTo(map.highlightLayer);
-            m.bindTooltip(`${park.name} (${park.reference})`, { direction: 'top', className: 'custom-tooltip' });
-            groupBounds.push([latitude, longitude]);
-        });
-
         currentSearchResults = matched;
 
-        // Do NOT auto-zoom while typing PQL; zoom happens on Enter in handleSearchEnter.return; // Do not fall through to legacy search
-    }
+        matched.forEach((park) => {
+            if (!(park.latitude && park.longitude)) return;
+            L.circleMarker([park.latitude, park.longitude], {
+                radius: 8,
+                fillOpacity: 0.8,
+                opacity: 1,
+                weight: 2,
+                color: '#000',
+                fillColor: '#ffff00'
+            })
+                .addTo(map.highlightLayer)
+                .bindTooltip(`${park.name} (${park.reference})`, { direction: 'top', className: 'custom-tooltip' })
+                .on('click', async (e) => {
+                    const html = await fetchFullPopupContent(park);
+                    e.target.bindPopup(html).openPopup();
+                });
+        });
 
-    console.log(`Search query received: "${query}"`); // Debugging
-
-    // Clear previous highlights
-    if (map.highlightLayer) {
-        map.highlightLayer.clearLayers();
-    } else {
-        map.highlightLayer = L.layerGroup().addTo(map);
-    }
-
-    // Save the map's state before searching (only once)
-    if (query && !previousMapState.bounds) {
-        previousMapState = {
-            bounds: map.getBounds(),
-            displayedParks: [...parks], // Save the currently displayed parks
-        };
-        console.log("Saved map state before search:", previousMapState); // Debugging
-    }
-
-    if (query === '') {
-        // If the search box is empty, reset the park display based on current filters
-        currentSearchResults = [];
-        resetParkDisplay();
+        // IMPORTANT: stop here so legacy path doesn't run
         return;
     }
 
-    // Get current map bounds
-    const bounds = getCurrentMapBounds();
+    // ===== Legacy (non-PQL) incremental search =====
+    const query = normalizeString(raw);
+    console.log(`Search query received: "${query}"`);
 
-    // Filter parks within the visible map bounds based on the search query
+    if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
+    map.highlightLayer.clearLayers();
+
+    if (!query) {
+        currentSearchResults = [];
+        return;
+    }
+
+    const bounds = getCurrentMapBounds();
     const filteredParks = parks.filter(park => {
-        const isWithinBounds =
-            park.latitude && park.longitude && bounds.contains([park.latitude, park.longitude]);
-        return (
-            isWithinBounds &&
-            (normalizeString(park.name).includes(query) ||
-                normalizeString(park.reference).includes(query))
-        );
+        if (!(park.latitude && park.longitude)) return false;
+        const latLng = L.latLng(park.latitude, park.longitude);
+        if (!bounds.contains(latLng)) return false;
+
+        const nameMatch = normalizeString(park.name).includes(query);
+        const idMatch = normalizeString(park.reference).includes(query);
+        const locMatch = normalizeString(park?.city || park?.state || park?.country || '').includes(query);
+        return nameMatch || idMatch || locMatch;
     });
 
-    console.log(`Parks matching search within bounds: ${filteredParks.length}`); // Debugging
-
-    // Update the global search results
     currentSearchResults = filteredParks;
 
-    // Highlight matching parks dynamically
-    filteredParks.forEach((park, index) => {
-        const markerSize = index === 0 ? 20 : 15; // Larger size for the top result
-        const markerColor = index === 0 ? "#ff6600" : "#ffa500"; // Different color for emphasis
-
-        const highlightMarker = L.circleMarker([park.latitude, park.longitude], {
-            radius: markerSize,
-            fillColor: markerColor,
-            color: "#000",
-            weight: 2,
+    filteredParks.forEach((park) => {
+        L.circleMarker([park.latitude, park.longitude], {
+            radius: 8,
+            fillOpacity: 0.8,
             opacity: 1,
-            fillOpacity: 0.8
-        }).addTo(map.highlightLayer);
-
-        highlightMarker.bindTooltip(`${park.name} (${park.reference})`, {
-            direction: "top",
-            className: "custom-tooltip"
-        });
-
-        // Optionally bind the full popup content
-        highlightMarker.on('click', async () => {
-            const popupContent = await fetchFullPopupContent(park);
-            highlightMarker.bindPopup(popupContent).openPopup();
-        });
+            weight: 2,
+            color: '#000',
+            fillColor: '#ffff00'
+        })
+            .addTo(map.highlightLayer)
+            .bindTooltip(`${park.name} (${park.reference})`, { direction: 'top', className: 'custom-tooltip' })
+            .on('click', async (e) => {
+                const html = await fetchFullPopupContent(park);
+                e.target.bindPopup(html).openPopup();
+            });
     });
 
-    // If there is a single match, zoom to it
-    if (filteredParks.length === 1) {
-        zoomToPark(filteredParks[0]);
-    }
+    // (Still no auto-zoom here; Enter zooms in handleSearchEnter)
 }
+
 
 /**
  * Handles the 'Enter' key press in the search box to zoom to the searched park(s).
