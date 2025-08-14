@@ -14,6 +14,65 @@ let previousMapState = {
     displayedParks: [],
 };
 
+// --- Lightweight Toast UI -------------------------------------------------
+function ensureToastCss() {
+    if (document.getElementById('pql-toast-css')) return;
+    const css = `
+  .toast-container{position:fixed;right:14px;top:14px;z-index:10000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  .toast{min-width:260px;max-width:360px;background:rgba(24,24,24,.92);color:#fff;border-radius:10px;padding:10px 12px;box-shadow:0 8px 20px rgba(0,0,0,.25);display:flex;align-items:flex-start;gap:10px;font:14px/1.35 system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  .toast .icon{flex:0 0 auto;margin-top:1px}
+  .toast .msg{flex:1 1 auto;white-space:pre-wrap}
+  .toast.success{background:rgba(24,120,24,.92)}
+  .toast.error{background:rgba(168,28,28,.92)}
+  .toast .spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  `;
+    const style = document.createElement('style');
+    style.id = 'pql-toast-css';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
+function showToast(message, opts = {}) {
+    ensureToastCss();
+    const { sticky = true, kind = '', showSpinner = true } = opts;
+    let cont = document.querySelector('.toast-container');
+    if (!cont) {
+        cont = document.createElement('div');
+        cont.className = 'toast-container';
+        document.body.appendChild(cont);
+    }
+    const el = document.createElement('div');
+    el.className = 'toast' + (kind ? (' ' + kind) : '');
+    const icon = document.createElement('div');
+    icon.className = 'icon';
+    icon.innerHTML = showSpinner ? '<div class="spinner"></div>' : 'ℹ️';
+    const msg = document.createElement('div');
+    msg.className = 'msg';
+    msg.textContent = message;
+    el.appendChild(icon); el.appendChild(msg);
+    cont.appendChild(el);
+    el.style.pointerEvents = 'auto';
+
+    let closed = false;
+    const api = {
+        update(m, k) {
+            if (m != null) msg.textContent = m;
+            if (k != null) {
+                el.classList.remove('success','error');
+                if (k) el.classList.add(k);
+            }
+        },
+        close(delay = 0) {
+            if (closed) return;
+            closed = true;
+            setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 220); }, delay);
+        }
+    };
+    if (!sticky) api.close(3000);
+    return api;
+}
+
+
 // --- PQL display filter helpers (highlight-only; keep base parks visible) --------
 function ensurePqlPulseCss() {
     if (document.getElementById('pql-pulse-css')) return;
@@ -3534,12 +3593,43 @@ async function fetchAndCacheModes({ chunkSize = 1000 } = {}) {
 
 // Keep this simple wrapper if you like having a single call site:
 async function checkAndUpdateModesAtStartup() {
+    const key = (typeof MODES_KEYS === 'object' && MODES_KEYS && MODES_KEYS.initialized) || 'modes.initialized';
+    const firstRun = !(localStorage.getItem(key) === '1');
+
+    const toast = showToast(
+        firstRun
+            ? 'Loading mode totals for all parks… this may take a bit on first run.'
+            : 'Checking for mode total updates…',
+        { sticky: true, showSpinner: true }
+    );
+
     try {
-        await fetchAndCacheModes({ chunkSize: 1000 });
+        const res = await fetchAndCacheModes({ chunkSize: 1000 });
+
+        if (!res) {
+            toast.update('Mode totals up to date.', 'success');
+            toast.close(1200);
+            return;
+        }
+        if (res.phase === 'initial') {
+            toast.update(`Mode totals loaded for ${res.applied} parks.`, 'success');
+            toast.close(1500);
+            return;
+        }
+        if (res.skipped) {
+            toast.update('Mode totals are already up to date.', 'success');
+            toast.close(1200);
+            return;
+        }
+        toast.update(`Mode totals updated (${res.applied} changes).`, 'success');
+        toast.close(1500);
     } catch (err) {
         console.warn('[modes] update failed:', err);
+        toast.update('Failed to load mode totals. Will retry later.', 'error');
+        toast.close(3500);
     }
 }
+
 
 /**
  * One-shot check+apply at startup. Call this after parks have been loaded/cached.
