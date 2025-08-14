@@ -1881,40 +1881,21 @@ function fallbackToDefaultLocation() {
  * Handles input in the search box and dynamically highlights matching parks within the visible map bounds.
  * @param {Event} event - The input event from the search box.
  */
-/**
- * Handles input in the search box and dynamically highlights matching parks within the visible map bounds.
- * PQL (starts with '?') is limited to current map bounds and does NOT auto-zoom while typing.
- * Pressing Enter is handled separately in handleSearchEnter.
- * @param {Event} event - The input event from the search box.
- */
 function handleSearchInput(event) {
-    const rawValue = event.target.value || '';
-    const trimmed = rawValue.trim();
-
-    // PQL branch: only act if it starts with '?'
-    if (trimmed.startsWith('?')) {
-        const parsed = parseStructuredQuery(rawValue);
-
-        // Avoid moving map or drawing until we actually have a constraint
-        const hasConstraint =
-            (parsed.text && parsed.text.length > 0) ||
-            parsed.mode !== null ||
-            parsed.max !== null ||
-            parsed.active !== null ||
-            parsed.isNew !== null ||
-            parsed.mine !== null ||
-            parsed.state !== null;
-
-        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
-        map.highlightLayer.clearLayers();
-
-        if (!hasConstraint) {
-            currentSearchResults = [];
-            return;
+    const query = normalizeString(event.target.value);
+    // Structured Query Language branch: only when input starts with '?' or '? '
+    if (event.target.value.trim().startsWith('?')) {
+        const raw = event.target.value;
+        const parsed = parseStructuredQuery(raw);
+        // Save previous state if not already saved
+        if (!previousMapState.bounds) {
+            previousMapState = {
+                bounds: map.getBounds(),
+                displayedParks: [...parks],
+            };
         }
-
-        // Context: limited to current bounds
         const bounds = getCurrentMapBounds();
+        // Build spot index and user-activated set
         const spotByRef = {};
         if (Array.isArray(spots)) {
             for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
@@ -1925,12 +1906,16 @@ function handleSearchInput(event) {
 
         // Filter
         const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
-        currentSearchResults = matched;
 
-        // Highlight only (no fitBounds here)
+        // Clear old highlights layer
+        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
+        map.highlightLayer.clearLayers();
+
+        // Highlight matches and build bounds
+        const groupBounds = [];
         matched.forEach((park) => {
-            if (!(park.latitude && park.longitude)) return;
-            const marker = L.circleMarker([park.latitude, park.longitude], {
+            const { latitude, longitude } = park;
+            const m = L.circleMarker([latitude, longitude], {
                 radius: 8,
                 fillColor: '#ffff00',
                 color: '#000',
@@ -1938,70 +1923,102 @@ function handleSearchInput(event) {
                 opacity: 1,
                 fillOpacity: 0.8
             }).addTo(map.highlightLayer);
-
-            marker.bindTooltip(`${park.name} (${park.reference})`, {
-                direction: 'top',
-                className: 'custom-tooltip'
-            });
-
-            marker.on('click', async () => {
-                const popupContent = await fetchFullPopupContent(park);
-                marker.bindPopup(popupContent).openPopup();
-            });
+            m.bindTooltip(`${park.name} (${park.reference})`, { direction: 'top', className: 'custom-tooltip' });
+            groupBounds.push([latitude, longitude]);
         });
 
-        // Stop here for PQL during typing. Zoom happens in handleSearchEnter.
-        return;
+        currentSearchResults = matched;
+
+        // Adjust map view
+        if (groupBounds.length === 1) {
+            map.setView(groupBounds[0], 14);
+        } else if (groupBounds.length > 1) {
+            map.fitBounds(groupBounds, { padding: [40, 40] });
+        }
+
+        return; // Do not fall through to legacy search
     }
 
-    // Legacy free-text search branch
-    const query = normalizeString(rawValue);
-    if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
-    map.highlightLayer.clearLayers();
+    console.log(`Search query received: "${query}"`); // Debugging
 
-    if (!query) {
+    // Clear previous highlights
+    if (map.highlightLayer) {
+        map.highlightLayer.clearLayers();
+    } else {
+        map.highlightLayer = L.layerGroup().addTo(map);
+    }
+
+    // Save the map's state before searching (only once)
+    if (query && !previousMapState.bounds) {
+        previousMapState = {
+            bounds: map.getBounds(),
+            displayedParks: [...parks], // Save the currently displayed parks
+        };
+        console.log("Saved map state before search:", previousMapState); // Debugging
+    }
+
+    if (query === '') {
+        // If the search box is empty, reset the park display based on current filters
         currentSearchResults = [];
+        resetParkDisplay();
         return;
     }
 
+    // Get current map bounds
     const bounds = getCurrentMapBounds();
-    const filteredParks = parks.filter(park => {
-        if (!(park.latitude && park.longitude)) return false;
-        const latLng = L.latLng(park.latitude, park.longitude);
-        if (!bounds.contains(latLng)) return false;
 
-        const nameMatch = normalizeString(park.name).includes(query);
-        const idMatch = normalizeString(park.reference).includes(query);
-        const locationMatch = normalizeString(park?.city || park?.state || park?.country || '').includes(query);
-        return nameMatch || idMatch || locationMatch;
+    // Filter parks within the visible map bounds based on the search query
+    const filteredParks = parks.filter(park => {
+        const isWithinBounds =
+            park.latitude && park.longitude && bounds.contains([park.latitude, park.longitude]);
+        return (
+            isWithinBounds &&
+            (normalizeString(park.name).includes(query) ||
+                normalizeString(park.reference).includes(query))
+        );
     });
 
+    console.log(`Parks matching search within bounds: ${filteredParks.length}`); // Debugging
+
+    // Update the global search results
     currentSearchResults = filteredParks;
 
-    filteredParks.forEach((park) => {
-        const marker = L.circleMarker([park.latitude, park.longitude], {
-            radius: 8,
-            fillColor: '#ffff00',
-            color: '#000',
+    // Highlight matching parks dynamically
+    filteredParks.forEach((park, index) => {
+        const markerSize = index === 0 ? 20 : 15; // Larger size for the top result
+        const markerColor = index === 0 ? "#ff6600" : "#ffa500"; // Different color for emphasis
+
+        const highlightMarker = L.circleMarker([park.latitude, park.longitude], {
+            radius: markerSize,
+            fillColor: markerColor,
+            color: "#000",
             weight: 2,
             opacity: 1,
             fillOpacity: 0.8
         }).addTo(map.highlightLayer);
 
-        marker.bindTooltip(`${park.name} (${park.reference})`, {
-            direction: 'top',
-            className: 'custom-tooltip'
+        highlightMarker.bindTooltip(`${park.name} (${park.reference})`, {
+            direction: "top",
+            className: "custom-tooltip"
         });
 
-        marker.on('click', async () => {
+        // Optionally bind the full popup content
+        highlightMarker.on('click', async () => {
             const popupContent = await fetchFullPopupContent(park);
-            marker.bindPopup(popupContent).openPopup();
+            highlightMarker.bindPopup(popupContent).openPopup();
         });
     });
 
-    // No auto-zoom while typing. Zoom on Enter is handled in handleSearchEnter.
+    // If there is a single match, zoom to it
+    if (filteredParks.length === 1) {
+        zoomToPark(filteredParks[0]);
+    }
 }
 
+/**
+ * Handles the 'Enter' key press in the search box to zoom to the searched park(s).
+ * @param {KeyboardEvent} event - The keyboard event triggered by key presses.
+ */
 function handleSearchEnter(event) {
     if (event.key === 'Enter') {
         event.preventDefault(); // Prevent form submission or other default actions
@@ -3924,11 +3941,16 @@ function addGoToParkButton() {
     if (searchBox) {
         searchBox.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
+                const raw = searchBox.value.trim();
+                if (raw.startsWith('?')) {
+                    // Let handleSearchEnter manage PQL Enter
+                    return;
+                }
                 event.preventDefault();
                 triggerGoToPark(true);
             }
         });
-        console.log("Enter key bound to Go To Park functionality.");
+        console.log("Enter key bound to Go To Park functionality (non-PQL only).");
     }
 }
 
@@ -3937,8 +3959,14 @@ function addGoToParkButton() {
  */
 function triggerGoToPark() {
     const searchBox = document.getElementById('searchBox');
+
     if (!searchBox || !searchBox.value.trim()) {
         alert('Please enter a search term.');
+        return;
+    }
+
+    if (searchBox.value.trim().startsWith('?')) {
+        // PQL Enter is handled by handleSearchEnter; ignore here to avoid duplicate alerts.
         return;
     }
 
@@ -3954,6 +3982,7 @@ function triggerGoToPark() {
         alert('No matching park.');
     }
 }
+
 
 // Initialize Go To Park button on DOMContentLoaded
 addEventListener('DOMContentLoaded', () => {
