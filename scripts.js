@@ -2456,11 +2456,13 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!parsed.isNew && recent) return false;
     }
 
-    // 5) MINE filter (example uses userActivatedRefs if you pass it in ctx)
+// 5) MINE filter (parks you've activated)
     if (parsed.mine !== null) {
-        const userHasActivated = userActivatedRefs && userActivatedRefs.includes(park.reference);
-        if (parsed.mine && userHasActivated) return false;    // MINE:0 means skip parks I've already done
-        if (!parsed.mine && !userHasActivated) return false;  // MINE:1 would mean only parks I've done
+        const userHasActivated = !!(userActivatedRefs && userActivatedRefs.includes(park.reference));
+        // MINE:true  -> keep ONLY parks I've activated
+        if (parsed.mine === true  && !userHasActivated) return false;
+        // MINE:false -> keep ONLY parks I have NOT activated
+        if (parsed.mine === false &&  userHasActivated) return false;
     }
 
     // 6) ACTIVE / MODE logic
