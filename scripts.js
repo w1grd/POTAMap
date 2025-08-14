@@ -82,8 +82,6 @@ function ensurePqlPulseCss() {
   position: relative;
   width: 28px;
   height: 28px;
-  margin-left: -14px;
-  margin-top: -14px;
   border-radius: 50%;
   background: rgba(255, 255, 0, 0.95);
   box-shadow: 0 0 0 2px #000 inset, 0 0 4px rgba(0,0,0,0.6);
@@ -95,8 +93,7 @@ function ensurePqlPulseCss() {
   top: 50%;
   width: 28px;
   height: 28px;
-  margin-left: -14px;
-  margin-top: -14px;
+  transform: translate(-50%, -50%) scale(1);
   border-radius: 50%;
   border: 2px solid rgba(255, 215, 0, 0.9);
   animation: pqlPulse 1.8s ease-out infinite;
@@ -105,12 +102,13 @@ function ensurePqlPulseCss() {
   0%   { transform: translate(-50%, -50%) scale(1.0); opacity: 0.9; }
   70%  { transform: translate(-50%, -50%) scale(2.0); opacity: 0; }
   100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
-}`.trim();
+}`;
     const style = document.createElement('style');
     style.id = 'pql-pulse-css';
     style.textContent = css;
     document.head.appendChild(style);
 }
+
 
 function _addPqlHighlightMarker(layer, park) {
     if (!(park.latitude && park.longitude)) return;
