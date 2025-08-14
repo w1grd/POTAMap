@@ -211,17 +211,10 @@ function buildFiltersPanel() {
     <div class="filters-panel">
       <div class="filters-title">Filters</div>
       <div class="filters-grid">
-        <button class="filter-chip" id="chipMyActs"   type="button" aria-pressed="false">Mine</button>
+        <button class="filter-chip" id="chipMyActs"   type="button" aria-pressed="false">My</button>
         <button class="filter-chip" id="chipOnAir"    type="button" aria-pressed="false">Active</button>
         <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New</button>
         <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All / Clr</button>
-
-        <!-- Threshold chip with inline number input -->
-        <button class="filter-chip" id="chipThreshold" type="button" aria-pressed="false">
-          <span id="thresholdLabel">Threshold</span>
-          <input type="number" id="greenInlineInput" min="1" max="999" step="1"
-                 class="threshold-inline-input" inputmode="numeric" aria-label="Max activations for green">
-        </button>
       </div>
     </div>
   `;
@@ -2494,25 +2487,12 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         return 0;
     };
 
-    // MODE matching:
-    // - If currently active, we still require the live spot's mode to match when MODE is present.
-    // - If not active, we accept based on modeTotals (park has ever had QSOs in that bucket).
-    if (parsed.mode) {
-        if (isActive) {
-            const liveMode = String(currentActivation.mode || '').toUpperCase();
-            if (parsed.mode === 'DATA') {
-                if (!(liveMode === 'FT8' || liveMode === 'FT4' || liveMode === 'DATA')) return false;
-            } else {
-                if (liveMode !== parsed.mode) return false;
-            }
-            // Additionally, make sure the park actually has QSOs in that bucket historically
-            if (countForMode(parsed.mode) <= 0) return false;
-        } else {
-            if (countForMode(parsed.mode) <= 0) return false;
-        }
-    }
 
-    // 7) MIN / MAX now apply to the selected bucket:
+    // MODE is research-oriented here:
+    // We select the bucket to evaluate (CW/SSB/DATA or TOTAL if none given).
+    // We DO NOT require the park to have >0 QSOs in that bucket,
+    // and we DO NOT require the live spot's mode to match.
+// 7) MIN / MAX now apply to the selected bucket:
     //    - if MODE is set, operate on that bucket (e.g. CW only)
     //    - if MODE is not set, operate on totalQSOs
     const selectedCount = countForMode(parsed.mode || null);
@@ -2726,32 +2706,49 @@ function updateMapWithFilteredParks(filteredParks) {
     applyActivationToggleState();
     console.log("Displayed filtered parks on the map."); // Debugging
 }
+// Unified Clear Search
 function clearSearchInput() {
+    // 1) Clear pulsing PQL overlay (if any)
+    try { clearPqlFilterDisplay(); } catch (e) {}
+
+    // 2) Clear legacy highlight layer (non-PQL incremental search)
+    if (map && map.highlightLayer) {
+        try { map.highlightLayer.clearLayers(); } catch (e) {}
+    }
+
+    // 3) Clear the search box
     const searchBox = document.getElementById('searchBox');
     if (searchBox) {
-        searchBox.value = ''; // Clear the input
-        console.log("Search input cleared."); // Debugging
+        searchBox.value = '';
+        // If you want to force downstream listeners to react, you can emit input:
+        // searchBox.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    // Clear highlights and reset the map view
-    if (map.highlightLayer) {
-        map.highlightLayer.clearLayers();
-    }
+    // 4) Drop any cached results from the last search
+    try { currentSearchResults = []; } catch (e) {}
 
-    if (previousMapState.bounds) {
-        // Restore the previous map bounds
-        map.fitBounds(previousMapState.bounds);
-
-        // Display the previously shown parks
-        const activatedReferences = activations.map((act) => act.reference);
-        //displayParksOnMap(map, previousMapState.displayedParks, activatedReferences, map.activationsLayer);
-        applyActivationToggleState();
-        console.log("Map view restored to prior state."); // Debugging
-
-        // Clear the saved state
-        previousMapState = { bounds: null, displayedParks: [] };
+    // 5) Restore the previous map view (if we saved it before the search)
+    if (previousMapState && previousMapState.bounds) {
+        try {
+            map.fitBounds(previousMapState.bounds);
+            // Restore base display according to current toggles/filters
+            if (typeof applyActivationToggleState === 'function') {
+                applyActivationToggleState();
+            }
+            // Clear saved state
+            previousMapState = { bounds: null, displayedParks: [] };
+            console.log('Map view restored to prior state.');
+        } catch (e) {
+            console.warn('Failed to restore previous map view:', e);
+        }
+    } else {
+        // If we didn’t save a state, at least ensure the base display is consistent
+        if (typeof applyActivationToggleState === 'function') {
+            applyActivationToggleState();
+        }
     }
 }
+
 
 /**
  * Adds event listeners to the search box and Clear button.
@@ -4291,17 +4288,4 @@ function initializeFilterChips(){
         updateChipStates();
         refreshMarkers();
     });
-}
-
-
-
-// Optional: Clear Search button hook (call this on your existing Clear Search handler)
-async function onClearSearchClicked() {
-    try { clearPqlFilterDisplay(); } catch(e) {}
-    // Also clear highlight layer if used by legacy search
-    if (map && map.highlightLayer) {
-        try { map.highlightLayer.clearLayers(); } catch(e) {}
-    }
-    const sb = document.getElementById('searchBox');
-    if (sb) sb.value = '';
 }
