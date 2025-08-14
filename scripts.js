@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//9
+//8
 //
 // Initialize global variables
 let activations = [];
@@ -1930,14 +1930,7 @@ function handleSearchInput(event) {
 
         currentSearchResults = matched;
 
-        // Adjust map view
-        if (groupBounds.length === 1) {
-            map.setView(groupBounds[0], 14);
-        } else if (groupBounds.length > 1) {
-            map.fitBounds(groupBounds, { padding: [40, 40] });
-        }
-
-        return; // Do not fall through to legacy search
+        // Do NOT auto-zoom while typing PQL; zoom happens on Enter in handleSearchEnter.return; // Do not fall through to legacy search
     }
 
     console.log(`Search query received: "${query}"`); // Debugging
