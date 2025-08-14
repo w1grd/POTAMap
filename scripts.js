@@ -109,7 +109,8 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
         return "#0000ff"; // blue
     } catch(e) {
         return "#0000ff";
-      }
+    }
+}
 
 // Build Filters UI inside the hamburger menu
 function buildFiltersPanel() {
@@ -380,34 +381,6 @@ function refreshMarkers(){
 /* ==== end Filters & Thresholds block ==== */
 
 /* ==== end Filters & Thresholds block ==== */
-
-// Clears the search box and resets the map display (PQL + legacy safe)
-function clearSearchInput() {
-    const searchEl = document.getElementById('searchBox');
-
-    // Clear the input field
-    if (searchEl) searchEl.value = '';
-
-    // Clear any in-memory results
-    currentSearchResults = [];
-
-    // Clear any highlight overlay
-    if (map && map.highlightLayer) {
-        map.highlightLayer.clearLayers();
-    }
-
-    // Return the map to its normal filtered state
-    if (typeof resetParkDisplay === 'function') {
-        resetParkDisplay();
-    } else if (typeof redrawMarkersWithFilters === 'function') {
-        // Fallback if your code uses this instead
-        redrawMarkersWithFilters();
-    } else if (typeof drawParkMarkers === 'function') {
-        // Last-resort fallback
-        drawParkMarkers();
-    }
-}
-
 
 /**
  * Initializes the hamburger menu.
@@ -1908,131 +1881,171 @@ function fallbackToDefaultLocation() {
  * Handles input in the search box and dynamically highlights matching parks within the visible map bounds.
  * @param {Event} event - The input event from the search box.
  */
-
 function handleSearchInput(event) {
-    const rawValue = event.target.value || '';
-    const query = normalizeString(rawValue);
+    const query = normalizeString(event.target.value);
+    // Structured Query Language branch: only when input starts with '?' or '? '
+    if (event.target.value.trim().startsWith('?')) {
+        const raw = event.target.value;
+        const parsed = parseStructuredQuery(raw);
+        // Save previous state if not already saved
+        if (!previousMapState.bounds) {
+            previousMapState = {
+                bounds: map.getBounds(),
+                displayedParks: [...parks],
+            };
+        }
+        const bounds = getCurrentMapBounds();
+        // Build spot index and user-activated set
+        const spotByRef = {};
+        if (Array.isArray(spots)) {
+            for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
+        }
+        const userActivatedRefs = (activations || []).map(a => a.reference);
+        const now = Date.now();
+        const ctx = { bounds, spotByRef, userActivatedRefs, now };
 
-    if (!map.highlightLayer) {
+        // Filter
+        const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
+
+        // Clear old highlights layer
+        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
+        map.highlightLayer.clearLayers();
+
+        // Highlight matches and build bounds
+        const groupBounds = [];
+        matched.forEach((park) => {
+            const { latitude, longitude } = park;
+            const m = L.circleMarker([latitude, longitude], {
+                radius: 8,
+                fillColor: '#ffff00',
+                color: '#000',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(map.highlightLayer);
+            m.bindTooltip(`${park.name} (${park.reference})`, { direction: 'top', className: 'custom-tooltip' });
+            groupBounds.push([latitude, longitude]);
+        });
+
+        currentSearchResults = matched;
+
+        // Adjust map view
+        if (groupBounds.length === 1) {
+            map.setView(groupBounds[0], 14);
+        } else if (groupBounds.length > 1) {
+            map.fitBounds(groupBounds, { padding: [40, 40] });
+        }
+
+        return; // Do not fall through to legacy search
+    }
+
+    console.log(`Search query received: "${query}"`); // Debugging
+
+    // Clear previous highlights
+    if (map.highlightLayer) {
+        map.highlightLayer.clearLayers();
+    } else {
         map.highlightLayer = L.layerGroup().addTo(map);
     }
-    map.highlightLayer.clearLayers();
 
-    if (rawValue.trim().startsWith('?')) {
-        (async () => {
-            const parsed = parseStructuredQuery(rawValue);
-            const matched = await runStructuredQuery(parsed);
-
-            if (!matched || matched.length === 0) {
-                currentSearchResults = [];
-                return;
-            }
-
-            if (!previousMapState.bounds) {
-                previousMapState = {
-                    bounds: map.getBounds(),
-                    displayedParks: [...parks],
-                };
-            }
-
-            const groupBounds = [];
-            matched.forEach((park) => {
-                const { latitude, longitude } = park;
-                const marker = L.circleMarker([latitude, longitude], {
-                    radius: 8,
-                    fillColor: '#ffff00',
-                    color: '#000',
-                    weight: 2,
-                    opacity: 1,
-                    fillOpacity: 0.8
-                }).addTo(map.highlightLayer);
-
-                marker.bindTooltip(`${park.name} (${park.reference})`, {
-                    direction: 'top',
-                    className: 'custom-tooltip'
-                });
-
-                groupBounds.push([latitude, longitude]);
-            });
-
-            currentSearchResults = matched;
-
-            if (groupBounds.length === 1) {
-                map.setView(groupBounds[0], 14);
-            } else if (groupBounds.length > 1) {
-                map.fitBounds(groupBounds, { padding: [40, 40] });
-            }
-        })();
-        return;
+    // Save the map's state before searching (only once)
+    if (query && !previousMapState.bounds) {
+        previousMapState = {
+            bounds: map.getBounds(),
+            displayedParks: [...parks], // Save the currently displayed parks
+        };
+        console.log("Saved map state before search:", previousMapState); // Debugging
     }
 
-    if (!query) {
+    if (query === '') {
+        // If the search box is empty, reset the park display based on current filters
         currentSearchResults = [];
         resetParkDisplay();
         return;
     }
 
-    if (!previousMapState.bounds) {
-        previousMapState = {
-            bounds: map.getBounds(),
-            displayedParks: [...parks],
-        };
-    }
-
+    // Get current map bounds
     const bounds = getCurrentMapBounds();
+
+    // Filter parks within the visible map bounds based on the search query
     const filteredParks = parks.filter(park => {
-        const inBounds = park.latitude && park.longitude && bounds.contains([park.latitude, park.longitude]);
-        if (!inBounds) return false;
-        const nm = normalizeString(park.name || '');
-        const ref = normalizeString(park.reference || '');
-        return nm.includes(query) || ref.includes(query);
+        const isWithinBounds =
+            park.latitude && park.longitude && bounds.contains([park.latitude, park.longitude]);
+        return (
+            isWithinBounds &&
+            (normalizeString(park.name).includes(query) ||
+                normalizeString(park.reference).includes(query))
+        );
     });
 
-    const groupBounds = [];
-    filteredParks.forEach((park) => {
-        const { latitude, longitude } = park;
-        const highlightMarker = L.circleMarker([latitude, longitude], {
-            radius: 8,
-            fillColor: '#ffff00',
-            color: '#000',
+    console.log(`Parks matching search within bounds: ${filteredParks.length}`); // Debugging
+
+    // Update the global search results
+    currentSearchResults = filteredParks;
+
+    // Highlight matching parks dynamically
+    filteredParks.forEach((park, index) => {
+        const markerSize = index === 0 ? 20 : 15; // Larger size for the top result
+        const markerColor = index === 0 ? "#ff6600" : "#ffa500"; // Different color for emphasis
+
+        const highlightMarker = L.circleMarker([park.latitude, park.longitude], {
+            radius: markerSize,
+            fillColor: markerColor,
+            color: "#000",
             weight: 2,
             opacity: 1,
             fillOpacity: 0.8
         }).addTo(map.highlightLayer);
 
         highlightMarker.bindTooltip(`${park.name} (${park.reference})`, {
-            direction: 'top',
-            className: 'custom-tooltip'
+            direction: "top",
+            className: "custom-tooltip"
         });
 
-        groupBounds.push([latitude, longitude]);
+        // Optionally bind the full popup content
+        highlightMarker.on('click', async () => {
+            const popupContent = await fetchFullPopupContent(park);
+            highlightMarker.bindPopup(popupContent).openPopup();
+        });
     });
 
-    currentSearchResults = filteredParks;
-
-    if (groupBounds.length === 1) {
-        map.setView(groupBounds[0], 14);
-    } else if (groupBounds.length > 1) {
-        map.fitBounds(groupBounds, { padding: [40, 40] });
+    // If there is a single match, zoom to it
+    if (filteredParks.length === 1) {
+        zoomToPark(filteredParks[0]);
     }
 }
-
 
 /**
  * Handles the 'Enter' key press in the search box to zoom to the searched park(s).
  * @param {KeyboardEvent} event - The keyboard event triggered by key presses.
  */
-
 function handleSearchEnter(event) {
-    if (event.key !== 'Enter') return;
+    if (event.key === 'Enter') {
+        event.preventDefault(); // Prevent form submission or other default actions
+        console.log("'Enter' key pressed in search box."); // Debugging
 
-    const rawValue = event.target.value || '';
-    const query = normalizeString(rawValue);
+        // Ensure the search box has a value
+        const searchBox = document.getElementById('searchBox');
+        if (!searchBox || !searchBox.value.trim()) {
+            console.warn("Search box is empty. No action taken."); // Debugging
+            return;
+        }
 
-    if (rawValue.trim().startsWith('?')) {
-        (async () => {
-            const parsed = parseStructuredQuery(rawValue);
-            const matched = await runStructuredQuery(parsed);
+        // Search for parks matching the input query
+        const query = normalizeString(searchBox.value.trim());
+        // If structured query, honor structured results
+        if (searchBox.value.trim().startsWith('?')) {
+            const parsed = parseStructuredQuery(searchBox.value);
+            const bounds = getCurrentMapBounds();
+            const spotByRef = {};
+            if (Array.isArray(spots)) {
+                for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
+            }
+            const userActivatedRefs = (activations || []).map(a => a.reference);
+            const now = Date.now();
+            const ctx = { bounds, spotByRef, userActivatedRefs, now };
+
+            const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
             currentSearchResults = matched;
 
             if (matched.length === 1) {
@@ -2042,45 +2055,36 @@ function handleSearchEnter(event) {
             } else {
                 alert('No parks match that query in the current view.');
             }
-        })();
-        return;
-    }
-
-    if (!query) {
-        currentSearchResults = [];
-        resetParkDisplay();
-        return;
-    }
-
-    if (currentSearchResults && currentSearchResults.length > 0) {
-        if (currentSearchResults.length === 1) {
-            zoomToPark(currentSearchResults[0]);
-        } else {
-            zoomToParks(currentSearchResults);
+            return;
         }
-        return;
-    }
 
-    const bounds = getCurrentMapBounds();
-    const filteredParks = parks.filter(park => {
-        const inBounds = park.latitude && park.longitude && bounds.contains([park.latitude, park.longitude]);
-        if (!inBounds) return false;
-        const nm = normalizeString(park.name || '');
-        const ref = normalizeString(park.reference || '');
-        return nm.includes(query) || ref.includes(query);
-    });
+        console.log(`Searching for parks matching: "${query}"`); // Debugging
 
-    currentSearchResults = filteredParks;
+        if (currentSearchResults.length > 0) {
+            if (currentSearchResults.length === 1) {
+                // If only one park matches, center and zoom to it
+                const park = currentSearchResults[0];
+                zoomToPark(park);
+            } else {
+                // If multiple parks match, fit the map bounds to include all
+                zoomToParks(currentSearchResults);
+            }
+        } else {
+            // Handle "Go To Park" functionality for the global dataset
+            const matchingPark = parks.find(park =>
+                normalizeString(park.name).includes(query) ||
+                normalizeString(park.reference).includes(query)
+            );
 
-    if (filteredParks.length === 1) {
-        zoomToPark(filteredParks[0]);
-    } else if (filteredParks.length > 1) {
-        zoomToParks(filteredParks);
-    } else {
-        alert('No parks match that search in the current view.');
+            if (matchingPark) {
+                zoomToPark(matchingPark);
+            } else {
+                // Display message only if no matches are found after searching
+                alert('No parks found matching your search criteria.');
+            }
+        }
     }
 }
-
 
 /**
  * Zooms the map to a single park's location and shows its full information popup,
@@ -2358,8 +2362,7 @@ function parseStructuredQuery(raw) {
         isNew: null,    // boolean
         mine: null,     // boolean
         state: null     // 'MA' etc.
-    }
-
+    };
     if (!q) return result;
 
     // Tokenize quoted strings and key:value pairs
@@ -2372,7 +2375,7 @@ function parseStructuredQuery(raw) {
             let j = i + 1;
             while (j < q.length && q[j] !== '"') j++;
             const val = q.slice(i + 1, j);
-            tokens.push(`TEXT:${val}`);
+            tokens.append ? tokens.append(val) : tokens.push(`TEXT:${val}`);
             i = (j < q.length) ? j + 1 : q.length;
         } else if (/\s/.test(ch)) {
             i++;
@@ -2427,95 +2430,8 @@ function parseStructuredQuery(raw) {
 
 /**
  * Tests whether a given park matches the parsed structured query.
- * Uses current map state (spots, activations) for ACTIVE and MINE filters.
+ * Uses current map state (spots, activations) for ACTIVE/MODE/MINE filters.
  */
-
-/**
- * Computes per-mode QSO totals for a park, using (in order):
- *  - park.activationsByMode { CW, PHONE, DATA } if present
- *  - IndexedDB 'parkActivations' aggregate
- *  - Fallback: fetch from POTA API (and cache), if allowed
- * Returns an object { CW, PHONE, DATA } with numbers (0 if unknown).
- */
-async function getModeTotalsForPark(park, allowFetch=true) {
-    // 1) Direct on-park cache (future-ready)
-    if (park && park.activationsByMode) {
-        const m = park.activationsByMode;
-        return {
-            CW: Number(m.CW || 0),
-            PHONE: Number(m.PHONE || m.SSB || 0),
-            DATA: Number(m.DATA || m.FT8 || 0)
-        };
-    }
-
-    // 2) IndexedDB
-    try {
-        const acts = await getParkActivationsFromIndexedDB(park.reference);
-        if (Array.isArray(acts) && acts.length) {
-            const cw = acts.reduce((sum, a) => sum + (a.qsosCW || a.cw || 0), 0);
-            const ph = acts.reduce((sum, a) => sum + (a.qsosPHONE || a.phone || 0), 0);
-            const dt = acts.reduce((sum, a) => sum + (a.qsosDATA || a.data || 0), 0);
-            return { CW: cw, PHONE: ph, DATA: dt };
-        }
-    } catch (e) {
-        console.warn("IndexedDB mode totals lookup failed for", park.reference, e);
-    }
-
-    // 3) Fetch from API on demand (expensive; view-limited)
-    if (allowFetch) {
-        try {
-            const fetched = await fetchParkActivations(park.reference);
-            if (Array.isArray(fetched)) {
-                await saveParkActivationsToIndexedDB(park.reference, fetched);
-                const cw = fetched.reduce((sum, a) => sum + (a.qsosCW || a.cw || 0), 0);
-                const ph = fetched.reduce((sum, a) => sum + (a.qsosPHONE || a.phone || 0), 0);
-                const dt = fetched.reduce((sum, a) => sum + (a.qsosDATA || a.data || 0), 0);
-                return { CW: cw, PHONE: ph, DATA: dt };
-            }
-        } catch (e) {
-            console.warn("API mode totals fetch failed for", park.reference, e);
-        }
-    }
-
-    return { CW: 0, PHONE: 0, DATA: 0 };
-}
-
-/**
- * Runs the full structured query across parks in the current view.
- * If MODE is specified, MAX applies to that mode's QSOs; otherwise MAX applies to total activations.
- * Returns Promise<Array<park>>.
- */
-async function runStructuredQuery(parsed) {
-    const bounds = getCurrentMapBounds();
-    const spotByRef = {};
-    if (Array.isArray(spots)) {
-        for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
-    }
-    const userActivatedRefs = (activations || []).map(a => a.reference);
-    const now = Date.now();
-    const ctx = { bounds, spotByRef, userActivatedRefs, now };
-
-    // First pass: synchronous filters (non-mode MAX handled here)
-    const prelim = parks.filter(park => parkMatchesStructuredQuery(park, parsed, ctx));
-
-    // Second pass: MODE-specific filtering if needed
-    if (parsed.mode) {
-        const modeKey = (parsed.mode === 'DATA') ? 'DATA' : (parsed.mode === 'SSB' ? 'PHONE' : parsed.mode);
-        const matched = [];
-        for (const park of prelim) {
-            const totals = await getModeTotalsForPark(park, true);
-            const count = totals[modeKey] || 0;
-            if (typeof parsed.max === 'number') {
-                if (count <= parsed.max) matched.push(park);
-            } else {
-                matched.push(park);
-            }
-        }
-        return matched;
-    }
-
-    return prelim;
-}
 function parkMatchesStructuredQuery(park, parsed, ctx) {
     // ctx: { bounds, spotByRef, userActivatedRefs, now }
     const { bounds, spotByRef, userActivatedRefs, now } = ctx;
@@ -2530,10 +2446,10 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!(nm.includes(parsed.text) || ref.includes(parsed.text))) return false;
     }
 
-    // Non-mode MAX applies to total activations
-    if (!parsed.mode && typeof parsed.max === 'number') {
-        const totalActs = typeof park.activations === 'number' ? park.activations : 0;
-        if (totalActs > parsed.max) return false;
+    // MAX activations
+    if (typeof parsed.max === 'number') {
+        const count = typeof park.activations === 'number' ? park.activations : 0;
+        if (!(count <= parsed.max)) return false;
     }
 
     // STATE
@@ -2559,1343 +2475,1350 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!parsed.isNew && isNew) return false;
     }
 
-    // ACTIVE
+    // ACTIVE / MODE
     const currentActivation = spotByRef[park.reference];
     const isActive = !!currentActivation;
     if (parsed.active !== null) {
         if (parsed.active && !isActive) return false;
         if (!parsed.active && isActive) return false;
     }
+    if (parsed.mode && isActive) {
+        const mode = (currentActivation.mode || '').toUpperCase();
+        if (parsed.mode === 'DATA') {
+            if (!(mode === 'FT8' || mode === 'FT4')) return false;
+        } else {
+            if (mode !== parsed.mode) return false;
+        }
+    } else if (parsed.mode && !isActive) {
+        // If MODE is specified but park is not active, we don't match
+        return false;
+    }
 
     return true;
 }
-
 /**
  * Filters and displays parks based on the maximum number of activations.
  * @param {number} maxActivations - The maximum number of activations to display.
  */
 function filterParksByActivations(maxActivations) {
-        if (!map) {
-            console.error("Map instance is not initialized.");
+    if (!map) {
+        console.error("Map instance is not initialized.");
+        return;
+    }
+
+    // Get current map bounds
+    const bounds = getCurrentMapBounds();
+    console.log("Current Map Bounds:", bounds.toBBoxString()); // Debugging
+
+    // Get all parks within the current bounds and meeting the activation criteria
+    const parksInBounds = parks.filter(park => {
+        if (park.latitude && park.longitude) {
+            const latLng = L.latLng(park.latitude, park.longitude);
+            return bounds.contains(latLng) && park.activations <= maxActivations;
+        }
+//        console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
+        return false;
+    });
+
+    console.log("Parks in Current View with Activations <= max:", parksInBounds); // Debugging
+
+    // Clear existing markers
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+        console.log("Cleared existing markers."); // Debugging
+    } else {
+        map.activationsLayer = L.layerGroup().addTo(map);
+        console.log("Created activationsLayer."); // Debugging
+    }
+
+    // Determine which parks are activated by the user within bounds
+    const activatedReferences = activations
+        .filter(act => parksInBounds.some(p => p.reference === act.reference))
+        .map(act => act.reference);
+
+    console.log("Activated References in Filtered View:", activatedReferences); // Debugging
+
+    // Display activated parks within current view based on slider
+    //displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
+    applyActivationToggleState();
+    console.log("Displayed activated parks within filtered view."); // Debugging
+}
+
+
+
+/**
+ * Displays the callsign(s) of the user's activations in the hamburger menu.
+ */
+function displayCallsign() {
+    const el = document.getElementById('callsignText');
+    if (!el) return;
+
+    const uniqueCallsigns = [...new Set(activations
+        .filter(act => act.activeCallsign)
+        .map(act => act.activeCallsign.trim())
+    )];
+
+    el.textContent = uniqueCallsigns.length > 0
+        ? uniqueCallsigns.join(', ')
+        : 'please set';
+}
+
+/**
+ * Removes the callsign display from the page.
+ */
+function removeCallsignDisplay() {
+    const callsignDiv = document.getElementById('callsignDisplay');
+    if (callsignDiv) {
+        callsignDiv.remove();
+        console.log("Calls-in display removed."); // Debugging
+    }
+}
+
+/**
+ * Retrieves the current geographical bounds of the map.
+ * @returns {L.LatLngBounds} The current map bounds.
+ */
+function getCurrentMapBounds() {
+    return map.getBounds();
+}
+function getParksInBounds(parks) {
+    const bounds = getCurrentMapBounds();
+    return parks.filter(p =>
+        p.latitude && p.longitude && bounds.contains([p.latitude, p.longitude])
+    );
+}
+
+/**
+ * Filters activated parks that are within the current map bounds.
+ * @param {Array} activations - The list of activated parks.
+ * @param {Array} parks - The complete list of parks.
+ * @param {L.LatLngBounds} bounds - The current map bounds.
+ * @returns {Array} List of activated parks within bounds.
+ */
+function getActivatedParksInBounds(activations, parks, bounds) {
+    const filteredParks = activations.filter((activation) => {
+        // Find the corresponding park in the parks list
+        const park = parks.find(p => p.reference === activation.reference);
+        if (park && park.latitude && park.longitude) {
+            const latLng = L.latLng(park.latitude, park.longitude);
+            const isWithin = bounds.contains(latLng);
+            console.log(`Park ${park.reference} (${park.name}) is within bounds: ${isWithin}`); // Debugging
+            return isWithin;
+        }
+        // console.warn(`Invalid park data for reference: ${activation.reference}`); // Debugging
+        return false;
+    });
+    console.log("Filtered Activated Parks:", filteredParks); // Debugging
+    return filteredParks;
+}
+
+/**
+ * Updates the map to display activated parks within the current map view.
+ */
+async function updateActivationsInView() {
+    if (!map) {
+        console.error("Map instance is not initialized.");
+        return;
+    }
+
+    const bounds = getCurrentMapBounds();
+    const allParks = await getAllParksFromIndexedDB();
+
+    const parksInBounds = allParks.filter(park => {
+        if (park.latitude && park.longitude) {
+            const latLng = L.latLng(park.latitude, park.longitude);
+            return bounds.contains(latLng);
+        }
+        return false;
+    });
+
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+    } else {
+        map.activationsLayer = L.layerGroup().addTo(map);
+    }
+
+    const userActivatedReferences = activations.map(act => act.reference);
+    const onAirReferences = spots.map(spot => spot.reference);
+
+    let parksToDisplay = parksInBounds;
+
+    switch (activationToggleState) {
+        case 1: // Show just user's activations
+            parksToDisplay = parksInBounds.filter(park =>
+                userActivatedReferences.includes(park.reference)
+            );
+            break;
+
+        case 2: // Show all spots except user's activations
+            parksToDisplay = parksInBounds.filter(park =>
+                !userActivatedReferences.includes(park.reference)
+            );
+            break;
+
+        case 3: // Show only currently active parks (on air)
+            parksToDisplay = parksInBounds.filter(park =>
+                onAirReferences.includes(park.reference)
+            );
+            break;
+
+        // case 0 and default: Show all parks in bounds
+    }
+
+//    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
+    applyActivationToggleState();
+}
+
+/**
+ * Updates the map to display only the filtered parks based on the search query.
+ * @param {Array} filteredParks - Array of park objects that match the search criteria.
+ */
+function updateMapWithFilteredParks(filteredParks) {
+    if (!map) {
+        console.error("Map instance is not initialized.");
+        return;
+    }
+
+    // Clear existing markers
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+        console.log("Cleared existing markers for filtered search."); // Debugging
+    } else {
+        map.activationsLayer = L.layerGroup().addTo(map);
+        console.log("Created activationsLayer for filtered search."); // Debugging
+    }
+
+    // Determine which parks are activated by the user within filtered parks
+    const activatedReferences = activations
+        .filter(act => filteredParks.some(p => p.reference === act.reference))
+        .map(act => act.reference);
+
+    console.log("Activated References in Filtered Search:", activatedReferences); // Debugging
+
+    // Display the filtered parks on the map
+    //displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
+    applyActivationToggleState();
+    console.log("Displayed filtered parks on the map."); // Debugging
+}
+function clearSearchInput() {
+    const searchBox = document.getElementById('searchBox');
+    if (searchBox) {
+        searchBox.value = ''; // Clear the input
+        console.log("Search input cleared."); // Debugging
+    }
+
+    // Clear highlights and reset the map view
+    if (map.highlightLayer) {
+        map.highlightLayer.clearLayers();
+    }
+
+    if (previousMapState.bounds) {
+        // Restore the previous map bounds
+        map.fitBounds(previousMapState.bounds);
+
+        // Display the previously shown parks
+        const activatedReferences = activations.map((act) => act.reference);
+        //displayParksOnMap(map, previousMapState.displayedParks, activatedReferences, map.activationsLayer);
+        applyActivationToggleState();
+        console.log("Map view restored to prior state."); // Debugging
+
+        // Clear the saved state
+        previousMapState = { bounds: null, displayedParks: [] };
+    }
+}
+
+/**
+ * Adds event listeners to the search box and Clear button.
+ */
+function setupSearchBoxListeners() {
+    const searchBox = document.getElementById('searchBox');
+    const clearButton = document.getElementById('clearSearch');
+
+    if (!searchBox || !clearButton) {
+        console.error("Search box or Clear button not found.");
+        return;
+    }
+
+    // Show the Clear button only when there is input
+    searchBox.addEventListener('input', () => {
+        if (searchBox.value.trim() !== '') {
+            clearButton.style.display = 'block';
+        } else {
+            clearButton.style.display = 'none';
+        }
+    });
+
+    // Attach the Clear button functionality
+    clearButton.addEventListener('click', clearSearchInput);
+}
+
+// Call the setup function when the DOM is fully loaded
+document.addEventListener('DOMContentLoaded', () => {
+    setupSearchBoxListeners();
+    console.log("Search box listeners initialized."); // Debugging
+});
+
+/**
+ * Resets the park display on the map based on current activation filters.
+ * This function is called when the search input is cleared.
+ */
+function resetParkDisplay() {
+    const activationSlider = document.getElementById('activationSlider');
+    const minActivations = activationSlider ? parseInt(activationSlider.value, 10) : 0;
+    console.log(`Resetting park display with Minimum Activations: ${minActivations}`); // Debugging
+
+    // Filter parks based on the current activation slider value
+    const parksToDisplay = parks.filter(park => park.activations >= minActivations);
+
+    // Update the map with the filtered parks
+    filterParksByActivations(minActivations);
+}
+/**
+ * Initializes and displays activations on startup.
+ * If activations exist in the local store, this function attempts to update them
+ * by fetching data from the API at https://pota.app/#/user/activations.
+ */
+async function initializeActivationsDisplay() {
+    try {
+        // Restore activation toggle state from localStorage (if available)
+        const savedToggleState = parseInt(localStorage.getItem('activationToggleState'), 10);
+        if (!isNaN(savedToggleState) && savedToggleState >= 0 && savedToggleState <= 3) {
+            activationToggleState = savedToggleState;
+
+            // Update button label accordingly
+            const toggleButton = document.getElementById('toggleActivations');
+            const buttonTexts = [
+                "Show My Activations",
+                "Hide My Activations",
+                "Show Currently On Air",
+                "Show All Spots",
+            ];
+            if (toggleButton) {
+                toggleButton.innerText = buttonTexts[activationToggleState];
+            }
+        }
+
+        const storedActivations = await getActivationsFromIndexedDB();
+        if (storedActivations.length > 0) {
+            // Set the toggle button to active if activations exist.
+            const toggleButton = document.getElementById('toggleActivations');
+            if (toggleButton) {
+                toggleButton.classList.add('active');
+                console.log("Activations exist in IndexedDB. Enabling 'Show My Activations' by default.");
+            }
+
+            // Load stored activations.
+            activations = storedActivations;
+
+            // If we have stored activations (and by extension a valid callsign), try updating from the API.
+//            await updateUserActivationsFromAPI();
+            // await updateActivationsFromScrape();
+            // Refresh the map view and display the user's callsign.
+            updateActivationsInView();
+            displayCallsign();
+        } else {
+            console.log("No activations found in IndexedDB. Starting with default view.");
+        }
+    } catch (error) {
+        console.error('Error initializing activations display:', error);
+    }
+}
+
+async function updateUserActivationsFromAPI() {
+    try {
+        // Correct endpoint returning JSON.
+        const apiUrl = 'https://api.pota.app/#/user/activations?all=1';
+
+        // Fetch using credentials so that cookies are sent
+        const response = await fetch(apiUrl, {
+            credentials: 'include', // Include cookies and credentials in cross-origin requests.
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+                // If needed, you can add:
+                // 'Authorization': `Bearer YOUR_TOKEN_HERE`
+            }
+        });
+
+        // Parse the JSON response.
+        const apiData = await response.json();
+        console.log("Fetched API activations:", apiData.activations);
+
+        // Check if activations were returned.
+        if (!apiData || !Array.isArray(apiData.activations) || apiData.activations.length === 0) {
+            console.log("No activation data returned from API, skipping update.");
             return;
         }
 
-        // Get current map bounds
-        const bounds = getCurrentMapBounds();
-        console.log("Current Map Bounds:", bounds.toBBoxString()); // Debugging
-
-        // Get all parks within the current bounds and meeting the activation criteria
-        const parksInBounds = parks.filter(park => {
-            if (park.latitude && park.longitude) {
-                const latLng = L.latLng(park.latitude, park.longitude);
-                return bounds.contains(latLng) && park.activations <= maxActivations;
-            }
-//        console.warn(`Invalid park data for reference: ${park.reference}`); // Debugging
-            return false;
+        // Create a map keyed by 'reference' from existing activations.
+        const activationMap = new Map();
+        activations.forEach(act => {
+            activationMap.set(act.reference, act);
         });
 
-        console.log("Parks in Current View with Activations <= max:", parksInBounds); // Debugging
+        // Merge each API activation into the map.
+        apiData.activations.forEach(apiAct => {
+            const reference = apiAct.reference.trim();
+            const newActivation = {
+                reference: reference,
+                name: apiAct.name.trim(),
+                qso_date: apiAct.date.trim(),  // e.g., "2025-01-10"
+                activeCallsign: apiAct.callsign.trim(),
+                totalQSOs: parseInt(apiAct.total, 10) || 0,
+                qsosCW: parseInt(apiAct.cw, 10) || 0,
+                qsosDATA: parseInt(apiAct.data, 10) || 0,
+                qsosPHONE: parseInt(apiAct.phone, 10) || 0,
+                attempts: parseInt(apiAct.total, 10) || 0,
+                activations: parseInt(apiAct.total, 10) || 0,
+            };
 
-        // Clear existing markers
-        if (map.activationsLayer) {
-            map.activationsLayer.clearLayers();
-            console.log("Cleared existing markers."); // Debugging
-        } else {
-            map.activationsLayer = L.layerGroup().addTo(map);
-            console.log("Created activationsLayer."); // Debugging
+            if (activationMap.has(reference)) {
+                const existingAct = activationMap.get(reference);
+                activationMap.set(reference, {
+                    ...existingAct,
+                    ...newActivation,
+                    // Optionally aggregate numeric values:
+                    totalQSOs: existingAct.totalQSOs + newActivation.totalQSOs,
+                    qsosCW: existingAct.qsosCW + newActivation.qsosCW,
+                    qsosDATA: existingAct.qsosDATA + newActivation.qsosDATA,
+                    qsosPHONE: existingAct.qsosPHONE + newActivation.qsosPHONE,
+                    activations: existingAct.activations + newActivation.activations,
+                });
+                console.log(`Updated activation: ${reference}`);
+            } else {
+                activationMap.set(reference, newActivation);
+                console.log(`Added new activation: ${reference}`);
+            }
+        });
+
+        // Update the global activations array.
+        activations = Array.from(activationMap.values());
+        await saveActivationsToIndexedDB(activations);
+        console.log("Successfully merged API activations into local store.");
+    } catch (error) {
+        console.error("Error fetching or merging user activations from API:", error);
+    }
+}
+
+/**
+ * Scrapes recent activations data from the returned HTML string.
+ * Assumes that the table rows in the first table inside an element
+ * with class "v-data-table__wrapper" contain the data.
+ *
+ * Each row is assumed to have these columns (in order):
+ *  - Date (e.g. "01/09/2025")
+ *  - Park (an <a> element whose href contains a reference like "#/park/US-0891" and text with the park name)
+ *  - CW (a number)
+ *  - Data (a number)
+ *  - Phone (a number)
+ *  - Total QSOs (a number)
+ *
+ * @param {string} html - The full HTML from the page.
+ * @returns {Array<Object>} Array of activation objects.
+ */
+function scrapeActivationsFromHTML(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    // Find the table that holds the activations.
+    // Adjust this selector if needed.
+    const table = doc.querySelector('.v-data-table__wrapper table');
+    if (!table) {
+        console.error('Activations table not found in HTML.');
+        return [];
+    }
+
+    // Query all rows within the table body.
+    const rows = Array.from(table.querySelectorAll('tbody > tr'));
+    if (!rows.length) {
+        console.warn('No rows found in the activations table.');
+        return [];
+    }
+
+    // Map over each row to extract the data.
+    const activations = rows.map(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 6) {
+            // If for some reason there are not enough cells, skip this row.
+            return null;
         }
 
-        // Determine which parks are activated by the user within bounds
-        const activatedReferences = activations
-            .filter(act => parksInBounds.some(p => p.reference === act.reference))
-            .map(act => act.reference);
+        // Column indices:
+        // 0: Date (assumed format "MM/DD/YYYY")
+        // 1: Park information (contains an <a> tag with href and text)
+        // 2: CW
+        // 3: Data
+        // 4: Phone
+        // 5: Total QSOs
+        const date = cells[0].textContent.trim();
 
-        console.log("Activated References in Filtered View:", activatedReferences); // Debugging
+        // Extract park reference from the <a> tag.
+        let parkReference = '';
+        let parkName = '';
+        const parkAnchor = cells[1].querySelector('a');
+        if (parkAnchor) {
+            // Example href: "#/park/US-0891"
+            const href = parkAnchor.getAttribute('href');
+            const match = href.match(/\/park\/(.+)/);
+            if (match) {
+                parkReference = match[1].trim();
+            }
+            parkName = parkAnchor.textContent.trim();
+        }
 
-        // Display activated parks within current view based on slider
-        //displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
-        applyActivationToggleState();
-        console.log("Displayed activated parks within filtered view."); // Debugging
+        const cw = parseInt(cells[2].textContent.trim(), 10) || 0;
+        const dataVal = parseInt(cells[3].textContent.trim(), 10) || 0;
+        const phone = parseInt(cells[4].textContent.trim(), 10) || 0;
+        const totalQSOs = parseInt(cells[5].textContent.trim(), 10) || 0;
+
+        // Return an object matching (or easily mappable to) your activation format.
+        return {
+            qso_date: date,  // if using qso_date everywhere
+            reference: parkReference,
+            name: parkName,
+            callsign: '',
+            totalQSOs: totalQSOs,  // Always use totalQSOs
+            qsosCW: cw,
+            qsosDATA: dataVal,
+            qsosPHONE: phone
+        };
+    }).filter(item => item !== null);
+
+    return activations;
+}
+
+/**
+ * An example function that fetches the page containing the recent activations,
+ * scrapes the activations from its HTML, and then merges them with your local data.
+ *
+ * You can call this function in place of, or in addition to, your API call.
+ */
+async function updateActivationsFromScrape() {
+    try {
+        // Replace with the URL of the page you want to scrape.
+        const url = 'https://api.pota.app/#/user/activations?all=1';
+        const response = await fetch(url, { credentials: 'include' });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch activations page. Status: ${response.status}`);
+        }
+
+        const html = await response.text();
+        console.log("Fetched HTML (first 300 chars):", html.substring(0, 300));
+
+        // Scrape activations from the HTML.
+        const scrapedActivations = scrapeActivationsFromHTML(html);
+        console.log("Scraped activations:", scrapedActivations);
+
+        // Merge scrapedActivations into your existing global 'activations' array.
+        // For merging, we’ll build a map keyed by the activation reference.
+        const activationMap = new Map();
+        activations.forEach(act => {
+            activationMap.set(act.reference, act);
+        });
+
+        scrapedActivations.forEach(scraped => {
+            const ref = scraped.reference;
+            if (activationMap.has(ref)) {
+                // Merge the activation. Adjust merge logic as needed.
+                const existing = activationMap.get(ref);
+                activationMap.set(ref, {
+                    ...existing,
+                    ...scraped,
+                    // Optionally combine numeric fields.
+                    total: existing.total + scraped.total
+                });
+                console.log(`Merged scraped activation: ${ref}`);
+            } else {
+                activationMap.set(ref, scraped);
+                console.log(`Added new scraped activation: ${ref}`);
+            }
+        });
+
+        // Update the global array.
+        activations = Array.from(activationMap.values());
+        await saveActivationsToIndexedDB(activations);
+        console.log("Successfully saved merged scraped activations.");
+        updateActivationsInView();
+
+    } catch (error) {
+        console.error("Error updating activations from scrape:", error);
     }
+}
 
+/**
+ * Initializes the Leaflet map.
+ * @param {number} lat - Latitude for the map center.
+ * @param {number} lng - Longitude for the map center.
+ * @returns {L.Map} The initialized Leaflet map instance.
+ */
+function initializeMap(lat, lng) {
+    // Determine if the device is mobile based on screen width
+    const isMobile = window.innerWidth <= 600;
 
-    /**
-     * Displays the callsign(s) of the user's activations in the hamburger menu.
-     */
-    function displayCallsign() {
-        const el = document.getElementById('callsignText');
-        if (!el) return;
+    // Check for saved map center and zoom in localStorage
+    let savedCenter = localStorage.getItem("mapCenter");
+    let savedZoom = localStorage.getItem("mapZoom");
 
-        const uniqueCallsigns = [...new Set(activations
-            .filter(act => act.activeCallsign)
-            .map(act => act.activeCallsign.trim())
-        )];
-
-        el.textContent = uniqueCallsigns.length > 0
-            ? uniqueCallsigns.join(', ')
-            : 'please set';
-    }
-
-    /**
-     * Removes the callsign display from the page.
-     */
-    function removeCallsignDisplay() {
-        const callsignDiv = document.getElementById('callsignDisplay');
-        if (callsignDiv) {
-            callsignDiv.remove();
-            console.log("Calls-in display removed."); // Debugging
+    if (savedCenter) {
+        try {
+            savedCenter = JSON.parse(savedCenter);
+        } catch (e) {
+            savedCenter = null;
         }
     }
 
-    /**
-     * Retrieves the current geographical bounds of the map.
-     * @returns {L.LatLngBounds} The current map bounds.
-     */
-    function getCurrentMapBounds() {
-        return map.getBounds();
+    if (savedZoom) {
+        savedZoom = parseInt(savedZoom, 10);
     }
 
-    function getParksInBounds(parks) {
-        const bounds = getCurrentMapBounds();
-        return parks.filter(p =>
-            p.latitude && p.longitude && bounds.contains([p.latitude, p.longitude])
+    const mapInstance = L.map("map", {
+        center: savedCenter || [lat, lng],
+        zoom: savedZoom || (isMobile ? 12 : 10),
+        zoomControl: !isMobile,
+        attributionControl: true,
+    });
+
+    console.log("Initialized map at:", mapInstance.getCenter(), "zoom:", mapInstance.getZoom());
+
+    // Add OpenStreetMap tiles
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(mapInstance);
+
+    console.log("Added OpenStreetMap tiles.");
+
+    // Add marker for user's location with adjusted icon size
+    L.marker([lat, lng], {
+        icon: L.icon({
+            iconUrl:
+                "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+            iconSize: [30, 30],
+            iconAnchor: [15, 30],
+            popupAnchor: [0, -30],
+        }),
+    }).addTo(mapInstance);
+    console.log("Added user location marker.");
+
+    // Save center and zoom to localStorage whenever map is moved or zoomed
+    mapInstance.on("moveend zoomend", () => {
+        const center = mapInstance.getCenter();
+        localStorage.setItem("mapCenter", JSON.stringify([center.lat, center.lng]));
+        localStorage.setItem("mapZoom", mapInstance.getZoom());
+        localStorage.setItem("mapSavedAt", Date.now().toString());
+    });
+
+    // Attach dynamic spot fetching to map movement
+    if (!isDesktopMode) {
+        mapInstance.on(
+            "moveend",
+            debounce(() => {
+                console.log("Map moved or zoomed. Updating spots...");
+                fetchAndDisplaySpotsInCurrentBounds(mapInstance)
+                    .then(() => applyActivationToggleState());
+            }, 300)
         );
     }
 
-    /**
-     * Filters activated parks that are within the current map bounds.
-     * @param {Array} activations - The list of activated parks.
-     * @param {Array} parks - The complete list of parks.
-     * @param {L.LatLngBounds} bounds - The current map bounds.
-     * @returns {Array} List of activated parks within bounds.
-     */
-    function getActivatedParksInBounds(activations, parks, bounds) {
-        const filteredParks = activations.filter((activation) => {
-            // Find the corresponding park in the parks list
-            const park = parks.find(p => p.reference === activation.reference);
-            if (park && park.latitude && park.longitude) {
-                const latLng = L.latLng(park.latitude, park.longitude);
-                const isWithin = bounds.contains(latLng);
-                console.log(`Park ${park.reference} (${park.name}) is within bounds: ${isWithin}`); // Debugging
-                return isWithin;
-            }
-            // console.warn(`Invalid park data for reference: ${activation.reference}`); // Debugging
-            return false;
-        });
-        console.log("Filtered Activated Parks:", filteredParks); // Debugging
-        return filteredParks;
+    return mapInstance;
+}
+
+
+/**
+ * Displays parks on the map.
+ */
+/**
+ * Displays parks on the map with proper popups that include activation information.
+ */
+async function displayParksOnMap(map, parks, userActivatedReferences = null, layerGroup = map.activationsLayer) {
+    console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
+
+    if (!layerGroup) {
+        map.activationsLayer = L.layerGroup().addTo(map);
+        layerGroup = map.activationsLayer;
+        console.log("Created a new activations layer.");
+    } else {
+        console.log("Using existing activations layer.");
     }
 
-    /**
-     * Updates the map to display activated parks within the current map view.
-     */
-    async function updateActivationsInView() {
-        if (!map) {
-            console.error("Map instance is not initialized.");
-            return;
+    layerGroup.clearLayers(); // Clear existing markers before adding new ones
+
+    parks.forEach((park) => {
+        const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+        const isUserActivated = userActivatedReferences.includes(reference);
+        let createdTime = null;
+        if (created) {
+            createdTime = typeof created === 'number'
+                ? created
+                : new Date(created).getTime();
         }
-
-        const bounds = getCurrentMapBounds();
-        const allParks = await getAllParksFromIndexedDB();
-
-        const parksInBounds = allParks.filter(park => {
-            if (park.latitude && park.longitude) {
-                const latLng = L.latLng(park.latitude, park.longitude);
-                return bounds.contains(latLng);
-            }
-            return false;
-        });
-
-        if (map.activationsLayer) {
-            map.activationsLayer.clearLayers();
-        } else {
-            map.activationsLayer = L.layerGroup().addTo(map);
-        }
-
-        const userActivatedReferences = activations.map(act => act.reference);
-        const onAirReferences = spots.map(spot => spot.reference);
-
-        let parksToDisplay = parksInBounds;
-
-        switch (activationToggleState) {
-            case 1: // Show just user's activations
-                parksToDisplay = parksInBounds.filter(park =>
-                    userActivatedReferences.includes(park.reference)
-                );
-                break;
-
-            case 2: // Show all spots except user's activations
-                parksToDisplay = parksInBounds.filter(park =>
-                    !userActivatedReferences.includes(park.reference)
-                );
-                break;
-
-            case 3: // Show only currently active parks (on air)
-                parksToDisplay = parksInBounds.filter(park =>
-                    onAirReferences.includes(park.reference)
-                );
-                break;
-
-            // case 0 and default: Show all parks in bounds
-        }
-
-//    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
-        applyActivationToggleState();
-    }
-
-    /**
-     * Updates the map to display only the filtered parks based on the search query.
-     * @param {Array} filteredParks - Array of park objects that match the search criteria.
-     */
-    function updateMapWithFilteredParks(filteredParks) {
-        if (!map) {
-            console.error("Map instance is not initialized.");
-            return;
-        }
-
-        // Clear existing markers
-        if (map.activationsLayer) {
-            map.activationsLayer.clearLayers();
-            console.log("Cleared existing markers for filtered search."); // Debugging
-        } else {
-            map.activationsLayer = L.layerGroup().addTo(map);
-            console.log("Created activationsLayer for filtered search."); // Debugging
-        }
-
-        // Determine which parks are activated by the user within filtered parks
-        const activatedReferences = activations
-            .filter(act => filteredParks.some(p => p.reference === act.reference))
-            .map(act => act.reference);
-
-        console.log("Activated References in Filtered Search:", activatedReferences); // Debugging
-
-        // Display the filtered parks on the map
-        //displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
-        applyActivationToggleState();
-        console.log("Displayed filtered parks on the map."); // Debugging
-    }
-
-    function clearSearchInput() {
-        const searchBox = document.getElementById('searchBox');
-        if (searchBox) {
-            searchBox.value = ''; // Clear the input
-            console.log("Search input cleared."); // Debugging
-        }
-
-        // Clear highlights and reset the map view
-        if (map.highlightLayer) {
-            map.highlightLayer.clearLayers();
-        }
-
-        if (previousMapState.bounds) {
-            // Restore the previous map bounds
-            map.fitBounds(previousMapState.bounds);
-
-            // Display the previously shown parks
-            const activatedReferences = activations.map((act) => act.reference);
-            //displayParksOnMap(map, previousMapState.displayedParks, activatedReferences, map.activationsLayer);
-            applyActivationToggleState();
-            console.log("Map view restored to prior state."); // Debugging
-
-            // Clear the saved state
-            previousMapState = {bounds: null, displayedParks: []};
-        }
-    }
-
-    /**
-     * Adds event listeners to the search box and Clear button.
-     */
-    function setupSearchBoxListeners() {
-        const searchBox = document.getElementById('searchBox');
-        const clearButton = document.getElementById('clearSearch');
-
-        if (!searchBox || !clearButton) {
-            console.error("Search box or Clear button not found.");
-            return;
-        }
-
-        // Show the Clear button only when there is input
-        searchBox.addEventListener('input', () => {
-            if (searchBox.value.trim() !== '') {
-                clearButton.style.display = 'block';
-            } else {
-                clearButton.style.display = 'none';
-            }
-        });
-
-        // Attach the Clear button functionality
-        clearButton.addEventListener('click', clearSearchInput);
-    }
-
-// Call the setup function when the DOM is fully loaded
-    document.addEventListener('DOMContentLoaded', () => {
-        setupSearchBoxListeners();
-        console.log("Search box listeners initialized."); // Debugging
-    });
-
-    /**
-     * Resets the park display on the map based on current activation filters.
-     * This function is called when the search input is cleared.
-     */
-    function resetParkDisplay() {
-        const activationSlider = document.getElementById('activationSlider');
-        const minActivations = activationSlider ? parseInt(activationSlider.value, 10) : 0;
-        console.log(`Resetting park display with Minimum Activations: ${minActivations}`); // Debugging
-
-        // Filter parks based on the current activation slider value
-        const parksToDisplay = parks.filter(park => park.activations >= minActivations);
-
-        // Update the map with the filtered parks
-        filterParksByActivations(minActivations);
-    }
-
-    /**
-     * Initializes and displays activations on startup.
-     * If activations exist in the local store, this function attempts to update them
-     * by fetching data from the API at https://pota.app/#/user/activations.
-     */
-    async function initializeActivationsDisplay() {
-        try {
-            // Restore activation toggle state from localStorage (if available)
-            const savedToggleState = parseInt(localStorage.getItem('activationToggleState'), 10);
-            if (!isNaN(savedToggleState) && savedToggleState >= 0 && savedToggleState <= 3) {
-                activationToggleState = savedToggleState;
-
-                // Update button label accordingly
-                const toggleButton = document.getElementById('toggleActivations');
-                const buttonTexts = [
-                    "Show My Activations",
-                    "Hide My Activations",
-                    "Show Currently On Air",
-                    "Show All Spots",
-                ];
-                if (toggleButton) {
-                    toggleButton.innerText = buttonTexts[activationToggleState];
-                }
-            }
-
-            const storedActivations = await getActivationsFromIndexedDB();
-            if (storedActivations.length > 0) {
-                // Set the toggle button to active if activations exist.
-                const toggleButton = document.getElementById('toggleActivations');
-                if (toggleButton) {
-                    toggleButton.classList.add('active');
-                    console.log("Activations exist in IndexedDB. Enabling 'Show My Activations' by default.");
-                }
-
-                // Load stored activations.
-                activations = storedActivations;
-
-                // If we have stored activations (and by extension a valid callsign), try updating from the API.
-//            await updateUserActivationsFromAPI();
-                // await updateActivationsFromScrape();
-                // Refresh the map view and display the user's callsign.
-                updateActivationsInView();
-                displayCallsign();
-            } else {
-                console.log("No activations found in IndexedDB. Starting with default view.");
-            }
-        } catch (error) {
-            console.error('Error initializing activations display:', error);
-        }
-    }
-
-    async function updateUserActivationsFromAPI() {
-        try {
-            // Correct endpoint returning JSON.
-            const apiUrl = 'https://api.pota.app/#/user/activations?all=1';
-
-            // Fetch using credentials so that cookies are sent
-            const response = await fetch(apiUrl, {
-                credentials: 'include', // Include cookies and credentials in cross-origin requests.
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                    // If needed, you can add:
-                    // 'Authorization': `Bearer YOUR_TOKEN_HERE`
-                }
-            });
-
-            // Parse the JSON response.
-            const apiData = await response.json();
-            console.log("Fetched API activations:", apiData.activations);
-
-            // Check if activations were returned.
-            if (!apiData || !Array.isArray(apiData.activations) || apiData.activations.length === 0) {
-                console.log("No activation data returned from API, skipping update.");
-                return;
-            }
-
-            // Create a map keyed by 'reference' from existing activations.
-            const activationMap = new Map();
-            activations.forEach(act => {
-                activationMap.set(act.reference, act);
-            });
-
-            // Merge each API activation into the map.
-            apiData.activations.forEach(apiAct => {
-                const reference = apiAct.reference.trim();
-                const newActivation = {
-                    reference: reference,
-                    name: apiAct.name.trim(),
-                    qso_date: apiAct.date.trim(),  // e.g., "2025-01-10"
-                    activeCallsign: apiAct.callsign.trim(),
-                    totalQSOs: parseInt(apiAct.total, 10) || 0,
-                    qsosCW: parseInt(apiAct.cw, 10) || 0,
-                    qsosDATA: parseInt(apiAct.data, 10) || 0,
-                    qsosPHONE: parseInt(apiAct.phone, 10) || 0,
-                    attempts: parseInt(apiAct.total, 10) || 0,
-                    activations: parseInt(apiAct.total, 10) || 0,
-                };
-
-                if (activationMap.has(reference)) {
-                    const existingAct = activationMap.get(reference);
-                    activationMap.set(reference, {
-                        ...existingAct,
-                        ...newActivation,
-                        // Optionally aggregate numeric values:
-                        totalQSOs: existingAct.totalQSOs + newActivation.totalQSOs,
-                        qsosCW: existingAct.qsosCW + newActivation.qsosCW,
-                        qsosDATA: existingAct.qsosDATA + newActivation.qsosDATA,
-                        qsosPHONE: existingAct.qsosPHONE + newActivation.qsosPHONE,
-                        activations: existingAct.activations + newActivation.activations,
-                    });
-                    console.log(`Updated activation: ${reference}`);
-                } else {
-                    activationMap.set(reference, newActivation);
-                    console.log(`Added new activation: ${reference}`);
-                }
-            });
-
-            // Update the global activations array.
-            activations = Array.from(activationMap.values());
-            await saveActivationsToIndexedDB(activations);
-            console.log("Successfully merged API activations into local store.");
-        } catch (error) {
-            console.error("Error fetching or merging user activations from API:", error);
-        }
-    }
-
-    /**
-     * Scrapes recent activations data from the returned HTML string.
-     * Assumes that the table rows in the first table inside an element
-     * with class "v-data-table__wrapper" contain the data.
-     *
-     * Each row is assumed to have these columns (in order):
-     *  - Date (e.g. "01/09/2025")
-     *  - Park (an <a> element whose href contains a reference like "#/park/US-0891" and text with the park name)
-     *  - CW (a number)
-     *  - Data (a number)
-     *  - Phone (a number)
-     *  - Total QSOs (a number)
-     *
-     * @param {string} html - The full HTML from the page.
-     * @returns {Array<Object>} Array of activation objects.
-     */
-    function scrapeActivationsFromHTML(html) {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        // Find the table that holds the activations.
-        // Adjust this selector if needed.
-        const table = doc.querySelector('.v-data-table__wrapper table');
-        if (!table) {
-            console.error('Activations table not found in HTML.');
-            return [];
-        }
-
-        // Query all rows within the table body.
-        const rows = Array.from(table.querySelectorAll('tbody > tr'));
-        if (!rows.length) {
-            console.warn('No rows found in the activations table.');
-            return [];
-        }
-
-        // Map over each row to extract the data.
-        const activations = rows.map(row => {
-            const cells = row.querySelectorAll('td');
-            if (cells.length < 6) {
-                // If for some reason there are not enough cells, skip this row.
-                return null;
-            }
-
-            // Column indices:
-            // 0: Date (assumed format "MM/DD/YYYY")
-            // 1: Park information (contains an <a> tag with href and text)
-            // 2: CW
-            // 3: Data
-            // 4: Phone
-            // 5: Total QSOs
-            const date = cells[0].textContent.trim();
-
-            // Extract park reference from the <a> tag.
-            let parkReference = '';
-            let parkName = '';
-            const parkAnchor = cells[1].querySelector('a');
-            if (parkAnchor) {
-                // Example href: "#/park/US-0891"
-                const href = parkAnchor.getAttribute('href');
-                const match = href.match(/\/park\/(.+)/);
-                if (match) {
-                    parkReference = match[1].trim();
-                }
-                parkName = parkAnchor.textContent.trim();
-            }
-
-            const cw = parseInt(cells[2].textContent.trim(), 10) || 0;
-            const dataVal = parseInt(cells[3].textContent.trim(), 10) || 0;
-            const phone = parseInt(cells[4].textContent.trim(), 10) || 0;
-            const totalQSOs = parseInt(cells[5].textContent.trim(), 10) || 0;
-
-            // Return an object matching (or easily mappable to) your activation format.
-            return {
-                qso_date: date,  // if using qso_date everywhere
-                reference: parkReference,
-                name: parkName,
-                callsign: '',
-                totalQSOs: totalQSOs,  // Always use totalQSOs
-                qsosCW: cw,
-                qsosDATA: dataVal,
-                qsosPHONE: phone
-            };
-        }).filter(item => item !== null);
-
-        return activations;
-    }
-
-    /**
-     * An example function that fetches the page containing the recent activations,
-     * scrapes the activations from its HTML, and then merges them with your local data.
-     *
-     * You can call this function in place of, or in addition to, your API call.
-     */
-    async function updateActivationsFromScrape() {
-        try {
-            // Replace with the URL of the page you want to scrape.
-            const url = 'https://api.pota.app/#/user/activations?all=1';
-            const response = await fetch(url, {credentials: 'include'});
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch activations page. Status: ${response.status}`);
-            }
-
-            const html = await response.text();
-            console.log("Fetched HTML (first 300 chars):", html.substring(0, 300));
-
-            // Scrape activations from the HTML.
-            const scrapedActivations = scrapeActivationsFromHTML(html);
-            console.log("Scraped activations:", scrapedActivations);
-
-            // Merge scrapedActivations into your existing global 'activations' array.
-            // For merging, we’ll build a map keyed by the activation reference.
-            const activationMap = new Map();
-            activations.forEach(act => {
-                activationMap.set(act.reference, act);
-            });
-
-            scrapedActivations.forEach(scraped => {
-                const ref = scraped.reference;
-                if (activationMap.has(ref)) {
-                    // Merge the activation. Adjust merge logic as needed.
-                    const existing = activationMap.get(ref);
-                    activationMap.set(ref, {
-                        ...existing,
-                        ...scraped,
-                        // Optionally combine numeric fields.
-                        total: existing.total + scraped.total
-                    });
-                    console.log(`Merged scraped activation: ${ref}`);
-                } else {
-                    activationMap.set(ref, scraped);
-                    console.log(`Added new scraped activation: ${ref}`);
-                }
-            });
-
-            // Update the global array.
-            activations = Array.from(activationMap.values());
-            await saveActivationsToIndexedDB(activations);
-            console.log("Successfully saved merged scraped activations.");
-            updateActivationsInView();
-
-        } catch (error) {
-            console.error("Error updating activations from scrape:", error);
-        }
-    }
-
-    /**
-     * Initializes the Leaflet map.
-     * @param {number} lat - Latitude for the map center.
-     * @param {number} lng - Longitude for the map center.
-     * @returns {L.Map} The initialized Leaflet map instance.
-     */
-    function initializeMap(lat, lng) {
-        // Determine if the device is mobile based on screen width
-        const isMobile = window.innerWidth <= 600;
-
-        // Check for saved map center and zoom in localStorage
-        let savedCenter = localStorage.getItem("mapCenter");
-        let savedZoom = localStorage.getItem("mapZoom");
-
-        if (savedCenter) {
-            try {
-                savedCenter = JSON.parse(savedCenter);
-            } catch (e) {
-                savedCenter = null;
-            }
-        }
-
-        if (savedZoom) {
-            savedZoom = parseInt(savedZoom, 10);
-        }
-
-        const mapInstance = L.map("map", {
-            center: savedCenter || [lat, lng],
-            zoom: savedZoom || (isMobile ? 12 : 10),
-            zoomControl: !isMobile,
-            attributionControl: true,
-        });
-
-        console.log("Initialized map at:", mapInstance.getCenter(), "zoom:", mapInstance.getZoom());
-
-        // Add OpenStreetMap tiles
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            attribution: '&copy; OpenStreetMap contributors',
-        }).addTo(mapInstance);
-
-        console.log("Added OpenStreetMap tiles.");
-
-        // Add marker for user's location with adjusted icon size
-        L.marker([lat, lng], {
-            icon: L.icon({
-                iconUrl:
-                    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-                iconSize: [30, 30],
-                iconAnchor: [15, 30],
-                popupAnchor: [0, -30],
-            }),
-        }).addTo(mapInstance);
-        console.log("Added user location marker.");
-
-        // Save center and zoom to localStorage whenever map is moved or zoomed
-        mapInstance.on("moveend zoomend", () => {
-            const center = mapInstance.getCenter();
-            localStorage.setItem("mapCenter", JSON.stringify([center.lat, center.lng]));
-            localStorage.setItem("mapZoom", mapInstance.getZoom());
-            localStorage.setItem("mapSavedAt", Date.now().toString());
-        });
-
-        // Attach dynamic spot fetching to map movement
-        if (!isDesktopMode) {
-            mapInstance.on(
-                "moveend",
-                debounce(() => {
-                    console.log("Map moved or zoomed. Updating spots...");
-                    fetchAndDisplaySpotsInCurrentBounds(mapInstance)
-                        .then(() => applyActivationToggleState());
-                }, 300)
-            );
-        }
-
-        return mapInstance;
-    }
-
-
-    /**
-     * Displays parks on the map.
-     */
-    /**
-     * Displays parks on the map with proper popups that include activation information.
-     */
-    async function displayParksOnMap(map, parks, userActivatedReferences = null, layerGroup = map.activationsLayer) {
-        console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
-
-        if (!layerGroup) {
-            map.activationsLayer = L.layerGroup().addTo(map);
-            layerGroup = map.activationsLayer;
-            console.log("Created a new activations layer.");
-        } else {
-            console.log("Using existing activations layer.");
-        }
-
-        layerGroup.clearLayers(); // Clear existing markers before adding new ones
-
-        parks.forEach((park) => {
-            const {reference, name, latitude, longitude, activations: parkActivationCount, created} = park;
-            const isUserActivated = userActivatedReferences.includes(reference);
-            let createdTime = null;
-            if (created) {
-                createdTime = typeof created === 'number'
-                    ? created
-                    : new Date(created).getTime();
-            }
-            const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
+        const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
 //        const isNew = (Date.now() - new Date(created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
-            const currentActivation = spots?.find(spot => spot.reference === reference);
-            const isActive = !!currentActivation;
-            const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
+        const currentActivation = spots?.find(spot => spot.reference === reference);
+        const isActive = !!currentActivation;
+        const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
-            // Apply Filters (OR semantics)
-            if (!shouldDisplayParkFlags({isUserActivated, isActive, isNew})) return;
-            if (!shouldDisplayByMode(isActive, isNew, mode)) return;
+        // Apply Filters (OR semantics)
+        if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+        if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
-            // Debugging
-            // if (isNew) {
-            //     const delta = Date.now() - new Date(created).getTime();
-            //     console.log(`Park ${reference} created: ${created}, delta: ${delta}, isNew: true`);
-            // }
+        // Debugging
+        // if (isNew) {
+        //     const delta = Date.now() - new Date(created).getTime();
+        //     console.log(`Park ${reference} created: ${created}, delta: ${delta}, isNew: true`);
+        // }
 
-            // Determine marker class for animated divIcon
-            const markerClasses = [];
-            if (isNew) markerClasses.push('pulse-marker');
-            if (isActive) {
-                markerClasses.push('active-pulse-marker');
-                if (mode === 'CW') markerClasses.push('mode-cw');
-                else if (mode === 'SSB') markerClasses.push('mode-ssb');
-                else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
-            }
-            const markerClassName = markerClasses.join(' ');
+        // Determine marker class for animated divIcon
+        const markerClasses = [];
+        if (isNew) markerClasses.push('pulse-marker');
+        if (isActive) {
+            markerClasses.push('active-pulse-marker');
+            if (mode === 'CW') markerClasses.push('mode-cw');
+            else if (mode === 'SSB') markerClasses.push('mode-ssb');
+            else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
+        }
+        const markerClassName = markerClasses.join(' ');
 
-            const marker = markerClasses.length > 0
-                ? L.marker([latitude, longitude], {
-                    icon: L.divIcon({
-                        className: markerClassName,
-                        iconSize: [20, 20],
-                    })
+        const marker = markerClasses.length > 0
+            ? L.marker([latitude, longitude], {
+                icon: L.divIcon({
+                    className: markerClassName,
+                    iconSize: [20, 20],
                 })
-                : L.circleMarker([latitude, longitude], {
-                    radius: 6,
-                    fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
-                    color: "#000",
-                    weight: 1,
-                    opacity: 1,
-                    fillOpacity: 0.9,
-                });
+            })
+            : L.circleMarker([latitude, longitude], {
+                radius: 6,
+                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.9,
+            });
 
-            marker.park = park;
-            marker.currentActivation = currentActivation;
-            //Set up data block
-            //
-            const tooltipText = currentActivation
-                ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
-                : `${reference}: ${name} (${parkActivationCount} activations)`;
+        marker.park = park;
+        marker.currentActivation = currentActivation;
+        //Set up data block
+        //
+        const tooltipText = currentActivation
+            ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
+            : `${reference}: ${name} (${parkActivationCount} activations)`;
 
-            marker
-                .addTo(layerGroup)
-                .bindPopup("<b>Loading park info...</b>", {
-                    // keep the popup fully in view
-                    keepInView: true,
-                    autoPan: true,
-                    // add a little breathing room around the popup
-                    autoPanPadding: [20, 20],
-                    // cap its width on small screens
-                    maxWidth: 280
-                })
+        marker
+            .addTo(layerGroup)
+            .bindPopup("<b>Loading park info...</b>", {
+                // keep the popup fully in view
+                keepInView: true,
+                autoPan: true,
+                // add a little breathing room around the popup
+                autoPanPadding: [20, 20],
+                // cap its width on small screens
+                maxWidth: 280
+            })
 
-                .bindTooltip(tooltipText, {
-                    direction: "top",
-                    opacity: 0.9,
-                    sticky: false,
-                    className: "custom-tooltip",
-                })
-                .on('click', function () {
-                    this.closeTooltip();
-                });
+            .bindTooltip(tooltipText, {
+                direction: "top",
+                opacity: 0.9,
+                sticky: false,
+                className: "custom-tooltip",
+            })
+            .on('click', function () {
+                this.closeTooltip();
+            });
 
-            marker.on('popupopen', async function () {
-                try {
-                    parkActivations = await fetchParkActivations(reference);
-                    await saveParkActivationsToIndexedDB(reference, parkActivations);
+        marker.on('popupopen', async function () {
+            try {
+                parkActivations = await fetchParkActivations(reference);
+                await saveParkActivationsToIndexedDB(reference, parkActivations);
 
-                    let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
 
-                    if (park.change) {
-                        popupContent += `
+                if (park.change) {
+                    popupContent += `
                         <div style="font-size: 0.85em; font-style: italic; margin-top: 0.5em;">
                             <b>Recent change:</b> ${park.change}
                         </div>
                     `;
-                    }
-
-                    this.setPopupContent(popupContent);
-                } catch (error) {
-                    console.error(`Error fetching activations for park ${reference}:`, error);
-                    this.setPopupContent("<b>Error loading park info.</b>");
                 }
-            });
-        });
 
-        console.log("All parks displayed with appropriate highlights.");
+                this.setPopupContent(popupContent);
+            } catch (error) {
+                console.error(`Error fetching activations for park ${reference}:`, error);
+                this.setPopupContent("<b>Error loading park info.</b>");
+            }
+        });
+    });
+
+    console.log("All parks displayed with appropriate highlights.");
+}
+
+async function fetchAndCacheParks(jsonUrl, cacheDuration) {
+    const db = await getDatabase();
+    const now = Date.now();
+    const lastFullFetch = await getLastFetchTimestamp('allparks.json');
+    let parks = [];
+
+    // Force a full fetch for now (you can restore the caching logic later)
+    if (!lastFullFetch || (now - lastFullFetch > cacheDuration)) {
+        console.log('Fetching full park data from JSON...');
+        const response = await fetch(jsonUrl);
+        if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
+
+        const parsed = await response.json();
+
+        // Don't assign "created" here — allparks.json is the baseline
+        parks = parsed.map(park => ({
+            reference: park.reference,
+            name: park.name,
+            latitude: parseFloat(park.latitude),
+            longitude: parseFloat(park.longitude),
+            activations: parseInt(park.activations, 10) || 0
+            // No `created` field at all
+        }));
+
+        await upsertParksToIndexedDB(parks);
+        await setLastFetchTimestamp('allparks.json', now);
+    } else {
+        console.log('Using cached full park data');
+        parks = await getAllParksFromIndexedDB();
     }
 
-    async function fetchAndCacheParks(jsonUrl, cacheDuration) {
-        const db = await getDatabase();
-        const now = Date.now();
-        const lastFullFetch = await getLastFetchTimestamp('allparks.json');
-        let parks = [];
+    // Apply updates from changes.json
+    try {
+        const changesResponse = await fetchIfModified('/potamap/data/changes.json', 'changes.json');
+        if (changesResponse && changesResponse.ok) {
+            const changesData = await changesResponse.json();
 
-        // Force a full fetch for now (you can restore the caching logic later)
-        if (!lastFullFetch || (now - lastFullFetch > cacheDuration)) {
-            console.log('Fetching full park data from JSON...');
-            const response = await fetch(jsonUrl);
-            if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
+            const updatedParks = changesData.map(park => {
+                const isNew = park.change === 'Park added';
 
-            const parsed = await response.json();
+                return {
+                    reference: park.reference,
+                    name: park.name,
+                    latitude: park.latitude,
+                    longitude: park.longitude,
+                    grid: park.grid,
+                    locationDesc: park.locationDesc,
+                    attempts: park.attempts,
+                    activations: park.activations,
+                    qsos: park.qsos,
+                    created: isNew
+                        ? (park.timestamp ? new Date(park.timestamp).getTime() : now)
+                        : undefined,
+                    change: park.change
+                };
+            });
 
-            // Don't assign "created" here — allparks.json is the baseline
-            parks = parsed.map(park => ({
-                reference: park.reference,
-                name: park.name,
-                latitude: parseFloat(park.latitude),
-                longitude: parseFloat(park.longitude),
-                activations: parseInt(park.activations, 10) || 0
-                // No `created` field at all
-            }));
+            console.log("Final updatedParks going to IndexedDB:", updatedParks);
 
-            await upsertParksToIndexedDB(parks);
-            await setLastFetchTimestamp('allparks.json', now);
+            await upsertParksToIndexedDB(updatedParks);
+            await setLastModifiedHeader('changes.json', changesResponse.headers.get('last-modified'));
+            console.log('Applied updates from changes.json');
         } else {
-            console.log('Using cached full park data');
-            parks = await getAllParksFromIndexedDB();
+            console.log('No new changes in changes.json');
+        }
+    } catch (err) {
+        console.warn('Failed to apply park changes:', err);
+    }
+    return parks;
+}
+async function fetchAndApplyUserActivations(callsign = null) {
+    // Try to load stored callsign
+    if (!callsign) {
+        callsign = localStorage.getItem("pota_user_callsign");
+    }
+
+    // Prompt the user if still not available
+    if (!callsign) {
+        callsign = prompt("Enter your callsign to load your POTA activations:");
+        if (!callsign) {
+            console.warn("No callsign provided; skipping user activation fetch.");
+            return;
+        }
+        localStorage.setItem("pota_user_callsign", callsign.trim().toUpperCase());
+    }
+
+    const url = `https://api.pota.app/profile/${callsign}`;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch activations: ${response.statusText}`);
         }
 
-        // Apply updates from changes.json
-        try {
-            const changesResponse = await fetchIfModified('/potamap/data/changes.json', 'changes.json');
-            if (changesResponse && changesResponse.ok) {
-                const changesData = await changesResponse.json();
+        const profile = await response.json();
+        const recent = profile.recent_activity.activations || [];
 
-                const updatedParks = changesData.map(park => {
-                    const isNew = park.change === 'Park added';
+        if (recent.length === 0) {
+            console.log("No recent activations returned.");
+            return;
+        }
 
-                    return {
-                        reference: park.reference,
-                        name: park.name,
-                        latitude: park.latitude,
-                        longitude: park.longitude,
-                        grid: park.grid,
-                        locationDesc: park.locationDesc,
-                        attempts: park.attempts,
-                        activations: park.activations,
-                        qsos: park.qsos,
-                        created: isNew
-                            ? (park.timestamp ? new Date(park.timestamp).getTime() : now)
-                            : undefined,
-                        change: park.change
-                    };
-                });
+        const newActivations = recent.map(act => ({
+            reference: act.reference.trim(),
+            name: (act.park || "").trim(),
+            qso_date: act.date.trim(),
+            activeCallsign: callsign,
+            totalQSOs: parseInt(act.total, 10) || 0,
+            qsosCW: parseInt(act.cw, 10) || 0,
+            qsosDATA: parseInt(act.data, 10) || 0,
+            qsosPHONE: parseInt(act.phone, 10) || 0,
+            attempts: parseInt(act.total, 10) || 0,
+            activations: parseInt(act.total, 10) || 0
+        }));
 
-                console.log("Final updatedParks going to IndexedDB:", updatedParks);
+        const existing = await getActivationsFromIndexedDB();
+        const map = new Map(existing.map(act => [act.reference, act]));
 
-                await upsertParksToIndexedDB(updatedParks);
-                await setLastModifiedHeader('changes.json', changesResponse.headers.get('last-modified'));
-                console.log('Applied updates from changes.json');
+        newActivations.forEach(act => {
+            const ref = act.reference;
+            if (map.has(ref)) {
+                const merged = {
+                    ...map.get(ref),
+                    ...act,
+                    totalQSOs: map.get(ref).totalQSOs + act.totalQSOs,
+                    qsosCW: map.get(ref).qsosCW + act.qsosCW,
+                    qsosDATA: map.get(ref).qsosDATA + act.qsosDATA,
+                    qsosPHONE: map.get(ref).qsosPHONE + act.qsosPHONE,
+                    activations: map.get(ref).activations + act.activations
+                };
+                map.set(ref, merged);
             } else {
-                console.log('No new changes in changes.json');
+                map.set(ref, act);
             }
-        } catch (err) {
-            console.warn('Failed to apply park changes:', err);
-        }
-        return parks;
-    }
-
-    async function fetchAndApplyUserActivations(callsign = null) {
-        // Try to load stored callsign
-        if (!callsign) {
-            callsign = localStorage.getItem("pota_user_callsign");
-        }
-
-        // Prompt the user if still not available
-        if (!callsign) {
-            callsign = prompt("Enter your callsign to load your POTA activations:");
-            if (!callsign) {
-                console.warn("No callsign provided; skipping user activation fetch.");
-                return;
-            }
-            localStorage.setItem("pota_user_callsign", callsign.trim().toUpperCase());
-        }
-
-        const url = `https://api.pota.app/profile/${callsign}`;
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch activations: ${response.statusText}`);
-            }
-
-            const profile = await response.json();
-            const recent = profile.recent_activity.activations || [];
-
-            if (recent.length === 0) {
-                console.log("No recent activations returned.");
-                return;
-            }
-
-            const newActivations = recent.map(act => ({
-                reference: act.reference.trim(),
-                name: (act.park || "").trim(),
-                qso_date: act.date.trim(),
-                activeCallsign: callsign,
-                totalQSOs: parseInt(act.total, 10) || 0,
-                qsosCW: parseInt(act.cw, 10) || 0,
-                qsosDATA: parseInt(act.data, 10) || 0,
-                qsosPHONE: parseInt(act.phone, 10) || 0,
-                attempts: parseInt(act.total, 10) || 0,
-                activations: parseInt(act.total, 10) || 0
-            }));
-
-            const existing = await getActivationsFromIndexedDB();
-            const map = new Map(existing.map(act => [act.reference, act]));
-
-            newActivations.forEach(act => {
-                const ref = act.reference;
-                if (map.has(ref)) {
-                    const merged = {
-                        ...map.get(ref),
-                        ...act,
-                        totalQSOs: map.get(ref).totalQSOs + act.totalQSOs,
-                        qsosCW: map.get(ref).qsosCW + act.qsosCW,
-                        qsosDATA: map.get(ref).qsosDATA + act.qsosDATA,
-                        qsosPHONE: map.get(ref).qsosPHONE + act.qsosPHONE,
-                        activations: map.get(ref).activations + act.activations
-                    };
-                    map.set(ref, merged);
-                } else {
-                    map.set(ref, act);
-                }
-            });
-
-            activations = Array.from(map.values());
-            await saveActivationsToIndexedDB(activations);
-            console.log(`Fetched and merged ${newActivations.length} recent activations.`);
-
-            updateActivationsInView();
-            displayCallsign();
-
-        } catch (error) {
-            console.error("Error fetching or processing user activations:", error);
-        }
-    }
-
-
-    function getFromStore(store, key) {
-        return new Promise((resolve, reject) => {
-            const request = store.get(key);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
         });
+
+        activations = Array.from(map.values());
+        await saveActivationsToIndexedDB(activations);
+        console.log(`Fetched and merged ${newActivations.length} recent activations.`);
+
+        updateActivationsInView();
+        displayCallsign();
+
+    } catch (error) {
+        console.error("Error fetching or processing user activations:", error);
+    }
+}
+
+
+function getFromStore(store, key) {
+    return new Promise((resolve, reject) => {
+        const request = store.get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+
+async function upsertParksToIndexedDB(parks) {
+    const db = await getDatabase();
+    const tx = db.transaction('parks', 'readwrite');
+    const store = tx.objectStore('parks');
+
+    for (const park of parks) {
+        const existing = await getFromStore(store, park.reference);
+
+        const merged = {
+            ...existing,
+            ...park,
+            created: park.created ?? existing?.created // ✅ Only update if explicitly provided
+        };
+
+        store.put(merged);
     }
 
+    return tx.complete;
+}
 
-    async function upsertParksToIndexedDB(parks) {
+
+async function getAllParksFromIndexedDB() {
+    const db = await getDatabase();
+    const transaction = db.transaction('parks', 'readonly');
+    const store = transaction.objectStore('parks');
+
+    return new Promise((resolve, reject) => {
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+
+async function getLastFetchTimestamp(key) {
+    return parseInt(localStorage.getItem(`lastFetch_${key}`), 10) || null;
+}
+
+async function setLastFetchTimestamp(key, timestamp) {
+    localStorage.setItem(`lastFetch_${key}`, timestamp.toString());
+}
+
+async function fetchIfModified(url, key) {
+    const response = await fetch('/potamap/data/changes.json', { cache: 'no-store' });
+    const data = await response;
+    console.log("Bypassed fetchIfModified — data:", data);
+    return data;
+}
+
+
+async function setLastModifiedHeader(key, value) {
+    if (value) {
+        localStorage.setItem(`lastModified_${key}`, value);
+    }
+}
+
+
+/**
+ * Initializes the Leaflet map and loads park data from CSV using IndexedDB.
+ */
+async function setupPOTAMap() {
+    const csvUrl = '/potamap/data/allparks.json';
+
+    try {
+        // Fetch and cache parks data
+        await fetchAndCacheParks(csvUrl, cacheDuration);
+        // Now reload from IndexedDB, which will include merged changes
+        parks = await getAllParksFromIndexedDB();
+        console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
+        console.log("Parks Loaded from IndexedDB:", parks); // Debugging
+
+        //Pull nfer data from backend
+        await loadAndApplyNferData(); // ✅ Inject NFER links into park objects
+
+        // Retrieve activations from IndexedDB
+        activations = await getActivationsFromIndexedDB();
+        console.log("Initial Activations:", activations); // Debugging
+
+        // Optional: Validate that activations correspond to existing parks
+        activations.forEach(act => {
+            const exists = parks.some(p => p.reference === act.reference);
+            if (!exists) {
+                console.warn(`Activation reference ${act.reference} does not match any park.`);
+            }
+        });
+        const userCallsign = await getOrPromptUserCallsign();
+        if (userCallsign) {
+            await fetchAndApplyUserActivations(userCallsign);
+        } else {
+            console.log("No callsign provided. Skipping live user activation fetch.");
+        }
+
+        // Initialize the map with user's location
+        navigator.geolocation.getCurrentPosition(
+            async (position) => {
+                userLat = position.coords.latitude;
+                userLng = position.coords.longitude;
+                console.log(`User location acquired: ${userLat}, ${userLng}`);
+
+                map = initializeMap(userLat, userLng);
+                map.activationsLayer = L.layerGroup().addTo(map);
+
+                await fetchAndDisplaySpots();
+                applyActivationToggleState();
+                displayCallsign();
+            },
+            async (error) => {
+                console.warn('Geolocation failed:', error.message);
+
+                // Try to use last saved location from localStorage
+                const saved = localStorage.getItem("mapCenter");
+                if (saved) {
+                    try {
+                        [userLat, userLng] = JSON.parse(saved);
+                        console.log(`Using last known map center from localStorage: ${userLat}, ${userLng}`);
+                    } catch (e) {
+                        console.warn("Failed to parse saved map center, falling back to default.");
+                        userLat = 39.8283; // Center of CONUS
+                        userLng = -98.5795;
+                    }
+                } else {
+                    console.log("No saved map center, using default center of U.S.");
+                    userLat = 39.8283;
+                    userLng = -98.5795;
+                }
+
+                map = initializeMap(userLat, userLng);
+                map.activationsLayer = L.layerGroup().addTo(map);
+
+                await fetchAndDisplaySpots();
+                applyActivationToggleState();
+                displayCallsign();
+            }
+        );
+
+        console.log('XX Displaying active spots');
+    } catch (error) {
+        console.error('Error setting up POTA map:', error.message);
+        alert('Failed to set up the POTA map. Please try again later.');
+    }
+}
+
+async function loadAndApplyNferData() {
+    try {
+        const response = await fetch('/potamap/data/nfer_from_top_activators.json');
+        if (!response.ok) throw new Error(`Failed to fetch NFER data: ${response.statusText}`);
+
+        const raw = await response.json();
+
+        // Map from park reference -> Set of co-activated parks
+        const nferMap = {};
+
+        for (const entry of raw) {
+            const refs = entry.references;
+            for (const park of refs) {
+                if (!nferMap[park]) nferMap[park] = new Set();
+                for (const other of refs) {
+                    if (other !== park) {
+                        nferMap[park].add(other);
+                    }
+                }
+            }
+        }
+
         const db = await getDatabase();
         const tx = db.transaction('parks', 'readwrite');
         const store = tx.objectStore('parks');
 
-        for (const park of parks) {
-            const existing = await getFromStore(store, park.reference);
+        const updatePromises = [];
 
-            const merged = {
-                ...existing,
-                ...park,
-                created: park.created ?? existing?.created // ✅ Only update if explicitly provided
-            };
-
-            store.put(merged);
-        }
-
-        return tx.complete;
-    }
-
-
-    async function getAllParksFromIndexedDB() {
-        const db = await getDatabase();
-        const transaction = db.transaction('parks', 'readonly');
-        const store = transaction.objectStore('parks');
-
-        return new Promise((resolve, reject) => {
-            const request = store.getAll();
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
-    }
-
-
-    async function getLastFetchTimestamp(key) {
-        return parseInt(localStorage.getItem(`lastFetch_${key}`), 10) || null;
-    }
-
-    async function setLastFetchTimestamp(key, timestamp) {
-        localStorage.setItem(`lastFetch_${key}`, timestamp.toString());
-    }
-
-    async function fetchIfModified(url, key) {
-        const response = await fetch('/potamap/data/changes.json', {cache: 'no-store'});
-        const data = await response;
-        console.log("Bypassed fetchIfModified — data:", data);
-        return data;
-    }
-
-
-    async function setLastModifiedHeader(key, value) {
-        if (value) {
-            localStorage.setItem(`lastModified_${key}`, value);
-        }
-    }
-
-
-    /**
-     * Initializes the Leaflet map and loads park data from CSV using IndexedDB.
-     */
-    async function setupPOTAMap() {
-        const csvUrl = '/potamap/data/allparks.json';
-
-        try {
-            // Fetch and cache parks data
-            await fetchAndCacheParks(csvUrl, cacheDuration);
-            // Now reload from IndexedDB, which will include merged changes
-            parks = await getAllParksFromIndexedDB();
-            console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
-            console.log("Parks Loaded from IndexedDB:", parks); // Debugging
-
-            //Pull nfer data from backend
-            await loadAndApplyNferData(); // ✅ Inject NFER links into park objects
-
-            // Retrieve activations from IndexedDB
-            activations = await getActivationsFromIndexedDB();
-            console.log("Initial Activations:", activations); // Debugging
-
-            // Optional: Validate that activations correspond to existing parks
-            activations.forEach(act => {
-                const exists = parks.some(p => p.reference === act.reference);
-                if (!exists) {
-                    console.warn(`Activation reference ${act.reference} does not match any park.`);
-                }
-            });
-            const userCallsign = await getOrPromptUserCallsign();
-            if (userCallsign) {
-                await fetchAndApplyUserActivations(userCallsign);
-            } else {
-                console.log("No callsign provided. Skipping live user activation fetch.");
-            }
-
-            // Initialize the map with user's location
-            navigator.geolocation.getCurrentPosition(
-                async (position) => {
-                    userLat = position.coords.latitude;
-                    userLng = position.coords.longitude;
-                    console.log(`User location acquired: ${userLat}, ${userLng}`);
-
-                    map = initializeMap(userLat, userLng);
-                    map.activationsLayer = L.layerGroup().addTo(map);
-
-                    await fetchAndDisplaySpots();
-                    applyActivationToggleState();
-                    displayCallsign();
-                },
-                async (error) => {
-                    console.warn('Geolocation failed:', error.message);
-
-                    // Try to use last saved location from localStorage
-                    const saved = localStorage.getItem("mapCenter");
-                    if (saved) {
-                        try {
-                            [userLat, userLng] = JSON.parse(saved);
-                            console.log(`Using last known map center from localStorage: ${userLat}, ${userLng}`);
-                        } catch (e) {
-                            console.warn("Failed to parse saved map center, falling back to default.");
-                            userLat = 39.8283; // Center of CONUS
-                            userLng = -98.5795;
+        for (const [reference, nferSet] of Object.entries(nferMap)) {
+            updatePromises.push(
+                new Promise((resolve, reject) => {
+                    const getReq = store.get(reference);
+                    getReq.onsuccess = () => {
+                        const park = getReq.result;
+                        if (park) {
+                            park.nfer = Array.from(nferSet).sort();
+                            store.put(park);
                         }
-                    } else {
-                        console.log("No saved map center, using default center of U.S.");
-                        userLat = 39.8283;
-                        userLng = -98.5795;
-                    }
-
-                    map = initializeMap(userLat, userLng);
-                    map.activationsLayer = L.layerGroup().addTo(map);
-
-                    await fetchAndDisplaySpots();
-                    applyActivationToggleState();
-                    displayCallsign();
-                }
+                        resolve();
+                    };
+                    getReq.onerror = () => {
+                        console.warn(`Failed to read park ${reference} from IndexedDB`);
+                        resolve(); // Don't block on errors
+                    };
+                })
             );
-
-            console.log('XX Displaying active spots');
-        } catch (error) {
-            console.error('Error setting up POTA map:', error.message);
-            alert('Failed to set up the POTA map. Please try again later.');
         }
+
+        await Promise.all(updatePromises);
+        console.log("NFER relationships applied to parks in IndexedDB.");
+    } catch (err) {
+        console.error("Error loading or applying NFER data:", err);
+    }
+}
+
+function getCurrentUserCallsign() {
+    const validCallsigns = activations
+        .map(act => act.activeCallsign)
+        .filter(cs => cs && typeof cs === "string" && cs.trim().length > 0);
+
+    const unique = [...new Set(validCallsigns.map(cs => cs.trim()))];
+
+    if (unique.length === 1) {
+        return unique[0]; // ✅ Found a single consistent callsign
+    } else if (unique.length > 1) {
+        console.warn("Multiple callsigns found in activations:", unique);
+        return unique[0]; // Still return one, fallback behavior
     }
 
-    async function loadAndApplyNferData() {
-        try {
-            const response = await fetch('/potamap/data/nfer_from_top_activators.json');
-            if (!response.ok) throw new Error(`Failed to fetch NFER data: ${response.statusText}`);
+    console.warn("No valid callsign found in activations.");
+    return null;
+}
+async function getOrPromptUserCallsign() {
+    let stored = localStorage.getItem("userCallsign");
+    if (stored) return stored;
 
-            const raw = await response.json();
-
-            // Map from park reference -> Set of co-activated parks
-            const nferMap = {};
-
-            for (const entry of raw) {
-                const refs = entry.references;
-                for (const park of refs) {
-                    if (!nferMap[park]) nferMap[park] = new Set();
-                    for (const other of refs) {
-                        if (other !== park) {
-                            nferMap[park].add(other);
-                        }
-                    }
-                }
-            }
-
-            const db = await getDatabase();
-            const tx = db.transaction('parks', 'readwrite');
-            const store = tx.objectStore('parks');
-
-            const updatePromises = [];
-
-            for (const [reference, nferSet] of Object.entries(nferMap)) {
-                updatePromises.push(
-                    new Promise((resolve, reject) => {
-                        const getReq = store.get(reference);
-                        getReq.onsuccess = () => {
-                            const park = getReq.result;
-                            if (park) {
-                                park.nfer = Array.from(nferSet).sort();
-                                store.put(park);
-                            }
-                            resolve();
-                        };
-                        getReq.onerror = () => {
-                            console.warn(`Failed to read park ${reference} from IndexedDB`);
-                            resolve(); // Don't block on errors
-                        };
-                    })
-                );
-            }
-
-            await Promise.all(updatePromises);
-            console.log("NFER relationships applied to parks in IndexedDB.");
-        } catch (err) {
-            console.error("Error loading or applying NFER data:", err);
-        }
+    // Try to extract from activations
+    const fromActivations = getCurrentUserCallsign();
+    if (fromActivations) {
+        localStorage.setItem("userCallsign", fromActivations);
+        return fromActivations;
     }
 
-    function getCurrentUserCallsign() {
-        const validCallsigns = activations
-            .map(act => act.activeCallsign)
-            .filter(cs => cs && typeof cs === "string" && cs.trim().length > 0);
-
-        const unique = [...new Set(validCallsigns.map(cs => cs.trim()))];
-
-        if (unique.length === 1) {
-            return unique[0]; // ✅ Found a single consistent callsign
-        } else if (unique.length > 1) {
-            console.warn("Multiple callsigns found in activations:", unique);
-            return unique[0]; // Still return one, fallback behavior
-        }
-
-        console.warn("No valid callsign found in activations.");
-        return null;
+    // Otherwise, ask the user
+    const input = prompt("Enter your callsign to show your POTA activations:");
+    if (input && input.trim().length > 0) {
+        const callsign = input.trim().toUpperCase();
+        localStorage.setItem("userCallsign", callsign);
+        return callsign;
     }
 
-    async function getOrPromptUserCallsign() {
-        let stored = localStorage.getItem("userCallsign");
-        if (stored) return stored;
+    return null;
+}
 
-        // Try to extract from activations
-        const fromActivations = getCurrentUserCallsign();
-        if (fromActivations) {
-            localStorage.setItem("userCallsign", fromActivations);
-            return fromActivations;
-        }
+function applyActivationToggleState() {
+    const toggleButton = document.getElementById('toggleActivations');
+    const userActivatedReferences = activations.map((act) => act.reference);
 
-        // Otherwise, ask the user
-        const input = prompt("Enter your callsign to show your POTA activations:");
-        if (input && input.trim().length > 0) {
-            const callsign = input.trim().toUpperCase();
-            localStorage.setItem("userCallsign", callsign);
-            return callsign;
-        }
+    const buttonTexts = [
+        "Show My Activations",
+        "Hide My Activations",
+        "Show Currently On Air",
+        "Show All Spots",
+    ];
 
-        return null;
+    if (toggleButton) {
+        toggleButton.innerText = buttonTexts[activationToggleState];
     }
 
-    function applyActivationToggleState() {
-        const toggleButton = document.getElementById('toggleActivations');
-        const userActivatedReferences = activations.map((act) => act.reference);
+    let parksInBounds = getParksInBounds(parks);
+    let parksToDisplay = [];
 
-        const buttonTexts = [
-            "Show My Activations",
-            "Hide My Activations",
-            "Show Currently On Air",
-            "Show All Spots",
-        ];
+    switch (activationToggleState) {
+        case 0: // Show all parks in bounds
+            parksToDisplay = parksInBounds;
+            break;
 
-        if (toggleButton) {
-            toggleButton.innerText = buttonTexts[activationToggleState];
-        }
+        case 1: // Show just user's activations in bounds
+            parksToDisplay = parksInBounds.filter(p => userActivatedReferences.includes(p.reference));
+            break;
 
-        let parksInBounds = getParksInBounds(parks);
-        let parksToDisplay = [];
+        case 2: // Show parks not activated by user
+            parksToDisplay = parksInBounds.filter(p => !userActivatedReferences.includes(p.reference));
+            break;
 
-        switch (activationToggleState) {
-            case 0: // Show all parks in bounds
-                parksToDisplay = parksInBounds;
-                break;
+        case 3: // Show only currently active parks (on air)
+            const onAirRefs = spots.map(s => s.reference);
+            parksToDisplay = parksInBounds.filter(p => onAirRefs.includes(p.reference));
+            break;
 
-            case 1: // Show just user's activations in bounds
-                parksToDisplay = parksInBounds.filter(p => userActivatedReferences.includes(p.reference));
-                break;
-
-            case 2: // Show parks not activated by user
-                parksToDisplay = parksInBounds.filter(p => !userActivatedReferences.includes(p.reference));
-                break;
-
-            case 3: // Show only currently active parks (on air)
-                const onAirRefs = spots.map(s => s.reference);
-                parksToDisplay = parksInBounds.filter(p => onAirRefs.includes(p.reference));
-                break;
-
-            default:
-                console.warn(`Unknown activationToggleState: ${activationToggleState}`);
-                parksToDisplay = parksInBounds;
-                break;
-        }
-
-        displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
+        default:
+            console.warn(`Unknown activationToggleState: ${activationToggleState}`);
+            parksToDisplay = parksInBounds;
+            break;
     }
 
-    /**
-     * Fetches active POTA spots from the API and displays them on the map.
-     */
-    async function fetchAndDisplaySpots() {
-        const SPOT_API_URL = 'https://api.pota.app/v1/spots';
-        try {
-            const response = await fetch(SPOT_API_URL);
-            if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
+    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
+}
 
-            spots = await response.json();  // ✅ store globally for isActive logic
+/**
+ * Fetches active POTA spots from the API and displays them on the map.
+ */
+async function fetchAndDisplaySpots() {
+    const SPOT_API_URL = 'https://api.pota.app/v1/spots';
+    try {
+        const response = await fetch(SPOT_API_URL);
+        if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
 
-            console.log('Fetched spots data:', spots); // Debugging
+        spots = await response.json();  // ✅ store globally for isActive logic
 
-            if (!map) {
-                console.error('Map instance is not initialized.');
-                return;
-            }
+        console.log('Fetched spots data:', spots); // Debugging
 
-            // Just refresh markers using the existing unified logic
-            if (!map.activationsLayer) {
-                map.activationsLayer = L.layerGroup().addTo(map);
-            } else {
-                map.activationsLayer.clearLayers();
-            }
+        if (!map) {
+            console.error('Map instance is not initialized.');
+            return;
+        }
 
-            const activatedReferences = activations.map(act => act.reference);
+        // Just refresh markers using the existing unified logic
+        if (!map.activationsLayer) {
+            map.activationsLayer = L.layerGroup().addTo(map);
+        } else {
+            map.activationsLayer.clearLayers();
+        }
 
-            const parksInBounds = getParksInBounds(parks);
+        const activatedReferences = activations.map(act => act.reference);
+
+        const parksInBounds = getParksInBounds(parks);
 //        displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
-            applyActivationToggleState();
-            console.log(`Updated display of ${spots.length} active spots on the map.`);
-        } catch (error) {
-            console.error('Error fetching or displaying POTA spots:', error);
-        }
+        applyActivationToggleState();
+        console.log(`Updated display of ${spots.length} active spots on the map.`);
+    } catch (error) {
+        console.error('Error fetching or displaying POTA spots:', error);
     }
+}
 
 
-    /**
-     * Fetches active POTA spots from the API, filters them to the current map bounds,
-     * and displays them so that their popups show both park info + spot data.
-     * Clicking on a spot now also closes any visible tooltip.
-     */
-    async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
-        const SPOT_API_URL = "https://api.pota.app/v1/spots";
-        try {
-            const response = await fetch(SPOT_API_URL);
-            if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
-            const spots = await response.json();
+/**
+ * Fetches active POTA spots from the API, filters them to the current map bounds,
+ * and displays them so that their popups show both park info + spot data.
+ * Clicking on a spot now also closes any visible tooltip.
+ */
+async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
+    const SPOT_API_URL = "https://api.pota.app/v1/spots";
+    try {
+        const response = await fetch(SPOT_API_URL);
+        if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
+        const spots = await response.json();
 
-            console.log("Fetched spots data:", spots);
+        console.log("Fetched spots data:", spots);
 
-            if (!mapInstance.spotsLayer) {
-                console.log("Initializing spots layer...");
-                mapInstance.spotsLayer = L.layerGroup().addTo(mapInstance);
-            } else {
-                console.log("Clearing existing spots layer...");
-                mapInstance.spotsLayer.clearLayers();
+        if (!mapInstance.spotsLayer) {
+            console.log("Initializing spots layer...");
+            mapInstance.spotsLayer = L.layerGroup().addTo(mapInstance);
+        } else {
+            console.log("Clearing existing spots layer...");
+            mapInstance.spotsLayer.clearLayers();
+        }
+
+        const bounds = mapInstance.getBounds();
+        console.log("Current map bounds:", bounds);
+
+        const spotsInBounds = spots.filter(({ latitude, longitude }) => {
+            if (!latitude || !longitude) {
+                console.warn("Invalid coordinates:", { latitude, longitude });
+                return false;
             }
+            return bounds.contains([latitude, longitude]);
+        });
 
-            const bounds = mapInstance.getBounds();
-            console.log("Current map bounds:", bounds);
+        console.log(`Displaying ${spotsInBounds.length} spots in current bounds.`);
 
-            const spotsInBounds = spots.filter(({latitude, longitude}) => {
-                if (!latitude || !longitude) {
-                    console.warn("Invalid coordinates:", {latitude, longitude});
-                    return false;
-                }
-                return bounds.contains([latitude, longitude]);
-            });
-
-            console.log(`Displaying ${spotsInBounds.length} spots in current bounds.`);
-
-            if (!mapInstance.activationsLayer) {
-                mapInstance.activationsLayer = L.layerGroup().addTo(mapInstance);
-            } else {
-                mapInstance.activationsLayer.clearLayers();
-            }
-
-            const activatedReferences = activations.map(act => act.reference);
-            //displayParksOnMap(mapInstance, parks, activatedReferences, mapInstance.activationsLayer);
-            applyActivationToggleState();
-
-        } catch (error) {
-            console.error("Error fetching or displaying POTA spots:", error);
+        if (!mapInstance.activationsLayer) {
+            mapInstance.activationsLayer = L.layerGroup().addTo(mapInstance);
+        } else {
+            mapInstance.activationsLayer.clearLayers();
         }
+
+        const activatedReferences = activations.map(act => act.reference);
+        //displayParksOnMap(mapInstance, parks, activatedReferences, mapInstance.activationsLayer);
+        applyActivationToggleState();
+
+    } catch (error) {
+        console.error("Error fetching or displaying POTA spots:", error);
     }
+}
 
 
-    /**
-     * Initializes the recurring fetch for POTA spots.
-     */
-    function initializeSpotFetching() {
-        fetchAndDisplaySpots(); // Initial
-        // in initializeSpotFetching()
-        if (!isDesktopMode) {
-            setInterval(fetchAndDisplaySpots, 5 * 60 * 1000);
-        }
+/**
+ * Initializes the recurring fetch for POTA spots.
+ */
+function initializeSpotFetching() {
+    fetchAndDisplaySpots(); // Initial
+    // in initializeSpotFetching()
+    if (!isDesktopMode) {
+        setInterval(fetchAndDisplaySpots, 5 * 60 * 1000);
     }
+}
 
 // Ensure spots fetching starts when the DOM is fully loaded
-    document.addEventListener('DOMContentLoaded', () => {
-        initializeSpotFetching();
-    });
+document.addEventListener('DOMContentLoaded', () => {
+    initializeSpotFetching();
+});
 
 
-    /**
-     * Determines the marker color based on activations and user activation status.
-     * @param {number} activations - The number of activations for the park.
-     * @param {boolean} userActivated - Whether the user has activated the park.
-     * @returns {string} The color code for the marker.
-     */
-    function getMarkerColor(activations, userActivated, created) {
-        const now = new Date();
-        const createdDate = new Date(created);
-        const ageInDays = (now - createdDate) / (1000 * 60 * 60 * 24);
 
-        if (ageInDays <= 30) return "#800080"; // Purple for new parks
-        if (userActivated) return "#ffa500";   // Orange for user-activated parks
-        if (activations > 10) return "#ff6666"; // Light red for highly active parks
-        if (activations > 0) return "#90ee90";  // Light green for active parks
-        return "#0000ff";                      // Vivid blue for inactive parks
-    }
+/**
+ * Determines the marker color based on activations and user activation status.
+ * @param {number} activations - The number of activations for the park.
+ * @param {boolean} userActivated - Whether the user has activated the park.
+ * @returns {string} The color code for the marker.
+ */
+function getMarkerColor(activations, userActivated, created) {
+    const now = new Date();
+    const createdDate = new Date(created);
+    const ageInDays = (now - createdDate) / (1000 * 60 * 60 * 24);
+
+    if (ageInDays <= 30) return "#800080"; // Purple for new parks
+    if (userActivated) return "#ffa500";   // Orange for user-activated parks
+    if (activations > 10) return "#ff6666"; // Light red for highly active parks
+    if (activations > 0) return "#90ee90";  // Light green for active parks
+    return "#0000ff";                      // Vivid blue for inactive parks
+}
 
 
-    /**
-     * Optimizes Leaflet controls and popups for better mobile experience.
-     */
-    function optimizeLeafletControlsAndPopups() {
-        const style = document.createElement('style');
-        style.innerHTML = `
+/**
+ * Optimizes Leaflet controls and popups for better mobile experience.
+ */
+function optimizeLeafletControlsAndPopups() {
+    const style = document.createElement('style');
+    style.innerHTML = `
         /* Adjust Leaflet Controls for Mobile */
         .leaflet-control-attribution {
             font-size: 12px;
@@ -3936,207 +3859,204 @@ function filterParksByActivations(maxActivations) {
             }
         }
     `;
-        document.head.appendChild(style);
-        console.log("Leaflet controls and popups optimized for mobile."); // Debugging
-    }
+    document.head.appendChild(style);
+    console.log("Leaflet controls and popups optimized for mobile."); // Debugging
+}
 
 // Call the optimization function
-    optimizeLeafletControlsAndPopups();
+optimizeLeafletControlsAndPopups();
 
-    /**
-     * Refreshes the map activations based on the current state.
-     */
-    function refreshMapActivations() {
-        // Clear existing markers or layers if necessary
-        if (map.activationsLayer) {
-            map.activationsLayer.clearLayers();
-            console.log("Cleared existing activation markers."); // Debugging
-        }
+/**
+ * Refreshes the map activations based on the current state.
+ */
+function refreshMapActivations() {
+    // Clear existing markers or layers if necessary
+    if (map.activationsLayer) {
+        map.activationsLayer.clearLayers();
+        console.log("Cleared existing activation markers."); // Debugging
+    }
 
-        // Create a new layer group
-        map.activationsLayer = L.layerGroup().addTo(map);
-        console.log("Created activationsLayer."); // Debugging
+    // Create a new layer group
+    map.activationsLayer = L.layerGroup().addTo(map);
+    console.log("Created activationsLayer."); // Debugging
 
-        // Determine which activations to display
-        let activatedReferences = [];
-        const toggleButton = document.getElementById('toggleActivations');
-        if (toggleButton && toggleButton.classList.contains('active')) {
-            activatedReferences = activations.map(act => act.reference);
-            console.log("Activated References in Refresh:", activatedReferences); // Debugging
-        }
-        // Display parks with the current activations
-        const parksInBounds = getParksInBounds(parks);
+    // Determine which activations to display
+    let activatedReferences = [];
+    const toggleButton = document.getElementById('toggleActivations');
+    if (toggleButton && toggleButton.classList.contains('active')) {
+        activatedReferences = activations.map(act => act.reference);
+        console.log("Activated References in Refresh:", activatedReferences); // Debugging
+    }
+    // Display parks with the current activations
+    const parksInBounds = getParksInBounds(parks);
 //    displayParksOnMap(map, parksInBounds, activatedReferences, map.activationsLayer);
-        applyActivationToggleState();
-        console.log("Displayed activated parks (if any) based on refresh."); // Debugging
+    applyActivationToggleState();
+    console.log("Displayed activated parks (if any) based on refresh."); // Debugging
+}
+
+
+/**
+ * Adds a "Go To Park" button below the search box for global dataset search.
+ */
+function addGoToParkButton() {
+    const searchBoxContainer = document.getElementById('searchBoxContainer');
+
+    if (!searchBoxContainer) {
+        console.error("SearchBoxContainer not found.");
+        return;
     }
 
+    // Create Go To Park button
+    const goToParkButton = document.createElement('button');
+    goToParkButton.id = 'goToParkButton';
+    goToParkButton.innerText = 'Go To Park';
+    goToParkButton.title = 'Expand search to the full dataset and zoom to a park';
+    goToParkButton.style.marginTop = '10px';
 
-    /**
-     * Adds a "Go To Park" button below the search box for global dataset search.
-     */
-    function addGoToParkButton() {
-        const searchBoxContainer = document.getElementById('searchBoxContainer');
-
-        if (!searchBoxContainer) {
-            console.error("SearchBoxContainer not found.");
-            return;
-        }
-
-        // Create Go To Park button
-        const goToParkButton = document.createElement('button');
-        goToParkButton.id = 'goToParkButton';
-        goToParkButton.innerText = 'Go To Park';
-        goToParkButton.title = 'Expand search to the full dataset and zoom to a park';
-        goToParkButton.style.marginTop = '10px';
-
-        // Add event listener for Go To Park button
-        goToParkButton.addEventListener('click', () => {
-            triggerGoToPark();
-        });
-
-        // Add Clear Search button if not already present
-        const clearButton = document.getElementById('clearSearch');
-        if (!clearButton) {
-            const clearSearchButton = document.createElement('button');
-            clearSearchButton.id = 'clearSearch';
-            clearSearchButton.innerText = 'Clear Search';
-            clearSearchButton.title = 'Clear Search';
-            clearSearchButton.style.marginTop = '10px';
-
-            clearSearchButton.addEventListener('click', clearSearchInput);
-            searchBoxContainer.appendChild(clearSearchButton);
-            console.log("Clear Search button added.");
-        }
-
-        // Append Go To Park button after the Clear Search button
-        searchBoxContainer.appendChild(goToParkButton);
-        console.log("Go To Park button added.");
-
-        // Bind Enter key to Go To Park functionality
-        const searchBox = document.getElementById('searchBox');
-        if (searchBox) {
-            searchBox.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter') {
-                    event.preventDefault();
-                    triggerGoToPark(true);
-                }
-            });
-            console.log("Enter key bound to Go To Park functionality.");
-        }
-    }
-
-    /**
-     * Triggers the Go To Park functionality by searching and zooming to a park.
-     */
-    function triggerGoToPark() {
-        const searchBox = document.getElementById('searchBox');
-        if (!searchBox || !searchBox.value.trim()) {
-            alert('Please enter a search term.');
-            return;
-        }
-
-        const query = normalizeString(searchBox.value);
-        const matchingPark = parks.find(park =>
-            normalizeString(park.name).includes(query) ||
-            normalizeString(park.reference).includes(query)
-        );
-
-        if (matchingPark) {
-            zoomToPark(matchingPark);
-        } else {
-            alert('No matching park.');
-        }
-    }
-
-// Initialize Go To Park button on DOMContentLoaded
-    addEventListener('DOMContentLoaded', () => {
-        addGoToParkButton();
+    // Add event listener for Go To Park button
+    goToParkButton.addEventListener('click', () => {
+        triggerGoToPark();
     });
 
-    /**
-     * Adds CSS styles for the hamburger menu and other responsive elements.
-     * (Already incorporated into the enhanceHamburgerMenuForMobile function)
-     */
+    // Add Clear Search button if not already present
+    const clearButton = document.getElementById('clearSearch');
+    if (!clearButton) {
+        const clearSearchButton = document.createElement('button');
+        clearSearchButton.id = 'clearSearch';
+        clearSearchButton.innerText = 'Clear Search';
+        clearSearchButton.title = 'Clear Search';
+        clearSearchButton.style.marginTop = '10px';
 
-    /**
-     * Ensure that the map container adjusts to viewport changes
-     */
-    window.addEventListener('resize', debounce(() => {
-        if (map) {
-            map.invalidateSize();
-            console.log("Map size invalidated on window resize.");
-            applyActivationToggleState();
-        }
-    }, 300));
+        clearSearchButton.addEventListener('click', clearSearchInput);
+        searchBoxContainer.appendChild(clearSearchButton);
+        console.log("Clear Search button added.");
+    }
 
+    // Append Go To Park button after the Clear Search button
+    searchBoxContainer.appendChild(goToParkButton);
+    console.log("Go To Park button added.");
 
-    function initializeFilterChips() {
-        const pairs = [
-            ['chipMyActs', 'myActivations'],
-            ['chipOnAir', 'currentlyActivating'],
-            ['chipNewParks', 'newParks'],
-            ['chipAllParks', 'allParks'],
-        ];
-
-        function setChip(btn, on) {
-            btn.classList.toggle('active', !!on);
-            btn.setAttribute('aria-pressed', !!on);
-        }
-
-        function updateChipStates() {
-            const chipAll = document.getElementById('chipAllParks');
-            if (chipAll) setChip(chipAll, !!potaFilters.allParks);
-
-            [['chipMyActs', 'myActivations'], ['chipOnAir', 'currentlyActivating'], ['chipNewParks', 'newParks']].forEach(([id, key]) => {
-                const el = document.getElementById(id);
-                if (!el) return;
-                setChip(el, !!potaFilters[key]);
-            });
-        }
-
-        // Initialize states
-        updateChipStates();
-
-        // Wire individual chips
-        const chipMy = document.getElementById('chipMyActs');
-        const chipOnAir = document.getElementById('chipOnAir');
-        const chipNew = document.getElementById('chipNewParks');
-        const chipAll = document.getElementById('chipAllParks');
-
-        if (chipMy) chipMy.addEventListener('click', () => {
-            potaFilters.myActivations = !potaFilters.myActivations;
-            savePotaFilters();
-            updateChipStates();
-            refreshMarkers();
-        });
-        if (chipOnAir) chipOnAir.addEventListener('click', () => {
-            potaFilters.currentlyActivating = !potaFilters.currentlyActivating;
-            savePotaFilters();
-            updateChipStates();
-            refreshMarkers();
-        });
-        if (chipNew) chipNew.addEventListener('click', () => {
-            potaFilters.newParks = !potaFilters.newParks;
-            savePotaFilters();
-            updateChipStates();
-            refreshMarkers();
-        });
-        if (chipAll) chipAll.addEventListener('click', () => {
-            const willBeOn = !potaFilters.allParks;
-            potaFilters.allParks = willBeOn;
-            if (willBeOn) {
-                potaFilters.myActivations = true;
-                potaFilters.currentlyActivating = true;
-                potaFilters.newParks = true;
-            } else {
-                potaFilters.myActivations = false;
-                potaFilters.currentlyActivating = false;
-                potaFilters.newParks = false;
+    // Bind Enter key to Go To Park functionality
+    const searchBox = document.getElementById('searchBox');
+    if (searchBox) {
+        searchBox.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                triggerGoToPark(true);
             }
-            savePotaFilters();
-            updateChipStates();
-            refreshMarkers();
         });
+        console.log("Enter key bound to Go To Park functionality.");
     }
 }
+
+/**
+ * Triggers the Go To Park functionality by searching and zooming to a park.
+ */
+function triggerGoToPark() {
+    const searchBox = document.getElementById('searchBox');
+    if (!searchBox || !searchBox.value.trim()) {
+        alert('Please enter a search term.');
+        return;
+    }
+
+    const query = normalizeString(searchBox.value);
+    const matchingPark = parks.find(park =>
+        normalizeString(park.name).includes(query) ||
+        normalizeString(park.reference).includes(query)
+    );
+
+    if (matchingPark) {
+        zoomToPark(matchingPark);
+    } else {
+        alert('No matching park.');
+    }
+}
+
+// Initialize Go To Park button on DOMContentLoaded
+addEventListener('DOMContentLoaded', () => {
+    addGoToParkButton();
+});
+
+/**
+ * Adds CSS styles for the hamburger menu and other responsive elements.
+ * (Already incorporated into the enhanceHamburgerMenuForMobile function)
+ */
+
+/**
+ * Ensure that the map container adjusts to viewport changes
+ */
+window.addEventListener('resize', debounce(() => {
+    if (map) {
+        map.invalidateSize();
+        console.log("Map size invalidated on window resize.");
+        applyActivationToggleState();
+    }
+}, 300));
+
+
+function initializeFilterChips(){
+    const pairs = [
+        ['chipMyActs','myActivations'],
+        ['chipOnAir','currentlyActivating'],
+        ['chipNewParks','newParks'],
+        ['chipAllParks','allParks'],
+    ];
+
+    function setChip(btn, on){ btn.classList.toggle('active', !!on); btn.setAttribute('aria-pressed', !!on); }
+
+    function updateChipStates(){
+        const chipAll = document.getElementById('chipAllParks');
+        if (chipAll) setChip(chipAll, !!potaFilters.allParks);
+
+        [['chipMyActs','myActivations'],['chipOnAir','currentlyActivating'],['chipNewParks','newParks']].forEach(([id,key])=>{
+            const el = document.getElementById(id);
+            if (!el) return;
+            setChip(el, !!potaFilters[key]);
+        });
+    }
+
+    // Initialize states
+    updateChipStates();
+
+    // Wire individual chips
+    const chipMy = document.getElementById('chipMyActs');
+    const chipOnAir = document.getElementById('chipOnAir');
+    const chipNew = document.getElementById('chipNewParks');
+    const chipAll = document.getElementById('chipAllParks');
+
+    if (chipMy) chipMy.addEventListener('click', ()=>{
+        potaFilters.myActivations = !potaFilters.myActivations;
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+    if (chipOnAir) chipOnAir.addEventListener('click', ()=>{
+        potaFilters.currentlyActivating = !potaFilters.currentlyActivating;
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+    if (chipNew) chipNew.addEventListener('click', ()=>{
+        potaFilters.newParks = !potaFilters.newParks;
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+    if (chipAll) chipAll.addEventListener('click', ()=>{
+        const willBeOn = !potaFilters.allParks;
+        potaFilters.allParks = willBeOn;
+        if (willBeOn){
+            potaFilters.myActivations = true;
+            potaFilters.currentlyActivating = true;
+            potaFilters.newParks = true;
+        } else {
+            potaFilters.myActivations = false;
+            potaFilters.currentlyActivating = false;
+            potaFilters.newParks = false;
+        }
+        savePotaFilters();
+        updateChipStates();
+        refreshMarkers();
+    });
+}
+
