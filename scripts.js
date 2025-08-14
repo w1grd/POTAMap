@@ -1,4 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
+//8
 //
 // Initialize global variables
 let activations = [];
