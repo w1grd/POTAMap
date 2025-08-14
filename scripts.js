@@ -2396,69 +2396,93 @@ function parseStructuredQuery(raw) {
  * Uses current map state (spots, activations) for ACTIVE/MODE/MINE filters.
  */
 function parkMatchesStructuredQuery(park, parsed, ctx) {
-    // ctx: { bounds, spotByRef, userActivatedRefs, now }
-    const { bounds, spotByRef, userActivatedRefs, now } = ctx;
-    if (!(park.latitude && park.longitude)) return false;
+    const { bounds, spotByRef, userActivatedRefs, now } = ctx || {};
+    if (!park || !(park.latitude && park.longitude)) return false;
+
+    // 1) In-view constraint
     const latLng = L.latLng(park.latitude, park.longitude);
-    if (!bounds.contains(latLng)) return false;
+    if (!bounds || !bounds.contains(latLng)) return false;
 
-    // free text matches name or reference (contains)
-    if (parsed.text) {
-        const nm = normalizeString(park.name || '');
-        const ref = normalizeString(park.reference || '');
-        if (!(nm.includes(parsed.text) || ref.includes(parsed.text))) return false;
+    // 2) Text search (if provided)
+    if (parsed.text && parsed.text.length) {
+        const hay = normalizeString(
+            [park.name, park.reference, park.city, park.state, park.country].filter(Boolean).join(' ')
+        );
+        const needle = normalizeString(parsed.text);
+        if (!hay.includes(needle)) return false;
     }
 
-    // MAX activations
-    if (typeof parsed.max === 'number') {
-        const count = typeof park.activations === 'number' ? park.activations : 0;
-        if (!(count <= parsed.max)) return false;
+    // 3) STATE filter
+    if (parsed.state && String(park.state || '').toUpperCase() !== parsed.state) {
+        return false;
     }
 
-    // STATE
-    if (parsed.state) {
-        const st = (park.state || park.province || park.region || '').toUpperCase();
-        if (st !== parsed.state) return false;
-    }
-
-    // MINE
-    if (parsed.mine !== null) {
-        const mine = userActivatedRefs.includes(park.reference);
-        if (parsed.mine && !mine) return false;
-        if (!parsed.mine && mine) return false;
-    }
-
-    // NEW (created <= 30 days)
+    // 4) NEW filter (example: last 30 days by created/updated timestamps if present)
     if (parsed.isNew !== null) {
-        let createdTime = null;
-        const c = park.created;
-        if (c) createdTime = (typeof c === 'number') ? c : new Date(c).getTime();
-        const isNew = createdTime && (now - createdTime <= 30 * 24 * 60 * 60 * 1000);
-        if (parsed.isNew && !isNew) return false;
-        if (!parsed.isNew && isNew) return false;
+        const created = Number(park.createdAt || park.created || 0);
+        const updated = Number(park.updatedAt || park.updated || 0);
+        const recencyMs = 30 * 24 * 60 * 60 * 1000;
+        const recent = (created && now - created <= recencyMs) || (updated && now - updated <= recencyMs);
+        if (parsed.isNew && !recent) return false;
+        if (!parsed.isNew && recent) return false;
     }
 
-    // ACTIVE / MODE
-    const currentActivation = spotByRef[park.reference];
+    // 5) MINE filter (example uses userActivatedRefs if you pass it in ctx)
+    if (parsed.mine !== null) {
+        const userHasActivated = userActivatedRefs && userActivatedRefs.includes(park.reference);
+        if (parsed.mine && userHasActivated) return false;    // MINE:0 means skip parks I've already done
+        if (!parsed.mine && !userHasActivated) return false;  // MINE:1 would mean only parks I've done
+    }
+
+    // 6) ACTIVE / MODE logic
+    const currentActivation = spotByRef ? spotByRef[park.reference] : null;
     const isActive = !!currentActivation;
+
+    // ACTIVE explicitly filters current spot presence if provided
     if (parsed.active !== null) {
         if (parsed.active && !isActive) return false;
         if (!parsed.active && isActive) return false;
     }
-    if (parsed.mode && isActive) {
-        const mode = (currentActivation.mode || '').toUpperCase();
-        if (parsed.mode === 'DATA') {
-            if (!(mode === 'FT8' || mode === 'FT4')) return false;
+
+    // Helper: pick the QSO count bucket that the query cares about
+    const mt = park.modeTotals || { cw: 0, ssb: 0, data: 0 };
+    const totalQSOs = (mt.cw || 0) + (mt.ssb || 0) + (mt.data || 0);
+    const countForMode = (mode) => {
+        if (!mode) return totalQSOs;
+        if (mode === 'CW')   return mt.cw   || 0;
+        if (mode === 'SSB')  return mt.ssb  || 0;
+        if (mode === 'DATA') return mt.data || 0; // all digital (FT8/FT4/etc.)
+        return 0;
+    };
+
+    // MODE matching:
+    // - If currently active, we still require the live spot's mode to match when MODE is present.
+    // - If not active, we accept based on modeTotals (park has ever had QSOs in that bucket).
+    if (parsed.mode) {
+        if (isActive) {
+            const liveMode = String(currentActivation.mode || '').toUpperCase();
+            if (parsed.mode === 'DATA') {
+                if (!(liveMode === 'FT8' || liveMode === 'FT4' || liveMode === 'DATA')) return false;
+            } else {
+                if (liveMode !== parsed.mode) return false;
+            }
+            // Additionally, make sure the park actually has QSOs in that bucket historically
+            if (countForMode(parsed.mode) <= 0) return false;
         } else {
-            if (mode !== parsed.mode) return false;
+            if (countForMode(parsed.mode) <= 0) return false;
         }
-    } else if (parsed.mode && !isActive) {
-        // If MODE is specified but park is not active, we don't match
-        return false;
     }
+
+    // 7) MIN / MAX now apply to the selected bucket:
+    //    - if MODE is set, operate on that bucket (e.g. CW only)
+    //    - if MODE is not set, operate on totalQSOs
+    const selectedCount = countForMode(parsed.mode || null);
+    if (parsed.min !== null && selectedCount < parsed.min) return false;
+    if (parsed.max !== null && selectedCount > parsed.max) return false;
 
     return true;
 }
+
 /**
  * Filters and displays parks based on the maximum number of activations.
  * @param {number} maxActivations - The maximum number of activations to display.
