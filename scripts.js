@@ -191,7 +191,7 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
     }
 }
 
-// Build Filters UI inside the hamburger menu
+// Build Filters UI inside the hamburger menu (thresholdChip fully removed)
 function buildFiltersPanel() {
     const menu = document.getElementById('menu');
     if (!menu) return;
@@ -200,13 +200,13 @@ function buildFiltersPanel() {
     const oldToggle = document.getElementById('toggleActivations');
     if (oldToggle) oldToggle.style.display = 'none';
 
-    // Remove any previously inserted filters panel or legacy copies
+    // Remove any previously-inserted filters panel or legacy copies
     const oldPanels = menu.querySelectorAll('.filters-panel');
     oldPanels.forEach(p => p.parentElement && p.parentElement.remove());
 
+    // Build the minimal panel (no threshold UI)
     const li = document.createElement('li');
     li.id = 'filtersPanelContainer';
-
     li.innerHTML = `
     <div class="filters-panel">
       <div class="filters-title">Filters</div>
@@ -222,69 +222,9 @@ function buildFiltersPanel() {
     // Insert at top of menu
     menu.insertBefore(li, menu.firstChild || null);
 
-    // Ensure state object exists + defaults
-    if (typeof window.potaThresholds !== 'object' || window.potaThresholds === null) {
-        window.potaThresholds = {};
-    }
-    if (typeof potaThresholds.greenMax !== 'number') potaThresholds.greenMax = 5;
-    if (typeof potaThresholds.thresholdEnabled !== 'boolean') potaThresholds.thresholdEnabled = true;
-
-    // Elements
-    const thresholdChip = document.getElementById('chipThreshold');
-    const thresholdLabel = document.getElementById('thresholdLabel');
-    const greenInline = document.getElementById('greenInlineInput');
-
-    const getEnabled = () => !!potaThresholds.thresholdEnabled;
-
-    const updateChipState = () => {
-        const enabled = getEnabled();
-        thresholdChip.setAttribute('aria-pressed', String(enabled));
-        thresholdChip.classList.toggle('active', enabled);
-
-        if (enabled) {
-            // Show "Green ≤" and reveal input (CSS handles visibility when .active)
-            thresholdLabel.textContent = 'Max A:';
-            greenInline.value = potaThresholds.greenMax;
-        } else {
-            // Hide input (via CSS) and show "Threshold"
-            thresholdLabel.textContent = 'Max A';
-        }
-    };
-
-    // Initialize
-    updateChipState();
-
-    // Prevent chip toggle when interacting with the input
-    const stopToggle = (e) => e.stopPropagation();
-    ['mousedown', 'click', 'touchstart'].forEach(evt =>
-        greenInline.addEventListener(evt, stopToggle, { passive: true })
-    );
-
-    // Toggle chip (only when not clicking in the input)
-    thresholdChip.addEventListener('click', () => {
-        potaThresholds.thresholdEnabled = !getEnabled();
-        if (typeof savePotaThresholds === 'function') savePotaThresholds();
-        updateChipState();
-        if (typeof refreshMarkers === 'function') refreshMarkers();
-        if (getEnabled()) setTimeout(() => greenInline.focus(), 0);
-    });
-
-    // Apply numeric value (updates on change & blur)
-    const applyGreen = (val) => {
-        const v = Math.max(1, Math.min(999, parseInt(val, 10)));
-        if (!isNaN(v)) {
-            potaThresholds.greenMax = v;
-            if (typeof savePotaThresholds === 'function') savePotaThresholds();
-            if (typeof refreshMarkers === 'function') refreshMarkers();
-        }
-    };
-
-    greenInline.addEventListener('change', (e) => applyGreen(e.target.value));
-    greenInline.addEventListener('blur', (e) => applyGreen(e.target.value));
-    greenInline.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') e.currentTarget.blur();
-    });
+    // Nothing else to initialize here — threshold UI is retired.
 }
+
 
 function buildModeFilterPanel(){
     const menu = document.getElementById('menu');
