@@ -380,6 +380,34 @@ function refreshMarkers(){
 
 /* ==== end Filters & Thresholds block ==== */
 
+// Clears the search box and resets the map display (PQL + legacy safe)
+function clearSearchInput() {
+    const searchEl = document.getElementById('searchBox');
+
+    // Clear the input field
+    if (searchEl) searchEl.value = '';
+
+    // Clear any in-memory results
+    currentSearchResults = [];
+
+    // Clear any highlight overlay
+    if (map && map.highlightLayer) {
+        map.highlightLayer.clearLayers();
+    }
+
+    // Return the map to its normal filtered state
+    if (typeof resetParkDisplay === 'function') {
+        resetParkDisplay();
+    } else if (typeof redrawMarkersWithFilters === 'function') {
+        // Fallback if your code uses this instead
+        redrawMarkersWithFilters();
+    } else if (typeof drawParkMarkers === 'function') {
+        // Last-resort fallback
+        drawParkMarkers();
+    }
+}
+
+
 /**
  * Initializes the hamburger menu.
  */
