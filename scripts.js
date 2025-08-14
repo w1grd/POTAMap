@@ -1907,29 +1907,26 @@ function fallbackToDefaultLocation() {
  * Handles input in the search box and dynamically highlights matching parks within the visible map bounds.
  * @param {Event} event - The input event from the search box.
  */
+
 function handleSearchInput(event) {
     const rawValue = event.target.value || '';
     const query = normalizeString(rawValue);
 
-    // Ensure highlight layer exists and is cleared
     if (!map.highlightLayer) {
         map.highlightLayer = L.layerGroup().addTo(map);
     }
     map.highlightLayer.clearLayers();
 
-    // ===== PQL branch (input begins with '?') =====
     if (rawValue.trim().startsWith('?')) {
         (async () => {
             const parsed = parseStructuredQuery(rawValue);
-            const matched = await runStructuredQuery(parsed); // view-limited + per-mode when MODE is present
+            const matched = await runStructuredQuery(parsed);
 
-            // No matches (or just '?'): leave view unchanged
             if (!matched || matched.length === 0) {
                 currentSearchResults = [];
                 return;
             }
 
-            // Save pre-search view once, and only if we have matches
             if (!previousMapState.bounds) {
                 previousMapState = {
                     bounds: map.getBounds(),
@@ -1937,7 +1934,6 @@ function handleSearchInput(event) {
                 };
             }
 
-            // Highlight matches and compute bounds
             const groupBounds = [];
             matched.forEach((park) => {
                 const { latitude, longitude } = park;
@@ -1960,26 +1956,21 @@ function handleSearchInput(event) {
 
             currentSearchResults = matched;
 
-            // Adjust map view
             if (groupBounds.length === 1) {
                 map.setView(groupBounds[0], 14);
             } else if (groupBounds.length > 1) {
                 map.fitBounds(groupBounds, { padding: [40, 40] });
             }
         })();
-        return; // don't fall through to legacy search
+        return;
     }
 
-    // ===== Legacy free-text branch =====
-
-    // Empty -> reset
     if (!query) {
         currentSearchResults = [];
         resetParkDisplay();
         return;
     }
 
-    // Save pre-search view once
     if (!previousMapState.bounds) {
         previousMapState = {
             bounds: map.getBounds(),
@@ -1987,7 +1978,6 @@ function handleSearchInput(event) {
         };
     }
 
-    // Filter parks in current view by name/reference
     const bounds = getCurrentMapBounds();
     const filteredParks = parks.filter(park => {
         const inBounds = park.latitude && park.longitude && bounds.contains([park.latitude, park.longitude]);
@@ -1997,11 +1987,10 @@ function handleSearchInput(event) {
         return nm.includes(query) || ref.includes(query);
     });
 
-    // Highlight legacy matches
     const groupBounds = [];
     filteredParks.forEach((park) => {
         const { latitude, longitude } = park;
-        const highlightMarker = L.circleMarker([park.latitude, park.longitude], {
+        const highlightMarker = L.circleMarker([latitude, longitude], {
             radius: 8,
             fillColor: '#ffff00',
             color: '#000',
@@ -2020,7 +2009,6 @@ function handleSearchInput(event) {
 
     currentSearchResults = filteredParks;
 
-    // Zoom behavior
     if (groupBounds.length === 1) {
         map.setView(groupBounds[0], 14);
     } else if (groupBounds.length > 1) {
@@ -2028,68 +2016,70 @@ function handleSearchInput(event) {
     }
 }
 
+
 /**
  * Handles the 'Enter' key press in the search box to zoom to the searched park(s).
  * @param {KeyboardEvent} event - The keyboard event triggered by key presses.
  */
+
 function handleSearchEnter(event) {
-    if (event.key === 'Enter') {
-        event.preventDefault(); // Prevent form submission or other default actions
-        console.log("'Enter' key pressed in search box."); // Debugging
+    if (event.key !== 'Enter') return;
 
-        // Ensure the search box has a value
-        const searchBox = document.getElementById('searchBox');
-        if (!searchBox || !searchBox.value.trim()) {
-            console.warn("Search box is empty. No action taken."); // Debugging
-            return;
-        }
+    const rawValue = event.target.value || '';
+    const query = normalizeString(rawValue);
 
-        // Search for parks matching the input query
-        const query = normalizeString(searchBox.value.trim());
-        // If structured query, honor structured results
-        if (searchBox.value.trim().startsWith('?')) {
-            (async () => {
-                const parsed = parseStructuredQuery(searchBox.value);
-                const matched = await runStructuredQuery(parsed);
-                currentSearchResults = matched;
-                if (matched.length === 1) {
-                    zoomToPark(matched[0]);
-                } else if (matched.length > 1) {
-                    zoomToParks(matched);
-                } else {
-                    alert('No parks match that query in the current view.');
-                }
-            })();
-            return;
-        }
+    if (rawValue.trim().startsWith('?')) {
+        (async () => {
+            const parsed = parseStructuredQuery(rawValue);
+            const matched = await runStructuredQuery(parsed);
+            currentSearchResults = matched;
 
-        console.log(`Searching for parks matching: "${query}"`); // Debugging
-
-        if (currentSearchResults.length > 0) {
-            if (currentSearchResults.length === 1) {
-                // If only one park matches, center and zoom to it
-                const park = currentSearchResults[0];
-                zoomToPark(park);
+            if (matched.length === 1) {
+                zoomToPark(matched[0]);
+            } else if (matched.length > 1) {
+                zoomToParks(matched);
             } else {
-                // If multiple parks match, fit the map bounds to include all
-                zoomToParks(currentSearchResults);
+                alert('No parks match that query in the current view.');
             }
+        })();
+        return;
+    }
+
+    if (!query) {
+        currentSearchResults = [];
+        resetParkDisplay();
+        return;
+    }
+
+    if (currentSearchResults && currentSearchResults.length > 0) {
+        if (currentSearchResults.length === 1) {
+            zoomToPark(currentSearchResults[0]);
         } else {
-            // Handle "Go To Park" functionality for the global dataset
-            const matchingPark = parks.find(park =>
-                normalizeString(park.name).includes(query) ||
-                normalizeString(park.reference).includes(query)
-            );
-
-            if (matchingPark) {
-                zoomToPark(matchingPark);
-            } else {
-                // Display message only if no matches are found after searching
-                alert('No parks found matching your search criteria.');
-            }
+            zoomToParks(currentSearchResults);
         }
+        return;
+    }
+
+    const bounds = getCurrentMapBounds();
+    const filteredParks = parks.filter(park => {
+        const inBounds = park.latitude && park.longitude && bounds.contains([park.latitude, park.longitude]);
+        if (!inBounds) return false;
+        const nm = normalizeString(park.name || '');
+        const ref = normalizeString(park.reference || '');
+        return nm.includes(query) || ref.includes(query);
+    });
+
+    currentSearchResults = filteredParks;
+
+    if (filteredParks.length === 1) {
+        zoomToPark(filteredParks[0]);
+    } else if (filteredParks.length > 1) {
+        zoomToParks(filteredParks);
+    } else {
+        alert('No parks match that search in the current view.');
     }
 }
+
 
 /**
  * Zooms the map to a single park's location and shows its full information popup,
