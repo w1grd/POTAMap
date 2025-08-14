@@ -2031,6 +2031,7 @@ function handleSearchEnter(event) {
         if (searchBox.value.trim().startsWith('?')) {
             const parsed = parseStructuredQuery(searchBox.value);
             const bounds = getCurrentMapBounds();
+            console.log(`Search query received: "${parsed}"`);
             const spotByRef = {};
             if (Array.isArray(spots)) {
                 for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
