@@ -1,3 +1,5 @@
+//POTAmap (c) POTA News & Reviews https://pota.review
+//
 // Initialize global variables
 let activations = [];
 let map; // Leaflet map instance
