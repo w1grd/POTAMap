@@ -4059,4 +4059,3 @@ function initializeFilterChips(){
         refreshMarkers();
     });
 }
-
