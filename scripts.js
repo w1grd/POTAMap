@@ -3359,7 +3359,199 @@ async function fetchAndApplyUserActivations(callsign = null) {
         console.error("Error fetching or processing user activations:", error);
     }
 }
+// === Modes ingestion (initial + rolling updates) =============================
 
+const MODES_URL = '/potamap/data/modes.json';
+const MODES_CHANGES_URLS = [
+    '/potamap/data/modes-changes.json',     // your preferred name
+    '/potamap/data/mode-changes.json'       // fallback if you used the earlier name
+];
+
+const MODES_KEYS = {
+    initialized:      'modes.initialized',             // "1" after initial modes.json load
+    baseETag:         'modes.base.etag',
+    baseLM:           'modes.base.lastModified',
+    baseUpdatedAt:    'modes.base.updatedAt',
+    changesETag:      'modes.changes.etag',
+    changesLM:        'modes.changes.lastModified',
+    changesUpdatedAt: 'modes.changes.updatedAt',
+    changesLastDate:  'modes.changes.lastDate'         // last applied batch date (when using "batches")
+};
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function headProbe(url, etagKey, lmKey) {
+    const prevETag = localStorage.getItem(etagKey) || null;
+    const prevLM   = localStorage.getItem(lmKey) || null;
+    try {
+        const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        if (!r.ok) return { ok: false };
+        const etag = r.headers.get('ETag');
+        const lm   = r.headers.get('Last-Modified');
+        if (etag && prevETag && etag === prevETag) return { ok: true, isNew: false, etag, lm };
+        if (!etag && lm && prevLM && lm === prevLM) return { ok: true, isNew: false, etag, lm };
+        return { ok: true, isNew: true, etag, lm };
+    } catch {
+        // HEAD not supported or network hiccup — treat as potentially new
+        return { ok: true, isNew: true, etag: null, lm: null, noHead: true };
+    }
+}
+
+function rowsToPatches(rows) {
+    const patches = [];
+    for (const row of rows || []) {
+        const reference = row.reference || row.ref || row.id;
+        if (!reference) continue;
+        patches.push({
+            reference,
+            modeTotals: {
+                cw:   Number(row.cw)   || 0,
+                ssb:  Number(row.ssb)  || 0,
+                data: Number(row.data) || 0
+            }
+        });
+    }
+    return patches;
+}
+
+async function applyPatchesToIDBAndMemory(patches, { chunkSize = 1000, yieldEvery = 1 } = {}) {
+    if (!patches.length) return 0;
+    if (typeof upsertParksToIndexedDB !== 'function') {
+        console.warn('[modes] upsertParksToIndexedDB not found; cannot persist modeTotals.');
+        return 0;
+    }
+    for (let i = 0, batch = 0; i < patches.length; i += chunkSize, batch++) {
+        const slice = patches.slice(i, i + chunkSize);
+        await upsertParksToIndexedDB(slice);
+        // keep in-memory parks[] synced immediately
+        if (Array.isArray(parks) && parks.length) {
+            const m = new Map(slice.map(p => [p.reference, p.modeTotals]));
+            for (const park of parks) {
+                const mt = m.get(park.reference);
+                if (mt) park.modeTotals = mt;
+            }
+        }
+        if (yieldEvery && batch % yieldEvery === 0) await sleep(0);
+    }
+    return patches.length;
+}
+
+/**
+ * Fetch-and-cache modes:
+ * - First run: GET modes.json and upsert once, set initialized flag.
+ * - Later runs: check for modes-changes.json; if new, upsert only changed rows.
+ * Supports two formats for modes-changes.json:
+ *   1) Flat array: [{reference,cw,ssb,data}, ...]
+ *   2) {batches:[{date:"YYYY-MM-DD", changes:[{reference,cw,ssb,data}]}]}
+ */
+async function fetchAndCacheModes({ chunkSize = 1000 } = {}) {
+    const initialized = localStorage.getItem(MODES_KEYS.initialized) === '1';
+
+    if (!initialized) {
+        // --- Initial bootstrap from modes.json ---
+        const head = await headProbe(MODES_URL, MODES_KEYS.baseETag, MODES_KEYS.baseLM);
+        const resp = await fetch(MODES_URL, { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`Failed to fetch ${MODES_URL}: ${resp.status}`);
+        const rows = await resp.json();
+        if (!Array.isArray(rows)) throw new Error('modes.json must be an array');
+
+        const applied = await applyPatchesToIDBAndMemory(rowsToPatches(rows), { chunkSize });
+        const etag = resp.headers.get('ETag') || head.etag || null;
+        const lm   = resp.headers.get('Last-Modified') || head.lm || null;
+        if (etag) localStorage.setItem(MODES_KEYS.baseETag, etag);
+        if (lm)   localStorage.setItem(MODES_KEYS.baseLM, lm);
+        localStorage.setItem(MODES_KEYS.baseUpdatedAt, String(Date.now()));
+        localStorage.setItem(MODES_KEYS.initialized, '1');
+        console.log(`[modes] initial load applied ${applied} rows from modes.json`);
+        return { applied, phase: 'initial' };
+    }
+
+    // --- Incremental: modes-changes.json ---
+    let chosenUrl = null, head = null;
+    for (const u of MODES_CHANGES_URLS) {
+        head = await headProbe(u, MODES_KEYS.changesETag, MODES_KEYS.changesLM);
+        // if HEAD returned ok=false (e.g., 404), try next candidate
+        if (!head.ok) continue;
+        chosenUrl = u;
+        break;
+    }
+    if (!chosenUrl) {
+        console.log('[modes] no modes-changes file found; skipping.');
+        return { applied: 0, phase: 'changes', skipped: true };
+    }
+    if (head && head.isNew === false) {
+        console.log('[modes] modes-changes unchanged; skipping.');
+        return { applied: 0, phase: 'changes', skipped: true };
+    }
+
+    const resp = await fetch(chosenUrl, { cache: 'no-store' });
+    if (!resp.ok) {
+        console.warn(`[modes] failed to fetch ${chosenUrl}: ${resp.status}`);
+        return { applied: 0, phase: 'changes', skipped: true };
+    }
+    const body = await resp.json();
+
+    let changeRows = [];
+    if (Array.isArray(body)) {
+        // flat list
+        changeRows = body;
+    } else if (body && Array.isArray(body.batches)) {
+        // rolling window of dated batches
+        const lastDate = localStorage.getItem(MODES_KEYS.changesLastDate) || '';
+        const batches = [...body.batches].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+        let maxDate = lastDate;
+        for (const b of batches) {
+            const d = String(b.date || '');
+            if (lastDate && d <= lastDate) continue;   // already applied
+            if (Array.isArray(b.changes)) changeRows.push(...b.changes);
+            if (!maxDate || d > maxDate) maxDate = d;
+        }
+        if (maxDate) localStorage.setItem(MODES_KEYS.changesLastDate, maxDate);
+    } else {
+        console.warn('[modes] unexpected modes-changes format; skipping.');
+        return { applied: 0, phase: 'changes', skipped: true };
+    }
+
+    // Dedup by reference; last one wins
+    const byRef = new Map();
+    for (const r of changeRows) {
+        const ref = r.reference || r.ref || r.id;
+        if (!ref) continue;
+        byRef.set(ref, { reference: ref, cw: Number(r.cw) || 0, ssb: Number(r.ssb) || 0, data: Number(r.data) || 0 });
+    }
+    const patches = [...byRef.values()].map(r => ({ reference: r.reference, modeTotals: { cw: r.cw, ssb: r.ssb, data: r.data }}));
+    const applied = await applyPatchesToIDBAndMemory(patches, { chunkSize });
+
+    const etag = resp.headers.get('ETag') || (head && head.etag) || null;
+    const lm   = resp.headers.get('Last-Modified') || (head && head.lm) || null;
+    if (etag) localStorage.setItem(MODES_KEYS.changesETag, etag);
+    if (lm)   localStorage.setItem(MODES_KEYS.changesLM, lm);
+    localStorage.setItem(MODES_KEYS.changesUpdatedAt, String(Date.now()));
+
+    console.log(`[modes] applied ${applied} mode changes from ${chosenUrl}`);
+    return { applied, phase: 'changes', skipped: applied === 0 };
+}
+
+// Keep this simple wrapper if you like having a single call site:
+async function checkAndUpdateModesAtStartup() {
+    try {
+        await fetchAndCacheModes({ chunkSize: 1000 });
+    } catch (err) {
+        console.warn('[modes] update failed:', err);
+    }
+}
+
+/**
+ * One-shot check+apply at startup. Call this after parks have been loaded/cached.
+ */
+async function checkAndUpdateModesAtStartup() {
+    try {
+        // If you keep modes at a different URL/path, change it here:
+        await fetchAndCacheModes({ url: MODES_DEFAULT_URL, chunkSize: 1000 });
+    } catch (err) {
+        console.warn('[modes] update failed:', err);
+    }
+}
 
 function getFromStore(store, key) {
     return new Promise((resolve, reject) => {
@@ -3436,6 +3628,9 @@ async function setupPOTAMap() {
     try {
         // Fetch and cache parks data
         await fetchAndCacheParks(csvUrl, cacheDuration);
+        // After parks finished loading/caching:
+        await checkAndUpdateModesAtStartup();
+
         // Now reload from IndexedDB, which will include merged changes
         parks = await getAllParksFromIndexedDB();
         console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
