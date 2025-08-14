@@ -13,6 +13,51 @@ let previousMapState = {
     bounds: null,
     displayedParks: [],
 };
+
+// --- PQL display filter helpers --------------------------------------------
+function _addSimpleParkMarkerTo(layer, park) {
+    if (!(park.latitude && park.longitude)) return;
+    const m = L.circleMarker([park.latitude, park.longitude], {
+        radius: 8, fillColor: '#ffff00', color: '#000', weight: 2, opacity: 1, fillOpacity: 0.8
+    }).addTo(layer);
+    const tooltipText = `${park.name} (${park.reference})`;
+    m.bindTooltip(tooltipText, { direction: 'top', className: 'custom-tooltip' });
+    m.on('click', async () => {
+        const html = await fetchFullPopupContent(park);
+        m.bindPopup(html).openPopup();
+    });
+}
+
+function applyPqlFilterDisplay(matchedParks) {
+    if (!map) return;
+    map._pql = map._pql || {};
+
+    // Hide base parks layer(s) if we have a known layer reference
+    if (map.parksLayer && map.hasLayer(map.parksLayer)) {
+        map._pql.baseWasVisible = true;
+        map.removeLayer(map.parksLayer);
+    }
+
+    // Build/clear filter layer
+    if (!map._pql.filterLayer) map._pql.filterLayer = L.layerGroup().addTo(map);
+    map._pql.filterLayer.clearLayers();
+
+    for (const park of matchedParks) _addSimpleParkMarkerTo(map._pql.filterLayer, park);
+}
+
+function clearPqlFilterDisplay() {
+    if (!map) return;
+    const P = map._pql || {};
+
+    if (P.filterLayer) {
+        P.filterLayer.clearLayers();
+        if (map.hasLayer(P.filterLayer)) map.removeLayer(P.filterLayer);
+    }
+    if (P.baseWasVisible && map.parksLayer && !map.hasLayer(map.parksLayer)) {
+        map.addLayer(map.parksLayer);
+    }
+    map._pql = {};
+}
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
 const appVersion = "20250412a"; // manually update as needed
@@ -1886,47 +1931,8 @@ function handleSearchInput(event) {
     const raw = event.target.value || '';
     const trimmed = raw.trim();
 
-    // PQL branch — no auto-zoom while typing, and *return* so we don't fall through.
+    // If this looks like a PQL query, do NOTHING while typing (no filtering, no zoom, no logs).
     if (trimmed.startsWith('?')) {
-        const parsed = parseStructuredQuery(raw);
-
-        // highlight layer
-        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
-        map.highlightLayer.clearLayers();
-
-        // context limited to current view
-        const bounds = getCurrentMapBounds();
-        const spotByRef = {};
-        if (Array.isArray(spots)) {
-            for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
-        }
-        const userActivatedRefs = (activations || []).map(a => a.reference);
-        const now = Date.now();
-        const ctx = { bounds, spotByRef, userActivatedRefs, now };
-
-        // filter + highlight (no setView/fitBounds here)
-        const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
-        currentSearchResults = matched;
-
-        matched.forEach((park) => {
-            if (!(park.latitude && park.longitude)) return;
-            L.circleMarker([park.latitude, park.longitude], {
-                radius: 8,
-                fillOpacity: 0.8,
-                opacity: 1,
-                weight: 2,
-                color: '#000',
-                fillColor: '#ffff00'
-            })
-                .addTo(map.highlightLayer)
-                .bindTooltip(`${park.name} (${park.reference})`, { direction: 'top', className: 'custom-tooltip' })
-                .on('click', async (e) => {
-                    const html = await fetchFullPopupContent(park);
-                    e.target.bindPopup(html).openPopup();
-                });
-        });
-
-        // IMPORTANT: stop here so legacy path doesn't run
         return;
     }
 
@@ -1957,23 +1963,25 @@ function handleSearchInput(event) {
     currentSearchResults = filteredParks;
 
     filteredParks.forEach((park) => {
-        L.circleMarker([park.latitude, park.longitude], {
+        const marker = L.circleMarker([park.latitude, park.longitude], {
             radius: 8,
-            fillOpacity: 0.8,
-            opacity: 1,
-            weight: 2,
+            fillColor: '#ffff00',
             color: '#000',
-            fillColor: '#ffff00'
-        })
-            .addTo(map.highlightLayer)
-            .bindTooltip(`${park.name} (${park.reference})`, { direction: 'top', className: 'custom-tooltip' })
-            .on('click', async (e) => {
-                const html = await fetchFullPopupContent(park);
-                e.target.bindPopup(html).openPopup();
-            });
-    });
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 0.8
+        }).addTo(map.highlightLayer);
 
-    // (Still no auto-zoom here; Enter zooms in handleSearchEnter)
+        marker.bindTooltip(`${park.name} (${park.reference})`, {
+            direction: 'top',
+            className: 'custom-tooltip'
+        });
+
+        marker.on('click', async () => {
+            const popupContent = await fetchFullPopupContent(park);
+            marker.bindPopup(popupContent).openPopup();
+        });
+    });
 }
 
 
@@ -1999,7 +2007,6 @@ function handleSearchEnter(event) {
         if (searchBox.value.trim().startsWith('?')) {
             const parsed = parseStructuredQuery(searchBox.value);
             const bounds = getCurrentMapBounds();
-            console.log(`Search query received: "${parsed.text}"`);
             const spotByRef = {};
             if (Array.isArray(spots)) {
                 for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
@@ -2011,11 +2018,10 @@ function handleSearchEnter(event) {
             const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
             currentSearchResults = matched;
 
-            if (matched.length === 1) {
-                zoomToPark(matched[0]);
-            } else if (matched.length > 1) {
-                zoomToParks(matched);
-            } else {
+            // Do NOT pan/zoom. Filter the visible parks to ONLY these matches.
+            applyPqlFilterDisplay(matched);
+
+            if (matched.length === 0) {
                 alert('No parks match that query in the current view.');
             }
             return;
@@ -4252,4 +4258,17 @@ function initializeFilterChips(){
         updateChipStates();
         refreshMarkers();
     });
+}
+
+
+
+// Optional: Clear Search button hook (call this on your existing Clear Search handler)
+async function onClearSearchClicked() {
+    try { clearPqlFilterDisplay(); } catch(e) {}
+    // Also clear highlight layer if used by legacy search
+    if (map && map.highlightLayer) {
+        try { map.highlightLayer.clearLayers(); } catch(e) {}
+    }
+    const sb = document.getElementById('searchBox');
+    if (sb) sb.value = '';
 }
