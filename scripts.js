@@ -1881,6 +1881,62 @@ function fallbackToDefaultLocation() {
  */
 function handleSearchInput(event) {
     const query = normalizeString(event.target.value);
+    // Structured Query Language branch: only when input starts with '?' or '? '
+    if (event.target.value.trim().startsWith('?')) {
+        const raw = event.target.value;
+        const parsed = parseStructuredQuery(raw);
+        // Save previous state if not already saved
+        if (!previousMapState.bounds) {
+            previousMapState = {
+                bounds: map.getBounds(),
+                displayedParks: [...parks],
+            };
+        }
+        const bounds = getCurrentMapBounds();
+        // Build spot index and user-activated set
+        const spotByRef = {};
+        if (Array.isArray(spots)) {
+            for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
+        }
+        const userActivatedRefs = (activations || []).map(a => a.reference);
+        const now = Date.now();
+        const ctx = { bounds, spotByRef, userActivatedRefs, now };
+
+        // Filter
+        const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
+
+        // Clear old highlights layer
+        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
+        map.highlightLayer.clearLayers();
+
+        // Highlight matches and build bounds
+        const groupBounds = [];
+        matched.forEach((park) => {
+            const { latitude, longitude } = park;
+            const m = L.circleMarker([latitude, longitude], {
+                radius: 8,
+                fillColor: '#ffff00',
+                color: '#000',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(map.highlightLayer);
+            m.bindTooltip(`${park.name} (${park.reference})`, { direction: 'top', className: 'custom-tooltip' });
+            groupBounds.push([latitude, longitude]);
+        });
+
+        currentSearchResults = matched;
+
+        // Adjust map view
+        if (groupBounds.length === 1) {
+            map.setView(groupBounds[0], 14);
+        } else if (groupBounds.length > 1) {
+            map.fitBounds(groupBounds, { padding: [40, 40] });
+        }
+
+        return; // Do not fall through to legacy search
+    }
+
     console.log(`Search query received: "${query}"`); // Debugging
 
     // Clear previous highlights
@@ -1975,6 +2031,31 @@ function handleSearchEnter(event) {
 
         // Search for parks matching the input query
         const query = normalizeString(searchBox.value.trim());
+        // If structured query, honor structured results
+        if (searchBox.value.trim().startsWith('?')) {
+            const parsed = parseStructuredQuery(searchBox.value);
+            const bounds = getCurrentMapBounds();
+            const spotByRef = {};
+            if (Array.isArray(spots)) {
+                for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
+            }
+            const userActivatedRefs = (activations || []).map(a => a.reference);
+            const now = Date.now();
+            const ctx = { bounds, spotByRef, userActivatedRefs, now };
+
+            const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
+            currentSearchResults = matched;
+
+            if (matched.length === 1) {
+                zoomToPark(matched[0]);
+            } else if (matched.length > 1) {
+                zoomToParks(matched);
+            } else {
+                alert('No parks match that query in the current view.');
+            }
+            return;
+        }
+
         console.log(`Searching for parks matching: "${query}"`); // Debugging
 
         if (currentSearchResults.length > 0) {
@@ -2250,6 +2331,169 @@ function normalizeString(str) {
 
 
 
+
+/**
+ * Parses a structured query that begins with '?'.
+ * Supported keys (case-insensitive):
+ *  - MODE: CW | PHONE | SSB | DATA
+ *  - MAX: <number>        (max total activations)
+ *  - ACTIVE: 1|0          (currently on-air)
+ *  - NEW: 1|0             (created <= 30 days)
+ *  - MINE: 1|0            (parks you've activated)
+ *  - STATE: <US state/territory 2-letter code>
+ * Free text (quoted or bare) is matched against name or reference.
+ * Examples:
+ *   ? MODE:CW MAX:6
+ *   ? ACTIVE:1 MODE:DATA
+ *   ? NEW:1
+ *   ? MINE:1 STATE:MA
+ *   ? "Acadia" MAX:10
+ */
+function parseStructuredQuery(raw) {
+    const q = raw.trim().replace(/^\?\s*/, ''); // strip leading '?' and optional space
+    const result = {
+        isStructured: true,
+        text: '',       // free-text search
+        mode: null,     // 'CW' | 'SSB' | 'DATA'
+        max: null,      // number
+        active: null,   // boolean
+        isNew: null,    // boolean
+        mine: null,     // boolean
+        state: null     // 'MA' etc.
+    };
+    if (!q) return result;
+
+    // Tokenize quoted strings and key:value pairs
+    // Accept quoted segments "like this" as text; collect multiple texts joined with space
+    const tokens = [];
+    let i = 0;
+    while (i < q.length) {
+        const ch = q[i];
+        if (ch === '"') {
+            let j = i + 1;
+            while (j < q.length && q[j] !== '"') j++;
+            const val = q.slice(i + 1, j);
+            tokens.append ? tokens.append(val) : tokens.push(`TEXT:${val}`);
+            i = (j < q.length) ? j + 1 : q.length;
+        } else if (/\s/.test(ch)) {
+            i++;
+        } else {
+            // read until whitespace
+            let j = i + 1;
+            while (j < q.length && !/\s/.test(q[j])) j++;
+            tokens.push(q.slice(i, j));
+            i = j;
+        }
+    }
+
+    // Parse tokens
+    for (const t of tokens) {
+        const kv = t.includes(':') ? t.split(':') : null;
+        if (!kv) {
+            // bareword -> treat as text fragment
+            result.text = (result.text ? (result.text + ' ') : '') + t.replace(/^TEXT:/, '');
+            continue;
+        }
+        const key = kv[0].toUpperCase();
+        const valueRaw = kv.slice(1).join(':'); // in case value has colons
+        const value = valueRaw.replace(/^TEXT:/, '');
+
+        if (key === 'MODE') {
+            const v = value.toUpperCase();
+            if (v === 'CW') result.mode = 'CW';
+            else if (v === 'SSB' || v === 'PHONE') result.mode = 'SSB';
+            else if (v === 'DATA' || v === 'FT8' || v === 'FT4') result.mode = 'DATA';
+        } else if (key === 'MAX') {
+            const n = parseInt(value, 10);
+            if (!Number.isNaN(n)) result.max = n;
+        } else if (key === 'ACTIVE') {
+            result.active = (value === '1' || value.toLowerCase() === 'true');
+        } else if (key === 'NEW') {
+            result.isNew = (value === '1' || value.toLowerCase() === 'true');
+        } else if (key === 'MINE') {
+            result.mine = (value === '1' || value.toLowerCase() === 'true');
+        } else if (key === 'STATE') {
+            const st = value.toUpperCase().replace(/[^A-Z]/g, '');
+            if (st.length === 2) result.state = st;
+        } else if (key === 'TEXT') {
+            result.text = (result.text ? (result.text + ' ') : '') + value;
+        } else {
+            // Unknown key: ignore (future-proofing)
+        }
+    }
+
+    result.text = normalizeString(result.text);
+    return result;
+}
+
+/**
+ * Tests whether a given park matches the parsed structured query.
+ * Uses current map state (spots, activations) for ACTIVE/MODE/MINE filters.
+ */
+function parkMatchesStructuredQuery(park, parsed, ctx) {
+    // ctx: { bounds, spotByRef, userActivatedRefs, now }
+    const { bounds, spotByRef, userActivatedRefs, now } = ctx;
+    if (!(park.latitude && park.longitude)) return false;
+    const latLng = L.latLng(park.latitude, park.longitude);
+    if (!bounds.contains(latLng)) return false;
+
+    // free text matches name or reference (contains)
+    if (parsed.text) {
+        const nm = normalizeString(park.name || '');
+        const ref = normalizeString(park.reference || '');
+        if (!(nm.includes(parsed.text) || ref.includes(parsed.text))) return false;
+    }
+
+    // MAX activations
+    if (typeof parsed.max === 'number') {
+        const count = typeof park.activations === 'number' ? park.activations : 0;
+        if (!(count <= parsed.max)) return false;
+    }
+
+    // STATE
+    if (parsed.state) {
+        const st = (park.state || park.province || park.region || '').toUpperCase();
+        if (st !== parsed.state) return false;
+    }
+
+    // MINE
+    if (parsed.mine !== null) {
+        const mine = userActivatedRefs.includes(park.reference);
+        if (parsed.mine && !mine) return false;
+        if (!parsed.mine && mine) return false;
+    }
+
+    // NEW (created <= 30 days)
+    if (parsed.isNew !== null) {
+        let createdTime = null;
+        const c = park.created;
+        if (c) createdTime = (typeof c === 'number') ? c : new Date(c).getTime();
+        const isNew = createdTime && (now - createdTime <= 30 * 24 * 60 * 60 * 1000);
+        if (parsed.isNew && !isNew) return false;
+        if (!parsed.isNew && isNew) return false;
+    }
+
+    // ACTIVE / MODE
+    const currentActivation = spotByRef[park.reference];
+    const isActive = !!currentActivation;
+    if (parsed.active !== null) {
+        if (parsed.active && !isActive) return false;
+        if (!parsed.active && isActive) return false;
+    }
+    if (parsed.mode && isActive) {
+        const mode = (currentActivation.mode || '').toUpperCase();
+        if (parsed.mode === 'DATA') {
+            if (!(mode === 'FT8' || mode === 'FT4')) return false;
+        } else {
+            if (mode !== parsed.mode) return false;
+        }
+    } else if (parsed.mode && !isActive) {
+        // If MODE is specified but park is not active, we don't match
+        return false;
+    }
+
+    return true;
+}
 /**
  * Filters and displays parks based on the maximum number of activations.
  * @param {number} maxActivations - The maximum number of activations to display.
