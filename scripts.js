@@ -107,8 +107,7 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
         return "#0000ff"; // blue
     } catch(e) {
         return "#0000ff";
-    }
-}
+      }
 
 // Build Filters UI inside the hamburger menu
 function buildFiltersPanel() {
@@ -2359,113 +2358,6 @@ function parseStructuredQuery(raw) {
         state: null     // 'MA' etc.
     }
 
-    async function getModeTotalsForPark(park, allowFetch=true) {
-        if (park && park.activationsByMode) {
-            const m = park.activationsByMode;
-            return {
-                CW: Number(m.CW || 0),
-                PHONE: Number(m.PHONE || m.SSB || 0),
-                DATA: Number(m.DATA || m.FT8 || 0),
-            };
-        }
-        try {
-            const acts = await getParkActivationsFromIndexedDB(park.reference);
-            if (Array.isArray(acts) && acts.length) {
-                const cw = acts.reduce((sum, a) => sum + (a.qsosCW || a.cw || 0), 0);
-                const ph = acts.reduce((sum, a) => sum + (a.qsosPHONE || a.phone || 0), 0);
-                const dt = acts.reduce((sum, a) => sum + (a.qsosDATA || a.data || 0), 0);
-                return { CW: cw, PHONE: ph, DATA: dt };
-            }
-        } catch (e) {
-            console.warn("IndexedDB mode totals lookup failed for", park.reference, e);
-        }
-        if (allowFetch) {
-            try {
-                const fetched = await fetchParkActivations(park.reference);
-                if (Array.isArray(fetched)) {
-                    await saveParkActivationsToIndexedDB(park.reference, fetched);
-                    const cw = fetched.reduce((sum, a) => sum + (a.qsosCW || a.cw || 0), 0);
-                    const ph = fetched.reduce((sum, a) => sum + (a.qsosPHONE || a.phone || 0), 0);
-                    const dt = fetched.reduce((sum, a) => sum + (a.qsosDATA || a.data || 0), 0);
-                    return { CW: cw, PHONE: ph, DATA: dt };
-                }
-            } catch (e) {
-                console.warn("API mode totals fetch failed for", park.reference, e);
-            }
-        }
-        return { CW: 0, PHONE: 0, DATA: 0 };
-    }
-
-    async function runStructuredQuery(parsed) {
-        const bounds = getCurrentMapBounds();
-        const spotByRef = {};
-        if (Array.isArray(spots)) {
-            for (const s of spots) {
-                if (s && s.reference) spotByRef[s.reference] = s;
-            }
-        }
-        const userActivatedRefs = (activations || []).map(a => a.reference);
-        const now = Date.now();
-
-        const prelim = parks.filter(park => {
-            if (!(park.latitude && park.longitude)) return false;
-            const latLng = L.latLng(park.latitude, park.longitude);
-            if (!bounds.contains(latLng)) return false;
-
-            if (parsed.text) {
-                const nm = normalizeString(park.name || '');
-                const ref = normalizeString(park.reference || '');
-                if (!(nm.includes(parsed.text) || ref.includes(parsed.text))) return false;
-            }
-            if (parsed.state) {
-                const st = (park.state || park.province || park.region || '').toUpperCase();
-                if (st !== parsed.state) return false;
-            }
-            if (parsed.mine !== null) {
-                const mine = userActivatedRefs.includes(park.reference);
-                if (parsed.mine && !mine) return false;
-                if (!parsed.mine && mine) return false;
-            }
-            if (parsed.isNew !== null) {
-                let createdTime = null;
-                const c = park.created;
-                if (c) createdTime = (typeof c === 'number') ? c : new Date(c).getTime();
-                const isNew = createdTime && (now - createdTime <= 30 * 24 * 60 * 60 * 1000);
-                if (parsed.isNew && !isNew) return false;
-                if (!parsed.isNew && isNew) return false;
-            }
-            const isActive = !!spotByRef[park.reference];
-            if (parsed.active !== null) {
-                if (parsed.active && !isActive) return false;
-                if (!parsed.active && isActive) return false;
-            }
-            if (!parsed.mode && typeof parsed.max === 'number') {
-                const totalActs = typeof park.activations === 'number' ? park.activations : 0;
-                if (totalActs > parsed.max) return false;
-            }
-            return true;
-        });
-
-        if (parsed.mode) {
-            const modeKey = (parsed.mode === 'DATA') ? 'DATA' :
-                (parsed.mode === 'SSB' ? 'PHONE' : parsed.mode);
-            const matched = [];
-            for (const park of prelim) {
-                const totals = await getModeTotalsForPark(park, true);
-                const count = totals[modeKey] || 0;
-                if (typeof parsed.max === 'number') {
-                    if (count <= parsed.max) matched.push(park);
-                } else {
-                    matched.push(park);
-                }
-            }
-            return matched;
-        }
-
-        return prelim;
-    }
-
-    ;
     if (!q) return result;
 
     // Tokenize quoted strings and key:value pairs
@@ -2533,7 +2425,7 @@ function parseStructuredQuery(raw) {
 
 /**
  * Tests whether a given park matches the parsed structured query.
- * Uses current map state (spots, activations) for ACTIVE/MODE/MINE filters.
+ * Uses current map state (spots, activations) for ACTIVE and MINE filters.
  */
 
 /**
@@ -2601,58 +2493,8 @@ async function runStructuredQuery(parsed) {
     const now = Date.now();
     const ctx = { bounds, spotByRef, userActivatedRefs, now };
 
-    // First pass: synchronous filters except MODE/MAX (mode)
-    const prelim = parks.filter(park => {
-        if (!(park.latitude && park.longitude)) return false;
-        const latLng = L.latLng(park.latitude, park.longitude);
-        if (!bounds.contains(latLng)) return false;
-
-        // TEXT
-        if (parsed.text) {
-            const nm = normalizeString(park.name || '');
-            const ref = normalizeString(park.reference || '');
-            if (!(nm.includes(parsed.text) || ref.includes(parsed.text))) return false;
-        }
-
-        // STATE
-        if (parsed.state) {
-            const st = (park.state || park.province || park.region || '').toUpperCase();
-            if (st !== parsed.state) return false;
-        }
-
-        // MINE
-        if (parsed.mine !== null) {
-            const mine = userActivatedRefs.includes(park.reference);
-            if (parsed.mine && !mine) return false;
-            if (!parsed.mine && mine) return false;
-        }
-
-        // NEW
-        if (parsed.isNew !== null) {
-            let createdTime = null;
-            const c = park.created;
-            if (c) createdTime = (typeof c === 'number') ? c : new Date(c).getTime();
-            const isNew = createdTime && (now - createdTime <= 30 * 24 * 60 * 60 * 1000);
-            if (parsed.isNew && !isNew) return false;
-            if (!parsed.isNew && isNew) return false;
-        }
-
-        // ACTIVE
-        const currentActivation = spotByRef[park.reference];
-        const isActive = !!currentActivation;
-        if (parsed.active !== null) {
-            if (parsed.active && !isActive) return false;
-            if (!parsed.active && isActive) return false;
-        }
-
-        // Non-mode MAX applies to total activations
-        if (!parsed.mode && typeof parsed.max === 'number') {
-            const totalActs = typeof park.activations === 'number' ? park.activations : 0;
-            if (totalActs > parsed.max) return false;
-        }
-
-        return true;
-    });
+    // First pass: synchronous filters (non-mode MAX handled here)
+    const prelim = parks.filter(park => parkMatchesStructuredQuery(park, parsed, ctx));
 
     // Second pass: MODE-specific filtering if needed
     if (parsed.mode) {
@@ -2674,7 +2516,7 @@ async function runStructuredQuery(parsed) {
 }
 function parkMatchesStructuredQuery(park, parsed, ctx) {
     // ctx: { bounds, spotByRef, userActivatedRefs, now }
-    const {bounds, spotByRef, userActivatedRefs, now} = ctx;
+    const { bounds, spotByRef, userActivatedRefs, now } = ctx;
     if (!(park.latitude && park.longitude)) return false;
     const latLng = L.latLng(park.latitude, park.longitude);
     if (!bounds.contains(latLng)) return false;
@@ -2686,10 +2528,10 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!(nm.includes(parsed.text) || ref.includes(parsed.text))) return false;
     }
 
-    // MAX activations
-    if (typeof parsed.max === 'number') {
-        const count = typeof park.activations === 'number' ? park.activations : 0;
-        if (!(count <= parsed.max)) return false;
+    // Non-mode MAX applies to total activations
+    if (!parsed.mode && typeof parsed.max === 'number') {
+        const totalActs = typeof park.activations === 'number' ? park.activations : 0;
+        if (totalActs > parsed.max) return false;
     }
 
     // STATE
@@ -2715,29 +2557,22 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!parsed.isNew && isNew) return false;
     }
 
-    // ACTIVE / MODE
+    // ACTIVE
     const currentActivation = spotByRef[park.reference];
     const isActive = !!currentActivation;
     if (parsed.active !== null) {
         if (parsed.active && !isActive) return false;
         if (!parsed.active && isActive) return false;
     }
-    if (parsed.mode && isActive) {
-        const mode = (currentActivation.mode || '').toUpperCase();
-        if (parsed.mode === 'DATA') {
-            if (!(mode === 'FT8' || mode === 'FT4')) return false;
-        } else {
-            if (mode !== parsed.mode) return false;
-        }
 
-        return true;
-    }
+    return true;
+}
 
-    /**
-     * Filters and displays parks based on the maximum number of activations.
-     * @param {number} maxActivations - The maximum number of activations to display.
-     */
-    function filterParksByActivations(maxActivations) {
+/**
+ * Filters and displays parks based on the maximum number of activations.
+ * @param {number} maxActivations - The maximum number of activations to display.
+ */
+function filterParksByActivations(maxActivations) {
         if (!map) {
             console.error("Map instance is not initialized.");
             return;
