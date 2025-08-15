@@ -36,7 +36,7 @@ Free text matches the park **name** and **reference** (e.g., `US-1234`), plus ba
 | `MAXDIST` | number with optional unit | Maximum distance from **you** | Same units as above. **Disables map-bounds** and auto-pans. |
 | `DIST` | `a-b`, `a-`, or `-b` (units optional) | Distance range shorthand | Examples: `DIST:20-50`, `DIST:-30km`, `DIST:100-`. **Disables map-bounds** and auto-pans. |
 | `NFERWITH` | reference or comma list | Match parks that are NFER-neighbors of any given reference(s) | Example: `NFERWITH:US-6909` or `NFERWITH:US-6909,US-3857`. **Disables map-bounds** and auto-pans. |
- | `NFER` | `1` \| `0` \| `true` \| `false` | Match parks that have one or more n-fers asociated | Example: `NFER:1 STATE:MA` = parks in MA that might have an n-fer. |
+| `NFER` | `1` \| `0` \| `true` \| `false` | Match parks that have one or more n-fers asociated | Example: `NFER:1 STATE:MA` = parks in MA that might have an n-fer. |
 ### Global-scope behavior (auto-pan)
 If your query includes **any** of: `STATE`, `DIST`/`MINDIST`/`MAXDIST`, or `NFERWITH`, the search is not limited to what’s currently visible on the map. The app will **fit/zoom to all matches** automatically.
 

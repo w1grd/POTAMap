@@ -2547,11 +2547,27 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     }
 
     // 7) MINE
+    // 7) MINE (robust to Set | Array | Object)
     if (parsed.mine !== null && ctx && ctx.userActivatedRefs) {
-        const mine = ctx.userActivatedRefs.has(park.reference);
+        const refRaw = String(park.reference || '');
+        const refU = refRaw.toUpperCase();
+        const s = ctx.userActivatedRefs;
+
+        let mine = false;
+        if (s instanceof Set) {
+            mine = s.has(refU) || s.has(refRaw);
+        } else if (Array.isArray(s)) {
+            // array of refs
+            mine = s.includes(refU) || s.includes(refRaw);
+        } else if (typeof s === 'object') {
+            // map/dict or anything else keyed by ref
+            mine = !!(s[refU] || s[refRaw] || (typeof s.has === 'function' && (s.has(refU) || s.has(refRaw))));
+        }
+
         if (parsed.mine && !mine) return false;
         if (!parsed.mine && mine) return false;
     }
+
 
     // 8) ACTIVE (live)
     if (parsed.active !== null && ctx && ctx.spotByRef) {
