@@ -151,7 +151,7 @@ function clearPqlFilterDisplay() {
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
 const appVersion = "20250412a"; // manually update as needed
-const cacheDuration = (24 * 60 * 60 * 1000) * 8; // 8 days in milliseconds
+const cacheDuration = (24 * 60 * 60 * 1000) * 2; // 8 days in milliseconds
 
 // See if we are in desktop mode
 const urlParams = new URLSearchParams(window.location.search);
@@ -3305,8 +3305,7 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     let parks = [];
 
     // Full fetch if stale; when using cache, also backfill states
-if (true) {
-//        if (!lastFullFetch || (Date.now() - lastFullFetch > cacheDuration)) {
+        if (!lastFullFetch || (Date.now() - lastFullFetch > cacheDuration)) {
         console.log('Fetching full park data from JSON...');
         const response = await fetch(jsonUrl);
         if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
