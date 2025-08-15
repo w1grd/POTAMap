@@ -3305,7 +3305,8 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     let parks = [];
 
     // Full fetch if stale; when using cache, also backfill states
-    if (!lastFullFetch || (Date.now() - lastFullFetch > cacheDuration)) {
+if (true) {
+//        if (!lastFullFetch || (Date.now() - lastFullFetch > cacheDuration)) {
         console.log('Fetching full park data from JSON...');
         const response = await fetch(jsonUrl);
         if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
