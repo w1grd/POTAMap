@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//14
+//15
 //
 // Initialize global variables
 let activations = [];
@@ -2473,20 +2473,26 @@ function buildNferByRef(parks) {
  * Tests whether a given park matches the parsed structured query.
  * Uses current map state (spots, activations) for ACTIVE/MODE/MINE filters.
  */
+/**
+ * Tests whether a given park matches the parsed structured query.
+ * Uses current map state (spots, activations) for ACTIVE/MODE/MINE filters.
+ */
 function parkMatchesStructuredQuery(park, parsed, ctx) {
     const { bounds } = ctx || {};
 
     // 1) Proximity or in-view constraint
-    const hasDistConstraint = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    const hasDistConstraint  = (parsed.minDist !== null) || (parsed.maxDist !== null);
     const hasStateConstraint = !!parsed.state;
+    const hasNferConstraint  = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
 
-    if (hasDistConstraint || hasStateConstraint) {
+    if (hasDistConstraint || hasStateConstraint || hasNferConstraint) {
+        // Distance path (STATE/NFERWITH simply bypass bounds)
         if (hasDistConstraint) {
             if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
             const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
             if (parsed.minDist !== null && dMiles < parsed.minDist) return false;
             if (parsed.maxDist !== null && dMiles > parsed.maxDist) return false;
-            park._distMiles = dMiles; // optional cache
+            park._distMiles = dMiles; // optional cache for later sorting/UI
         }
     } else {
         const latLng = L.latLng(park.latitude, park.longitude);
@@ -2512,37 +2518,49 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!(statesArr.includes(parsed.state) || single === parsed.state)) return false;
     }
 
-    // 4) NEW
+    // 4) NFERWITH — require membership in neighbors of any target
+    if (hasNferConstraint) {
+        const ref = String(park.reference || '').toUpperCase();
+        const map = ctx && ctx.nferByRef;
+        let ok = false;
+        for (const target of parsed.nferWithRefs) {
+            const T = String(target).toUpperCase();
+            // forward: is this park listed as a neighbor of T?
+            if (map && map.get(T) && map.get(T).has(ref)) { ok = true; break; }
+            // backward: does this park list T among its own neighbors?
+            if (Array.isArray(park.nfer) && park.nfer.some(r => String(r).toUpperCase() === T)) { ok = true; break; }
+        }
+        if (!ok) return false;
+    }
+
+    // 5) NEW
     if (parsed.isNew === true) {
         const created = park.created || 0;
         const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
         if (!created || (Date.now() - created) > THIRTY_DAYS) return false;
     }
 
-    // 5) MINE
+    // 6) MINE
     if (parsed.mine !== null && ctx && ctx.userActivatedRefs) {
         const mine = ctx.userActivatedRefs.has(park.reference);
         if (parsed.mine && !mine) return false;
         if (!parsed.mine && mine) return false;
     }
 
-    // 6) ACTIVE (live)
+    // 7) ACTIVE (live spots)
     if (parsed.active !== null && ctx && ctx.spotByRef) {
         const active = !!ctx.spotByRef[park.reference];
         if (parsed.active && !active) return false;
         if (!parsed.active && active) return false;
     }
 
-    // 7) MODE / MIN / MAX — QSO bucket check (NEW: MIN)
+    // 8) MODE / MIN / MAX — QSO bucket check
     if (parsed.min !== null || parsed.max !== null || parsed.mode) {
-        // Resolve a QSO count for the requested mode; fallback to total qsos
-        const mode = parsed.mode; // 'CW' | 'SSB' | 'DATA' | null
+        const mode  = parsed.mode;                 // 'CW' | 'SSB' | 'DATA' | null
         const lower = mode ? mode.toLowerCase() : null;
-
         let qsoCount = park.qsos || 0;
 
         if (mode) {
-            // Try several common shapes; if you already store counts differently, adapt here
             const byRef = ctx?.modeQsosByRef && ctx.modeQsosByRef[park.reference];
             if (byRef && typeof byRef[lower] === 'number') {
                 qsoCount = byRef[lower];
@@ -2550,10 +2568,10 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
                 qsoCount = park[`qsos_${lower}`];
             } else if (park.qsosByMode && typeof park.qsosByMode[mode] === 'number') {
                 qsoCount = park.qsosByMode[mode];
-            } // else leave fallback total
+            }
         }
 
-        if (parsed.min !== null && qsoCount < parsed.min) return false; // ← NEW
+        if (parsed.min !== null && qsoCount < parsed.min) return false;
         if (parsed.max !== null && qsoCount > parsed.max) return false;
     }
 
@@ -2561,10 +2579,7 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 }
 
 function fitToMatchesIfGlobalScope(parsed, matched) {
-    const usedGlobalScope =
-        !!parsed.state ||
-        parsed.minDist !== null ||
-        parsed.maxDist !== null;
+    const usedGlobalScope = (!!parsed.state) || (parsed.minDist !== null) || (parsed.maxDist !== null) || (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
 
     if (!usedGlobalScope || !matched || !matched.length) return;
 
