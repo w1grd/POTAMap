@@ -2345,14 +2345,15 @@ function parseStructuredQuery(raw) {
         text: '',
         mode: null,
         max: null,
-        min: null,        // (from earlier sprint)
+        min: null,
         active: null,
         isNew: null,
         mine: null,
         state: null,
         minDist: null,
         maxDist: null,
-        nferWithRefs: []  // ← NEW: array of target refs (uppercased)
+        nferWithRefs: [],
+        hasNfer: null          // ← NEW: boolean or null (no filter)
     };
     if (!q) return result;
 
@@ -2371,15 +2372,9 @@ function parseStructuredQuery(raw) {
         const ch = q[i];
         if (ch === '"') {
             let j = i + 1; while (j < q.length && q[j] !== '"') j++;
-            tokens.push(`TEXT:${q.slice(i + 1, j)}`);
-            i = (j < q.length) ? j + 1 : q.length;
-        } else if (/\s/.test(ch)) {
-            i++;
-        } else {
-            let j = i + 1; while (j < q.length && !/\s/.test(q[j])) j++;
-            tokens.push(q.slice(i, j));
-            i = j;
-        }
+            tokens.push(`TEXT:${q.slice(i + 1, j)}`); i = (j < q.length) ? j + 1 : q.length;
+        } else if (/\s/.test(ch)) { i++; }
+        else { let j = i + 1; while (j < q.length && !/\s/.test(q[j])) j++; tokens.push(q.slice(i, j)); i = j; }
     }
 
     // parse
@@ -2398,50 +2393,44 @@ function parseStructuredQuery(raw) {
             else if (v === 'DATA' || v === 'FT8' || v === 'FT4') result.mode = 'DATA';
 
         } else if (key === 'MAX') {
-            const n = parseInt(value, 10);
-            if (!Number.isNaN(n)) result.max = n;
+            const n = parseInt(value, 10); if (!Number.isNaN(n)) result.max = n;
 
         } else if (key === 'MIN') {
-            const n = parseInt(value, 10);
-            if (!Number.isNaN(n)) result.min = n;
+            const n = parseInt(value, 10); if (!Number.isNaN(n)) result.min = n;
 
         } else if (key === 'ACTIVE') {
-            const v = value.toLowerCase();
-            result.active = (v === '1' || v === 'true');
+            const v = value.toLowerCase(); result.active = (v === '1' || v === 'true');
 
         } else if (key === 'NEW') {
-            const v = value.toLowerCase();
-            result.isNew = (v === '1' || v === 'true');
+            const v = value.toLowerCase(); result.isNew = (v === '1' || v === 'true');
 
         } else if (key === 'MINE') {
-            const v = value.toLowerCase();
-            result.mine = (v === '1' || v === 'true');
+            const v = value.toLowerCase(); result.mine = (v === '1' || v === 'true');
 
         } else if (key === 'STATE') {
-            const st = value.toUpperCase().match(/([A-Z]{2})$/);
-            if (st && st[1]) result.state = st[1];
+            const st = value.toUpperCase().match(/([A-Z]{2})$/); if (st && st[1]) result.state = st[1];
 
         } else if (key === 'MINDIST') {
-            const { miles } = parseDistanceValue(value);
-            if (!Number.isNaN(miles)) result.minDist = miles;
+            const { miles } = parseDistanceValue(value); if (!Number.isNaN(miles)) result.minDist = miles;
 
         } else if (key === 'MAXDIST') {
-            const { miles } = parseDistanceValue(value);
-            if (!Number.isNaN(miles)) result.maxDist = miles;
+            const { miles } = parseDistanceValue(value); if (!Number.isNaN(miles)) result.maxDist = miles;
 
         } else if (key === 'DIST') {
             const m = value.replace(/\s+/g, '').toLowerCase().match(/^([^-]*?)(?:-([^-]*))?$/);
             if (m) {
-                const left  = m[1];
-                const right = m[2] || '';
+                const left  = m[1], right = m[2] || '';
                 if (left)  { const { miles } = parseDistanceValue(left);  if (!Number.isNaN(miles)) result.minDist = miles; }
                 if (right) { const { miles } = parseDistanceValue(right); if (!Number.isNaN(miles)) result.maxDist = miles; }
             }
 
-        } else if (key === 'NFERWITH') { // ← NEW
-            const refs = String(value).split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-            // keep only plausible refs like "US-1234" (letters+dash+digits), but be lenient
-            result.nferWithRefs = refs;
+        } else if (key === 'NFERWITH') {
+            result.nferWithRefs = String(value).split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+
+        } else if (key === 'NFER' || key === 'NFERS') {   // ← NEW
+            const v = value.trim().toLowerCase();
+            if (v === '1' || v === 'true' || v === 'yes') result.hasNfer = true;
+            else if (v === '0' || v === 'false' || v === 'no') result.hasNfer = false;
 
         } else if (key === 'TEXT') {
             result.text = (result.text ? result.text + ' ' : '') + value;
@@ -2486,13 +2475,12 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const hasNferConstraint  = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
 
     if (hasDistConstraint || hasStateConstraint || hasNferConstraint) {
-        // Distance path (STATE/NFERWITH simply bypass bounds)
         if (hasDistConstraint) {
             if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
             const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
             if (parsed.minDist !== null && dMiles < parsed.minDist) return false;
             if (parsed.maxDist !== null && dMiles > parsed.maxDist) return false;
-            park._distMiles = dMiles; // optional cache for later sorting/UI
+            park._distMiles = dMiles;
         }
     } else {
         const latLng = L.latLng(park.latitude, park.longitude);
@@ -2502,9 +2490,7 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     // 2) Free-text
     if (parsed.text) {
         const hay = [
-            park.name,
-            park.reference,
-            park.city,
+            park.name, park.reference, park.city,
             Array.isArray(park.states) ? park.states.join(' ') : park.state,
             park.country
         ].filter(Boolean).join(' ');
@@ -2518,57 +2504,73 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!(statesArr.includes(parsed.state) || single === parsed.state)) return false;
     }
 
-    // 4) NFERWITH — require membership in neighbors of any target
+    // 4) NFERWITH (union)
     if (hasNferConstraint) {
         const ref = String(park.reference || '').toUpperCase();
         const map = ctx && ctx.nferByRef;
         let ok = false;
         for (const target of parsed.nferWithRefs) {
             const T = String(target).toUpperCase();
-            // forward: is this park listed as a neighbor of T?
-            if (map && map.get(T) && map.get(T).has(ref)) { ok = true; break; }
-            // backward: does this park list T among its own neighbors?
-            if (Array.isArray(park.nfer) && park.nfer.some(r => String(r).toUpperCase() === T)) { ok = true; break; }
+            if (map && map.get(T) && map.get(T).has(ref)) { ok = true; break; } // forward
+            if (Array.isArray(park.nfer) && park.nfer.some(r => String(r).toUpperCase() === T)) { ok = true; break; } // backward
         }
         if (!ok) return false;
     }
 
-    // 5) NEW
+    // 5) NFERS / NFER boolean (does this park have *any* NFERs?)
+    if (parsed.hasNfer !== null) {
+        const ref = String(park.reference || '').toUpperCase();
+        const fwd = Array.isArray(park.nfer) ? park.nfer
+            : Array.isArray(park.nferWith) ? park.nferWith
+                : null;
+        let has = Array.isArray(fwd) && fwd.length > 0;
+
+        // Optional inbound detection via ctx.nferByRef (so parks that appear only as someone else's neighbor count as "has NFER")
+        if (!has && ctx && ctx.nferByRef) {
+            const inboundSet = ctx.nferByRef._inboundSet; // may exist if you use the optimized builder below
+            if (inboundSet) {
+                has = inboundSet.has(ref);
+            } else {
+                for (const set of ctx.nferByRef.values()) { if (set.has(ref)) { has = true; break; } }
+            }
+        }
+
+        if (parsed.hasNfer && !has) return false;
+        if (parsed.hasNfer === false && has) return false;
+    }
+
+    // 6) NEW
     if (parsed.isNew === true) {
         const created = park.created || 0;
         const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
         if (!created || (Date.now() - created) > THIRTY_DAYS) return false;
     }
 
-    // 6) MINE
+    // 7) MINE
     if (parsed.mine !== null && ctx && ctx.userActivatedRefs) {
         const mine = ctx.userActivatedRefs.has(park.reference);
         if (parsed.mine && !mine) return false;
         if (!parsed.mine && mine) return false;
     }
 
-    // 7) ACTIVE (live spots)
+    // 8) ACTIVE (live)
     if (parsed.active !== null && ctx && ctx.spotByRef) {
         const active = !!ctx.spotByRef[park.reference];
         if (parsed.active && !active) return false;
         if (!parsed.active && active) return false;
     }
 
-    // 8) MODE / MIN / MAX — QSO bucket check
+    // 9) MODE / MIN / MAX — QSO bucket check
     if (parsed.min !== null || parsed.max !== null || parsed.mode) {
-        const mode  = parsed.mode;                 // 'CW' | 'SSB' | 'DATA' | null
+        const mode  = parsed.mode;
         const lower = mode ? mode.toLowerCase() : null;
         let qsoCount = park.qsos || 0;
 
         if (mode) {
             const byRef = ctx?.modeQsosByRef && ctx.modeQsosByRef[park.reference];
-            if (byRef && typeof byRef[lower] === 'number') {
-                qsoCount = byRef[lower];
-            } else if (typeof park[`qsos_${lower}`] === 'number') {
-                qsoCount = park[`qsos_${lower}`];
-            } else if (park.qsosByMode && typeof park.qsosByMode[mode] === 'number') {
-                qsoCount = park.qsosByMode[mode];
-            }
+            if (byRef && typeof byRef[lower] === 'number') qsoCount = byRef[lower];
+            else if (typeof park[`qsos_${lower}`] === 'number') qsoCount = park[`qsos_${lower}`];
+            else if (park.qsosByMode && typeof park.qsosByMode[mode] === 'number') qsoCount = park.qsosByMode[mode];
         }
 
         if (parsed.min !== null && qsoCount < parsed.min) return false;
