@@ -2343,7 +2343,8 @@ function parseStructuredQuery(raw) {
         isStructured: true,
         text: '',       // free-text search
         mode: null,     // 'CW' | 'SSB' | 'DATA'
-        max: null,      // number
+        max: null,      // number (QSOs ceiling)
+        min: null,      // number (QSOs floor)  ← NEW
         active: null,   // boolean
         isNew: null,    // boolean
         mine: null,     // boolean
@@ -2355,7 +2356,6 @@ function parseStructuredQuery(raw) {
 
     // --- helpers local to the parser ---
     function parseDistanceValue(rawVal) {
-        // accepts "25", "25mi", "25 km"
         const m = String(rawVal).trim().match(/^(\d+(?:\.\d+)?)(\s*(km|mi))?$/i);
         if (!m) return { miles: NaN };
         const val = parseFloat(m[1]);
@@ -2363,40 +2363,35 @@ function parseStructuredQuery(raw) {
         return { miles: unit === 'km' ? val * 0.621371 : val };
     }
 
-    // ---- Tokenize quoted strings and key:value pairs ----
-    // We convert "some phrase" into a single token TEXT:some phrase
+    // ---- tokenize quoted strings + bare tokens ----
     const tokens = [];
     let i = 0;
     while (i < q.length) {
         const ch = q[i];
         if (ch === '"') {
-            let j = i + 1;
-            while (j < q.length && q[j] !== '"') j++;
-            const val = q.slice(i + 1, j);
-            tokens.push(`TEXT:${val}`);
+            let j = i + 1; while (j < q.length && q[j] !== '"') j++;
+            tokens.push(`TEXT:${q.slice(i + 1, j)}`);
             i = (j < q.length) ? j + 1 : q.length;
         } else if (/\s/.test(ch)) {
             i++;
         } else {
-            let j = i + 1;
-            while (j < q.length && !/\s/.test(q[j])) j++;
+            let j = i + 1; while (j < q.length && !/\s/.test(q[j])) j++;
             tokens.push(q.slice(i, j));
             i = j;
         }
     }
 
-    // ---- Parse tokens ----
+    // ---- parse tokens ----
     for (const t of tokens) {
         const kv = t.includes(':') ? t.split(':') : null;
 
-        if (!kv) {
-            // bareword -> treat as text fragment
+        if (!kv) { // bareword → text
             result.text = (result.text ? result.text + ' ' : '') + t;
             continue;
         }
 
         const key = kv[0].toUpperCase();
-        const valueRaw = kv.slice(1).join(':'); // re-join in case value has colons
+        const valueRaw = kv.slice(1).join(':');
         const value = (valueRaw || '').replace(/^TEXT:/, '');
 
         if (key === 'MODE') {
@@ -2408,6 +2403,10 @@ function parseStructuredQuery(raw) {
         } else if (key === 'MAX') {
             const n = parseInt(value, 10);
             if (!Number.isNaN(n)) result.max = n;
+
+        } else if (key === 'MIN') {               // ← NEW
+            const n = parseInt(value, 10);
+            if (!Number.isNaN(n)) result.min = n;
 
         } else if (key === 'ACTIVE') {
             const v = value.toLowerCase();
@@ -2422,7 +2421,6 @@ function parseStructuredQuery(raw) {
             result.mine = (v === '1' || v === 'true');
 
         } else if (key === 'STATE') {
-            // Accept "ma", "MA", "us-ma", etc.
             const st = value.toUpperCase().match(/([A-Z]{2})$/);
             if (st && st[1]) result.state = st[1];
 
@@ -2435,30 +2433,19 @@ function parseStructuredQuery(raw) {
             if (!Number.isNaN(miles)) result.maxDist = miles;
 
         } else if (key === 'DIST') {
-            // Accept "a-b", "a", or "-b", units optional on either side (e.g., "20km-50")
             const m = value.replace(/\s+/g, '').toLowerCase().match(/^([^-]*?)(?:-([^-]*))?$/);
             if (m) {
-                const left  = m[1];        // may be "" or "20" or "20km"
-                const right = m[2] || '';  // may be "" or "50" or "50km"
-                if (left) {
-                    const { miles } = parseDistanceValue(left);
-                    if (!Number.isNaN(miles)) result.minDist = miles;
-                }
-                if (right) {
-                    const { miles } = parseDistanceValue(right);
-                    if (!Number.isNaN(miles)) result.maxDist = miles;
-                }
+                const left  = m[1];
+                const right = m[2] || '';
+                if (left)  { const { miles } = parseDistanceValue(left);  if (!Number.isNaN(miles)) result.minDist = miles; }
+                if (right) { const { miles } = parseDistanceValue(right); if (!Number.isNaN(miles)) result.maxDist = miles; }
             }
 
         } else if (key === 'TEXT') {
             result.text = (result.text ? result.text + ' ' : '') + value;
-
-        } else {
-            // Unknown key: ignore (future-proofing)
         }
     }
 
-    // Normalize free text for your existing search path
     result.text = normalizeString(result.text);
     return result;
 }
@@ -2473,25 +2460,22 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 
     // 1) Proximity or in-view constraint
     const hasDistConstraint = (parsed.minDist !== null) || (parsed.maxDist !== null);
-    const hasStateConstraint = !!parsed.state;   // ← NEW: STATE disables bounds, like distance
+    const hasStateConstraint = !!parsed.state;
 
     if (hasDistConstraint || hasStateConstraint) {
-        // Distance path (optional). STATE alone just skips the bounds check.
         if (hasDistConstraint) {
             if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
             const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
             if (parsed.minDist !== null && dMiles < parsed.minDist) return false;
             if (parsed.maxDist !== null && dMiles > parsed.maxDist) return false;
-            // (Optional) cache distance on the park for later sorting/UI
-            park._distMiles = dMiles;
+            park._distMiles = dMiles; // optional cache
         }
     } else {
-        // Fall back to current map-bounds behavior
         const latLng = L.latLng(park.latitude, park.longitude);
         if (!bounds || !bounds.contains(latLng)) return false;
     }
 
-    // 2) Free-text match
+    // 2) Free-text
     if (parsed.text) {
         const hay = [
             park.name,
@@ -2503,39 +2487,61 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!normalizeString(hay).includes(parsed.text)) return false;
     }
 
-    // 3) STATE filter
+    // 3) STATE
     if (parsed.state) {
         const statesArr = Array.isArray(park.states) ? park.states.map(s => String(s).toUpperCase()) : [];
         const single = String(park.state || park.primaryState || '').toUpperCase();
         if (!(statesArr.includes(parsed.state) || single === parsed.state)) return false;
     }
 
-    // 4) NEW filter (true means last 30 days)
+    // 4) NEW
     if (parsed.isNew === true) {
         const created = park.created || 0;
         const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
         if (!created || (Date.now() - created) > THIRTY_DAYS) return false;
     }
 
-    // 5) MINE filter
+    // 5) MINE
     if (parsed.mine !== null && ctx && ctx.userActivatedRefs) {
         const mine = ctx.userActivatedRefs.has(park.reference);
         if (parsed.mine && !mine) return false;
         if (!parsed.mine && mine) return false;
     }
 
-    // 6) ACTIVE filter (live spots)
+    // 6) ACTIVE (live)
     if (parsed.active !== null && ctx && ctx.spotByRef) {
         const active = !!ctx.spotByRef[park.reference];
         if (parsed.active && !active) return false;
         if (!parsed.active && active) return false;
     }
 
-    // 7) MODE/MAX or other existing checks — keep your existing logic here.
-    // (This function keeps behavior the same beyond the view/STATE change above.)
+    // 7) MODE / MIN / MAX — QSO bucket check (NEW: MIN)
+    if (parsed.min !== null || parsed.max !== null || parsed.mode) {
+        // Resolve a QSO count for the requested mode; fallback to total qsos
+        const mode = parsed.mode; // 'CW' | 'SSB' | 'DATA' | null
+        const lower = mode ? mode.toLowerCase() : null;
+
+        let qsoCount = park.qsos || 0;
+
+        if (mode) {
+            // Try several common shapes; if you already store counts differently, adapt here
+            const byRef = ctx?.modeQsosByRef && ctx.modeQsosByRef[park.reference];
+            if (byRef && typeof byRef[lower] === 'number') {
+                qsoCount = byRef[lower];
+            } else if (typeof park[`qsos_${lower}`] === 'number') {
+                qsoCount = park[`qsos_${lower}`];
+            } else if (park.qsosByMode && typeof park.qsosByMode[mode] === 'number') {
+                qsoCount = park.qsosByMode[mode];
+            } // else leave fallback total
+        }
+
+        if (parsed.min !== null && qsoCount < parsed.min) return false; // ← NEW
+        if (parsed.max !== null && qsoCount > parsed.max) return false;
+    }
 
     return true;
 }
+
 function fitToMatchesIfGlobalScope(parsed, matched) {
     const usedGlobalScope =
         !!parsed.state ||
