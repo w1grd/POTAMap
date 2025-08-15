@@ -2036,7 +2036,8 @@ function handleSearchEnter(event) {
             }
             const userActivatedRefs = (activations || []).map(a => a.reference);
             const now = Date.now();
-            const ctx = { bounds, spotByRef, userActivatedRefs, now, userLat, userLng };
+            const nferByRef = buildNferByRef(parks);
+            const ctx = { bounds, spotByRef, userActivatedRefs, now, userLat, userLng, nferByRef };
 
             const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
             currentSearchResults = matched;
@@ -2338,23 +2339,23 @@ function normalizeString(str) {
  * Free text (quoted "like this" or bare) is matched against name/reference.
  */
 function parseStructuredQuery(raw) {
-    const q = (raw || '').trim().replace(/^\?\s*/, ''); // strip leading '?' and optional space
+    const q = (raw || '').trim().replace(/^\?\s*/, '');
     const result = {
         isStructured: true,
-        text: '',       // free-text search
-        mode: null,     // 'CW' | 'SSB' | 'DATA'
-        max: null,      // number (QSOs ceiling)
-        min: null,      // number (QSOs floor)  ← NEW
-        active: null,   // boolean
-        isNew: null,    // boolean
-        mine: null,     // boolean
-        state: null,    // 'MA' etc.
-        minDist: null,  // miles
-        maxDist: null   // miles
+        text: '',
+        mode: null,
+        max: null,
+        min: null,        // (from earlier sprint)
+        active: null,
+        isNew: null,
+        mine: null,
+        state: null,
+        minDist: null,
+        maxDist: null,
+        nferWithRefs: []  // ← NEW: array of target refs (uppercased)
     };
     if (!q) return result;
 
-    // --- helpers local to the parser ---
     function parseDistanceValue(rawVal) {
         const m = String(rawVal).trim().match(/^(\d+(?:\.\d+)?)(\s*(km|mi))?$/i);
         if (!m) return { miles: NaN };
@@ -2363,7 +2364,7 @@ function parseStructuredQuery(raw) {
         return { miles: unit === 'km' ? val * 0.621371 : val };
     }
 
-    // ---- tokenize quoted strings + bare tokens ----
+    // tokenize
     const tokens = [];
     let i = 0;
     while (i < q.length) {
@@ -2381,14 +2382,10 @@ function parseStructuredQuery(raw) {
         }
     }
 
-    // ---- parse tokens ----
+    // parse
     for (const t of tokens) {
         const kv = t.includes(':') ? t.split(':') : null;
-
-        if (!kv) { // bareword → text
-            result.text = (result.text ? result.text + ' ' : '') + t;
-            continue;
-        }
+        if (!kv) { result.text = (result.text ? result.text + ' ' : '') + t; continue; }
 
         const key = kv[0].toUpperCase();
         const valueRaw = kv.slice(1).join(':');
@@ -2404,7 +2401,7 @@ function parseStructuredQuery(raw) {
             const n = parseInt(value, 10);
             if (!Number.isNaN(n)) result.max = n;
 
-        } else if (key === 'MIN') {               // ← NEW
+        } else if (key === 'MIN') {
             const n = parseInt(value, 10);
             if (!Number.isNaN(n)) result.min = n;
 
@@ -2441,6 +2438,11 @@ function parseStructuredQuery(raw) {
                 if (right) { const { miles } = parseDistanceValue(right); if (!Number.isNaN(miles)) result.maxDist = miles; }
             }
 
+        } else if (key === 'NFERWITH') { // ← NEW
+            const refs = String(value).split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+            // keep only plausible refs like "US-1234" (letters+dash+digits), but be lenient
+            result.nferWithRefs = refs;
+
         } else if (key === 'TEXT') {
             result.text = (result.text ? result.text + ' ' : '') + value;
         }
@@ -2448,6 +2450,22 @@ function parseStructuredQuery(raw) {
 
     result.text = normalizeString(result.text);
     return result;
+}
+
+function buildNferByRef(parks) {
+    // Map<REF, Set<REF>>
+    const map = new Map();
+    for (const p of parks) {
+        // accept p.nfer or p.nferWith arrays
+        const arr = Array.isArray(p.nfer) ? p.nfer
+            : Array.isArray(p.nferWith) ? p.nferWith
+                : null;
+        if (!arr) continue;
+        const key = String(p.reference).toUpperCase();
+        const vals = arr.map(r => String(r).toUpperCase()).filter(Boolean);
+        map.set(key, new Set(vals));
+    }
+    return map;
 }
 
 
