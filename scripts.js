@@ -3286,21 +3286,16 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
     console.log("All parks displayed with appropriate highlights.");
 }
-
 // ---- helper: extract 2-letter US state/territory codes from locationDesc ----
 function extractStates(locationDesc) {
-    if (!locationDesc || typeof locationDesc !== 'string') return [];
-    // locationDesc examples: "US-ME" or "US-MA,US-RI"
-    const codes = locationDesc
-        .split(',')
-        .map(s => s.trim())
-        .map(s => {
-            const m = s.match(/^US-([A-Z]{2})$/i);
-            return m ? m[1].toUpperCase() : null;
-        })
-        .filter(Boolean);
+    if (!locationDesc) return [];
+    const tokens = String(locationDesc)
+        .split(/[,\s/|]+/)                 // split on comma/space/slash/pipe
+        .map(s => s.trim().toUpperCase())
+        .map(s => s.replace(/^US-/, ''))   // accept both "US-XX" and bare "XX"
+        .filter(s => /^[A-Z]{2}$/.test(s)); // keep only 2-letter codes
     // de-dupe while preserving order
-    return [...new Set(codes)];
+    return [...new Set(tokens)];
 }
 
 async function fetchAndCacheParks(jsonUrl, cacheDuration) {
@@ -3309,7 +3304,7 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     const lastFullFetch = await getLastFetchTimestamp('allparks.json');
     let parks = [];
 
-    // Force a full fetch if stale; when using cache, also backfill states
+    // Full fetch if stale; when using cache, also backfill states
     if (!lastFullFetch || (Date.now() - lastFullFetch > cacheDuration)) {
         console.log('Fetching full park data from JSON...');
         const response = await fetch(jsonUrl);
@@ -3325,13 +3320,13 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
                 name: park.name,
                 latitude: parseFloat(park.latitude),
                 longitude: parseFloat(park.longitude),
-                grid: park.grid,                    // keep if present in allparks.json
-                locationDesc: park.locationDesc,    // keep raw source string
+                grid: park.grid,                  // keep if present in allparks.json
+                locationDesc: park.locationDesc,  // keep raw source string
                 attempts: parseInt(park.attempts, 10) || 0,
                 activations: parseInt(park.activations, 10) || 0,
                 qsos: parseInt(park.qsos, 10) || 0,
-                states,                             // ← NEW: ['MA','RI'] etc.
-                primaryState: states[0] || null     // ← NEW: convenience for single-state queries/labels
+                states: states,                           // e.g., ['MD','DC','WV']
+                primaryState: states[0] || null
             };
         });
 
@@ -3379,7 +3374,7 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
                     attempts: parseInt(park.attempts, 10) || 0,
                     activations: parseInt(park.activations, 10) || 0,
                     qsos: parseInt(park.qsos, 10) || 0,
-                    states,                         // ← keep current
+                    states: states,
                     primaryState: states[0] || null,
                     created: isNew
                         ? (park.timestamp ? new Date(park.timestamp).getTime() : Date.now())
