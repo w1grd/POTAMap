@@ -2036,7 +2036,7 @@ function handleSearchEnter(event) {
             }
             const userActivatedRefs = (activations || []).map(a => a.reference);
             const now = Date.now();
-            const ctx = { bounds, spotByRef, userActivatedRefs, now };
+            const ctx = { bounds, spotByRef, userActivatedRefs, now, userLat, userLng };
 
             const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
             currentSearchResults = matched;
@@ -2346,9 +2346,21 @@ function parseStructuredQuery(raw) {
         active: null,   // boolean
         isNew: null,    // boolean
         mine: null,     // boolean
-        state: null     // 'MA' etc.
+        state: null,    // 'MA' etc.
+        minDist: null,  // miles
+        maxDist: null   // miles
     };
     if (!q) return result;
+
+    // --- helpers local to the parser ---
+    function parseDistanceValue(rawVal) {
+        // accepts "25", "25mi", "25 km"
+        const m = String(rawVal).trim().match(/^(\d+(?:\.\d+)?)(\s*(km|mi))?$/i);
+        if (!m) return { miles: NaN };
+        const val = parseFloat(m[1]);
+        const unit = (m[3] || 'mi').toLowerCase();
+        return { miles: unit === 'km' ? val * 0.621371 : val };
+    }
 
     // ---- Tokenize quoted strings and key:value pairs ----
     // We convert "some phrase" into a single token TEXT:some phrase
@@ -2360,12 +2372,11 @@ function parseStructuredQuery(raw) {
             let j = i + 1;
             while (j < q.length && q[j] !== '"') j++;
             const val = q.slice(i + 1, j);
-            tokens.push(`TEXT:${val}`); // <-- FIX: use push (append doesn't exist)
+            tokens.push(`TEXT:${val}`);
             i = (j < q.length) ? j + 1 : q.length;
         } else if (/\s/.test(ch)) {
             i++;
         } else {
-            // read until whitespace
             let j = i + 1;
             while (j < q.length && !/\s/.test(q[j])) j++;
             tokens.push(q.slice(i, j));
@@ -2375,8 +2386,7 @@ function parseStructuredQuery(raw) {
 
     // ---- Parse tokens ----
     for (const t of tokens) {
-        const hasColon = t.includes(':');
-        const kv = hasColon ? t.split(':') : null;
+        const kv = t.includes(':') ? t.split(':') : null;
 
         if (!kv) {
             // bareword -> treat as text fragment
@@ -2385,8 +2395,7 @@ function parseStructuredQuery(raw) {
         }
 
         const key = kv[0].toUpperCase();
-        // re-join in case value itself contains colons (rare but safe)
-        const valueRaw = kv.slice(1).join(':');
+        const valueRaw = kv.slice(1).join(':'); // re-join in case value has colons
         const value = (valueRaw || '').replace(/^TEXT:/, '');
 
         if (key === 'MODE') {
@@ -2412,10 +2421,33 @@ function parseStructuredQuery(raw) {
             result.mine = (v === '1' || v === 'true');
 
         } else if (key === 'STATE') {
-            // Accept "ma", "MA", "us-ma", etc. Keep it strict to 2 letters at the end.
-            // If someone types "MA," or "MA;" we'll still grab the "MA".
+            // Accept "ma", "MA", "us-ma", etc.
             const st = value.toUpperCase().match(/([A-Z]{2})$/);
             if (st && st[1]) result.state = st[1];
+
+        } else if (key === 'MINDIST') {
+            const { miles } = parseDistanceValue(value);
+            if (!Number.isNaN(miles)) result.minDist = miles;
+
+        } else if (key === 'MAXDIST') {
+            const { miles } = parseDistanceValue(value);
+            if (!Number.isNaN(miles)) result.maxDist = miles;
+
+        } else if (key === 'DIST') {
+            // Accept "a-b", "a", or "-b", units optional on either side (e.g., "20km-50")
+            const m = value.replace(/\s+/g, '').toLowerCase().match(/^([^-]*?)(?:-([^-]*))?$/);
+            if (m) {
+                const left  = m[1];        // may be "" or "20" or "20km"
+                const right = m[2] || '';  // may be "" or "50" or "50km"
+                if (left) {
+                    const { miles } = parseDistanceValue(left);
+                    if (!Number.isNaN(miles)) result.minDist = miles;
+                }
+                if (right) {
+                    const { miles } = parseDistanceValue(right);
+                    if (!Number.isNaN(miles)) result.maxDist = miles;
+                }
+            }
 
         } else if (key === 'TEXT') {
             result.text = (result.text ? result.text + ' ' : '') + value;
@@ -2439,11 +2471,18 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const { bounds, spotByRef, userActivatedRefs, now } = ctx || {};
     if (!park || !(park.latitude && park.longitude)) return false;
 
-    // 1) In-view constraint
-    const latLng = L.latLng(park.latitude, park.longitude);
-    if (!bounds || !bounds.contains(latLng)) return false;
-
-    // 2) Text search (if provided)
+    // 1) Proximity or in-view constraint
+    const hasDistConstraint = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    if (hasDistConstraint) {
+        if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
+        const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
+        if (parsed.minDist !== null && dMiles < parsed.minDist) return false;
+        if (parsed.maxDist !== null && dMiles > parsed.maxDist) return false;
+    } else {
+        const latLng = L.latLng(park.latitude, park.longitude);
+        if (!bounds || !bounds.contains(latLng)) return false;
+    }
+// 2) Text search (if provided)
     if (parsed.text && parsed.text.length) {
         const hay = normalizeString(
             [park.name, park.reference, park.city, (Array.isArray(park.states)? park.states.join(' ') : park.state), park.country].filter(Boolean).join(' ')
@@ -3287,15 +3326,27 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     console.log("All parks displayed with appropriate highlights.");
 }
 // ---- helper: extract 2-letter US state/territory codes from locationDesc ----
+// ---- helpers ----
 function extractStates(locationDesc) {
     if (!locationDesc) return [];
     const tokens = String(locationDesc)
-        .split(/[,\s/|]+/)                 // split on comma/space/slash/pipe
+        .split(/[,\s/|]+/)
         .map(s => s.trim().toUpperCase())
-        .map(s => s.replace(/^US-/, ''))   // accept both "US-XX" and bare "XX"
-        .filter(s => /^[A-Z]{2}$/.test(s)); // keep only 2-letter codes
-    // de-dupe while preserving order
-    return [...new Set(tokens)];
+        .map(s => s.replace(/^US-/, ''))      // accept "US-XX" and "XX"
+        .filter(s => /^[A-Z]{2}$/.test(s));   // keep only 2-letter codes
+    return [...new Set(tokens)];            // de-dupe, preserve order
+}
+
+function haversineMiles(lat1, lon1, lat2, lon2) {
+    const toRad = d => d * Math.PI / 180;
+    const R = 3958.7613; // Earth radius in miles
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon/2)**2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
 }
 
 async function fetchAndCacheParks(jsonUrl, cacheDuration) {
@@ -3305,7 +3356,7 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     let parks = [];
 
     // Full fetch if stale; when using cache, also backfill states
-        if (!lastFullFetch || (Date.now() - lastFullFetch > cacheDuration)) {
+    if (!lastFullFetch || (Date.now() - lastFullFetch > cacheDuration)) {
         console.log('Fetching full park data from JSON...');
         const response = await fetch(jsonUrl);
         if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
