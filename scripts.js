@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//10
+//14
 //
 // Initialize global variables
 let activations = [];
@@ -2325,26 +2325,19 @@ function normalizeString(str) {
 
 
 
-
 /**
  * Parses a structured query that begins with '?'.
- * Supported keys (case-insensitive):
- *  - MODE: CW | PHONE | SSB | DATA
+ * Keys (case-insensitive):
+ *  - MODE: CW | PHONE | SSB | DATA | FT8 | FT4
  *  - MAX: <number>        (max total activations)
- *  - ACTIVE: 1|0          (currently on-air)
- *  - NEW: 1|0             (created <= 30 days)
- *  - MINE: 1|0            (parks you've activated)
+ *  - ACTIVE: 1|0|true|false
+ *  - NEW: 1|0|true|false
+ *  - MINE: 1|0|true|false
  *  - STATE: <US state/territory 2-letter code>
- * Free text (quoted or bare) is matched against name or reference.
- * Examples:
- *   ? MODE:CW MAX:6
- *   ? ACTIVE:1 MODE:DATA
- *   ? NEW:1
- *   ? MINE:1 STATE:MA
- *   ? "Acadia" MAX:10
+ * Free text (quoted "like this" or bare) is matched against name/reference.
  */
 function parseStructuredQuery(raw) {
-    const q = raw.trim().replace(/^\?\s*/, ''); // strip leading '?' and optional space
+    const q = (raw || '').trim().replace(/^\?\s*/, ''); // strip leading '?' and optional space
     const result = {
         isStructured: true,
         text: '',       // free-text search
@@ -2357,8 +2350,8 @@ function parseStructuredQuery(raw) {
     };
     if (!q) return result;
 
-    // Tokenize quoted strings and key:value pairs
-    // Accept quoted segments "like this" as text; collect multiple texts joined with space
+    // ---- Tokenize quoted strings and key:value pairs ----
+    // We convert "some phrase" into a single token TEXT:some phrase
     const tokens = [];
     let i = 0;
     while (i < q.length) {
@@ -2367,7 +2360,7 @@ function parseStructuredQuery(raw) {
             let j = i + 1;
             while (j < q.length && q[j] !== '"') j++;
             const val = q.slice(i + 1, j);
-            tokens.append ? tokens.append(val) : tokens.push(`TEXT:${val}`);
+            tokens.push(`TEXT:${val}`); // <-- FIX: use push (append doesn't exist)
             i = (j < q.length) ? j + 1 : q.length;
         } else if (/\s/.test(ch)) {
             i++;
@@ -2380,45 +2373,63 @@ function parseStructuredQuery(raw) {
         }
     }
 
-    // Parse tokens
+    // ---- Parse tokens ----
     for (const t of tokens) {
-        const kv = t.includes(':') ? t.split(':') : null;
+        const hasColon = t.includes(':');
+        const kv = hasColon ? t.split(':') : null;
+
         if (!kv) {
             // bareword -> treat as text fragment
-            result.text = (result.text ? (result.text + ' ') : '') + t.replace(/^TEXT:/, '');
+            result.text = (result.text ? result.text + ' ' : '') + t;
             continue;
         }
+
         const key = kv[0].toUpperCase();
-        const valueRaw = kv.slice(1).join(':'); // in case value has colons
-        const value = valueRaw.replace(/^TEXT:/, '');
+        // re-join in case value itself contains colons (rare but safe)
+        const valueRaw = kv.slice(1).join(':');
+        const value = (valueRaw || '').replace(/^TEXT:/, '');
 
         if (key === 'MODE') {
             const v = value.toUpperCase();
             if (v === 'CW') result.mode = 'CW';
             else if (v === 'SSB' || v === 'PHONE') result.mode = 'SSB';
             else if (v === 'DATA' || v === 'FT8' || v === 'FT4') result.mode = 'DATA';
+
         } else if (key === 'MAX') {
             const n = parseInt(value, 10);
             if (!Number.isNaN(n)) result.max = n;
+
         } else if (key === 'ACTIVE') {
-            result.active = (value === '1' || value.toLowerCase() === 'true');
+            const v = value.toLowerCase();
+            result.active = (v === '1' || v === 'true');
+
         } else if (key === 'NEW') {
-            result.isNew = (value === '1' || value.toLowerCase() === 'true');
+            const v = value.toLowerCase();
+            result.isNew = (v === '1' || v === 'true');
+
         } else if (key === 'MINE') {
-            result.mine = (value === '1' || value.toLowerCase() === 'true');
+            const v = value.toLowerCase();
+            result.mine = (v === '1' || v === 'true');
+
         } else if (key === 'STATE') {
-            const st = value.toUpperCase().replace(/[^A-Z]/g, '');
-            if (st.length === 2) result.state = st;
+            // Accept "ma", "MA", "us-ma", etc. Keep it strict to 2 letters at the end.
+            // If someone types "MA," or "MA;" we'll still grab the "MA".
+            const st = value.toUpperCase().match(/([A-Z]{2})$/);
+            if (st && st[1]) result.state = st[1];
+
         } else if (key === 'TEXT') {
-            result.text = (result.text ? (result.text + ' ') : '') + value;
+            result.text = (result.text ? result.text + ' ' : '') + value;
+
         } else {
             // Unknown key: ignore (future-proofing)
         }
     }
 
+    // Normalize free text for your existing search path
     result.text = normalizeString(result.text);
     return result;
 }
+
 
 /**
  * Tests whether a given park matches the parsed structured query.
@@ -2435,15 +2446,19 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     // 2) Text search (if provided)
     if (parsed.text && parsed.text.length) {
         const hay = normalizeString(
-            [park.name, park.reference, park.city, park.state, park.country].filter(Boolean).join(' ')
+            [park.name, park.reference, park.city, (Array.isArray(park.states)? park.states.join(' ') : park.state), park.country].filter(Boolean).join(' ')
         );
         const needle = normalizeString(parsed.text);
         if (!hay.includes(needle)) return false;
     }
 
     // 3) STATE filter
-    if (parsed.state && String(park.state || '').toUpperCase() !== parsed.state) {
-        return false;
+    if (parsed.state) {
+        const statesArr = Array.isArray(park.states) ? park.states.map(s => String(s).toUpperCase()) : [];
+        const single = String(park.state || park.primaryState || '').toUpperCase();
+        if (!(statesArr.includes(parsed.state) || single === parsed.state)) {
+            return false;
+        }
     }
 
     // 4) NEW filter (example: last 30 days by created/updated timestamps if present)
@@ -3272,38 +3287,80 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     console.log("All parks displayed with appropriate highlights.");
 }
 
+// ---- helper: extract 2-letter US state/territory codes from locationDesc ----
+function extractStates(locationDesc) {
+    if (!locationDesc || typeof locationDesc !== 'string') return [];
+    // locationDesc examples: "US-ME" or "US-MA,US-RI"
+    const codes = locationDesc
+        .split(',')
+        .map(s => s.trim())
+        .map(s => {
+            const m = s.match(/^US-([A-Z]{2})$/i);
+            return m ? m[1].toUpperCase() : null;
+        })
+        .filter(Boolean);
+    // de-dupe while preserving order
+    return [...new Set(codes)];
+}
+
 async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     const db = await getDatabase();
     const now = Date.now();
     const lastFullFetch = await getLastFetchTimestamp('allparks.json');
     let parks = [];
 
-    // Force a full fetch for now (you can restore the caching logic later)
-    if (!lastFullFetch || (now - lastFullFetch > cacheDuration)) {
+    // Force a full fetch if stale; when using cache, also backfill states
+    if (!lastFullFetch || (Date.now() - lastFullFetch > cacheDuration)) {
         console.log('Fetching full park data from JSON...');
         const response = await fetch(jsonUrl);
         if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
 
         const parsed = await response.json();
 
-        // Don't assign "created" here — allparks.json is the baseline
-        parks = parsed.map(park => ({
-            reference: park.reference,
-            name: park.name,
-            latitude: parseFloat(park.latitude),
-            longitude: parseFloat(park.longitude),
-            activations: parseInt(park.activations, 10) || 0
-            // No `created` field at all
-        }));
+        // Baseline load from allparks.json; no "created" here
+        parks = parsed.map(park => {
+            const states = extractStates(park.locationDesc);
+            return {
+                reference: park.reference,
+                name: park.name,
+                latitude: parseFloat(park.latitude),
+                longitude: parseFloat(park.longitude),
+                grid: park.grid,                    // keep if present in allparks.json
+                locationDesc: park.locationDesc,    // keep raw source string
+                attempts: parseInt(park.attempts, 10) || 0,
+                activations: parseInt(park.activations, 10) || 0,
+                qsos: parseInt(park.qsos, 10) || 0,
+                states,                             // ← NEW: ['MA','RI'] etc.
+                primaryState: states[0] || null     // ← NEW: convenience for single-state queries/labels
+            };
+        });
 
         await upsertParksToIndexedDB(parks);
         await setLastFetchTimestamp('allparks.json', now);
     } else {
         console.log('Using cached full park data');
-        parks = await getAllParksFromIndexedDB();
+        const cached = await getAllParksFromIndexedDB();
+
+        // Backfill states for any records that predate this change
+        const patched = cached.map(p => {
+            if (p.states && Array.isArray(p.states) && p.states.length) return p;
+            const states = extractStates(p.locationDesc);
+            return {
+                ...p,
+                states,
+                primaryState: p.primaryState ?? (states[0] || null)
+            };
+        });
+
+        // Only write back if we actually added anything
+        const needsUpsert = patched.some((p, i) => p !== cached[i]);
+        if (needsUpsert) {
+            await upsertParksToIndexedDB(patched);
+        }
+        parks = patched;
     }
 
-    // Apply updates from changes.json
+    // Apply updates from changes.json and ensure states stay in sync
     try {
         const changesResponse = await fetchIfModified('/potamap/data/changes.json', 'changes.json');
         if (changesResponse && changesResponse.ok) {
@@ -3311,26 +3368,27 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
 
             const updatedParks = changesData.map(park => {
                 const isNew = park.change === 'Park added';
-
+                const states = extractStates(park.locationDesc);
                 return {
                     reference: park.reference,
                     name: park.name,
-                    latitude: park.latitude,
-                    longitude: park.longitude,
+                    latitude: parseFloat(park.latitude),
+                    longitude: parseFloat(park.longitude),
                     grid: park.grid,
                     locationDesc: park.locationDesc,
-                    attempts: park.attempts,
-                    activations: park.activations,
-                    qsos: park.qsos,
+                    attempts: parseInt(park.attempts, 10) || 0,
+                    activations: parseInt(park.activations, 10) || 0,
+                    qsos: parseInt(park.qsos, 10) || 0,
+                    states,                         // ← keep current
+                    primaryState: states[0] || null,
                     created: isNew
-                        ? (park.timestamp ? new Date(park.timestamp).getTime() : now)
+                        ? (park.timestamp ? new Date(park.timestamp).getTime() : Date.now())
                         : undefined,
                     change: park.change
                 };
             });
 
             console.log("Final updatedParks going to IndexedDB:", updatedParks);
-
             await upsertParksToIndexedDB(updatedParks);
             await setLastModifiedHeader('changes.json', changesResponse.headers.get('last-modified'));
             console.log('Applied updates from changes.json');
@@ -3340,8 +3398,10 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     } catch (err) {
         console.warn('Failed to apply park changes:', err);
     }
+
     return parks;
 }
+
 async function fetchAndApplyUserActivations(callsign = null) {
     // Try to load stored callsign
     if (!callsign) {
