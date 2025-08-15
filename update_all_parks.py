@@ -2,7 +2,6 @@
 
 import json
 import requests
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -35,7 +34,13 @@ def fetch_remote_data():
     return combined
 
 def compare_parks(old_parks, new_parks):
+    """
+    Returns:
+      changes: list of dicts describing non-QSO metadata changes (add/delete/rename/move/etc.)
+      qsos_changed_refs: list of references whose 'qsos' value changed
+    """
     changes = []
+    qsos_changed_refs = []
     timestamp = datetime.utcnow().isoformat()
 
     old_keys = set(old_parks.keys())
@@ -73,6 +78,12 @@ def compare_parks(old_parks, new_parks):
         if old.get('grid') != new.get('grid'):
             differences.append('grid changed')
 
+        # Track QSO changes separately
+        if old.get('qsos') != new.get('qsos'):
+            qsos_changed_refs.append(ref)
+            # If you ALSO want this noted in changes.json, uncomment the next line:
+            # differences.append('qsos changed')
+
         if differences:
             changes.append({
                 **new,
@@ -80,11 +91,16 @@ def compare_parks(old_parks, new_parks):
                 'timestamp': timestamp
             })
 
-    return changes
+    return changes, qsos_changed_refs
 
 def write_json(filename, data):
     with open(filename, 'w') as f:
         json.dump(data, f, indent=2)
+
+def write_lines(filename, lines):
+    with open(filename, 'w') as f:
+        for line in lines:
+            f.write(f"{line}\n")
 
 def main():
     print("Loading local data...")
@@ -94,13 +110,21 @@ def main():
     new_parks = fetch_remote_data()
 
     print("Comparing park data...")
-    changes = compare_parks(local_parks, new_parks)
+    changes, qsos_changed_refs = compare_parks(local_parks, new_parks)
 
-    print(f"Found {len(changes)} changes.")
+    print(f"Found {len(changes)} non-QSO metadata changes.")
     if changes:
         write_json(CHANGES_FILE, changes)
         print(f"Changes written to {CHANGES_FILE}.")
 
+    # If any QSO counts changed, write references to updateQSO.<timestamp> (UTC, filename-safe)
+    if qsos_changed_refs:
+        ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        qso_update_file = BASE_DIR / f"updateQSO.{ts}"
+        write_lines(qso_update_file, sorted(qsos_changed_refs))
+        print(f"Wrote {len(qsos_changed_refs)} references with QSO updates to {qso_update_file}.")
+
+    # Always update the local allparks snapshot last
     write_json(LOCAL_FILE, list(new_parks.values()))
     print(f"Updated park list written to {LOCAL_FILE}.")
 
