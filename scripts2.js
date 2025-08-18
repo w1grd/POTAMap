@@ -485,7 +485,7 @@ async function redrawMarkersWithFilters(){
     try{
         if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
         if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
 
         const bounds = getCurrentMapBounds();
         const userActivatedReferences = (activations || []).map(a => a.reference);
@@ -572,9 +572,25 @@ async function redrawMarkersWithFilters(){
     }
 }
 
+
 function refreshMarkers(){
     if (!map) return;
-    redrawMarkersWithFilters();
+    // Prefer incremental refresh to avoid white-screen between clears and re-adds
+    if (typeof updateVisibleModeCounts === 'function') {
+        updateVisibleModeCounts();
+    }
+    if (window.requestAnimationFrame) {
+        window.requestAnimationFrame(() => {
+            if (typeof redrawMarkersWithFilters === 'function') {
+                // Use an internal flag to avoid clearing everything if not necessary
+                try { window.__nonDestructiveRedraw = true; } catch(e){}
+                redrawMarkersWithFilters();
+                try { window.__nonDestructiveRedraw = false; } catch(e){}
+            }
+        });
+    } else {
+        setTimeout(() => redrawMarkersWithFilters && redrawMarkersWithFilters(), 0);
+    }
 }
 /* ==== end Filters & Thresholds block ==== */
 
@@ -1862,7 +1878,7 @@ async function toggleActivations() {
 
     // Clear activationsLayer before updating map
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -2032,7 +2048,7 @@ function centerMapOnGeolocation() {
             console.log(`Centering map on geolocation: ${userLat}, ${userLng}`);
 
             if (map) {
-                map.setView([userLat, userLng], 12, {
+                map.setView([userLat, userLng], map.getZoom(), {
                     animate: true,
                     duration: 1.5,
                 });
@@ -2763,7 +2779,7 @@ function filterParksByActivations(maxActivations) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         console.log("Cleared existing markers."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -2872,7 +2888,7 @@ async function updateActivationsInView() {
     });
 
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -2920,7 +2936,7 @@ function updateMapWithFilteredParks(filteredParks) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         console.log("Cleared existing markers for filtered search."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -4005,9 +4021,8 @@ async function setupPOTAMap() {
         // Fetch and cache parks data
         await fetchAndCacheParks(csvUrl, cacheDuration);
         // After parks finished loading/caching:
-        await checkAndUpdateModesAtStartup();
-
-        // Now reload from IndexedDB, which will include merged changes
+        setTimeout(() => { checkAndUpdateModesAtStartup().catch(console.warn); }, 250);
+// Now reload from IndexedDB, which will include merged changes
         parks = await getAllParksFromIndexedDB();
         console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
         console.log("Parks Loaded from IndexedDB:", parks); // Debugging
@@ -4244,7 +4259,7 @@ async function fetchAndDisplaySpots() {
         if (!map.activationsLayer) {
             map.activationsLayer = L.layerGroup().addTo(map);
         } else {
-            map.activationsLayer.clearLayers();
+            if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         }
 
         const activatedReferences = activations.map(act => act.reference);
@@ -4406,7 +4421,7 @@ optimizeLeafletControlsAndPopups();
 function refreshMapActivations() {
     // Clear existing markers or layers if necessary
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         console.log("Cleared existing activation markers."); // Debugging
     }
 
