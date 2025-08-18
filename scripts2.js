@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//15
+//23
 //
 // Initialize global variables
 let activations = [];
@@ -164,10 +164,61 @@ if (isDesktopMode) {
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
  */
-document.addEventListener('DOMContentLoaded', async () => {
-    initializeMenu();
+// ==== Mode changes gating (performance) ====
+let MODE_CHANGES_AVAILABLE = false;
+let MODE_CHANGE_REFS = new Set();
 
-// === Off-main-thread per-mode QSO counting (performance patch) ===
+async function detectModeChanges() {
+    const candidates = [
+        '/potamap/data/mode-changes.json',
+        '/potamap/data/mode_changes.json',
+    ];
+    for (const url of candidates) {
+        try {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) continue;
+            const json = await res.json().catch(() => null);
+            if (!json) continue;
+
+            // Accept: array or {references:[...]} or {refs:[...]}
+            const refs = Array.isArray(json)
+                ? json
+                : Array.isArray(json.references)
+                    ? json.references
+                    : Array.isArray(json.refs)
+                        ? json.refs
+                        : [];
+
+            if (refs.length > 0) {
+                MODE_CHANGES_AVAILABLE = true;
+                MODE_CHANGE_REFS = new Set(refs);
+                console.log(`[modes] mode-changes found: ${refs.length} references`);
+                return true;
+            }
+
+            console.log('[modes] mode-changes present but empty; skipping computations.');
+            MODE_CHANGES_AVAILABLE = false;
+            MODE_CHANGE_REFS = new Set();
+            return false;
+        } catch (_) {
+            // try next candidate
+        }
+    }
+    MODE_CHANGES_AVAILABLE = false;
+    MODE_CHANGE_REFS = new Set();
+    console.log('[modes] no mode-changes.json; skipping per-mode computations.');
+    return false;
+}
+
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        initializeMenu();
+    } catch (e) {
+        console.warn('initializeMenu() failed', e);
+    }
+
+    // === Off-main-thread per-mode QSO counting (performance patch) ===
     let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
     let qsoWorker = null;
     let workerReady = false;
@@ -175,25 +226,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     let visibleComputeScheduled = false;
 
     function initQsoWorkerIfNeeded() {
+        if (!MODE_CHANGES_AVAILABLE) return;
         if (qsoWorker) return;
         try {
             qsoWorker = new Worker('qsoWorker.js');
             qsoWorker.onmessage = (e) => {
-                const { type, payload } = e.data || {};
-                if (type === 'INIT_OK') {
+                const msg = e.data || {};
+                if (msg.type === 'INIT_OK') {
                     workerReady = true;
-                    // Once ready, schedule first visible compute (if any queued)
                     scheduleVisibleCompute();
-                } else if (type === 'COMPUTE_DONE') {
-                    const res = payload?.result || {};
+                } else if (msg.type === 'COMPUTE_DONE') {
+                    const res = (msg.payload && msg.payload.result) || {};
                     for (const ref in res) {
                         modeCountCache.set(ref, res[ref]);
                     }
-                    // Trigger a light marker refresh for those refs without a full redraw
                     if (typeof updateMarkersForReferences === 'function') {
                         updateMarkersForReferences(Object.keys(res));
-                    } else {
-                        // Fallback: debounce a general refresh
+                    } else if (typeof refreshMarkers === 'function') {
                         if (window.requestIdleCallback) {
                             requestIdleCallback(() => refreshMarkers(), { timeout: 200 });
                         } else {
@@ -203,13 +252,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             };
             // Defer INIT until after initial map render so paint happens ASAP
-            const doInit = () => {
+            setTimeout(() => {
                 try {
                     qsoWorker.postMessage({ type: 'INIT', payload: { parks, activations } });
                 } catch (e) {}
-            };
-            // Schedule after current frame
-            setTimeout(doInit, 0);
+            }, 0);
         } catch (e) {
             console.warn('QSO worker failed to initialize, falling back to main thread.', e);
         }
@@ -219,7 +266,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return modeCountCache.get(ref) || { cw: 0, data: 0, ssb: 0, unk: 0 };
     }
 
-// Batch compute for visible parks only (and only missing entries)
+    // Batch compute for visible parks only (and only missing entries)
     function enqueueVisibleReferences(refs) {
         for (const r of refs) {
             if (!modeCountCache.has(r)) pendingVisibleBatch.push(r);
@@ -237,7 +284,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             try {
                 qsoWorker.postMessage({ type: 'COMPUTE', payload: { references: batch } });
             } catch (e) {}
-            // If more remain, schedule the next batch cooperatively
             if (pendingVisibleBatch.length > 0) {
                 if (window.requestIdleCallback) {
                     requestIdleCallback(scheduleVisibleCompute, { timeout: 200 });
@@ -246,7 +292,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }
         };
-        // Cooperative scheduling so rendering stays snappy
         if (window.requestIdleCallback) {
             requestIdleCallback(run, { timeout: 200 });
         } else {
@@ -254,45 +299,52 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-// Hook visibility: compute only for parks in current bounds
+    // Hook visibility: compute only for parks in current bounds AND in MODE_CHANGE_REFS
     function updateVisibleModeCounts() {
         if (!map || !parks || parks.length === 0) return;
+        if (!MODE_CHANGES_AVAILABLE || !(MODE_CHANGE_REFS instanceof Set)) return;
         const b = map.getBounds();
         const refs = [];
         for (const park of parks) {
             const { latitude, longitude, reference } = park || {};
             if (latitude == null || longitude == null || !reference) continue;
+            if (!MODE_CHANGE_REFS.has(reference)) continue;
             if (b.contains([latitude, longitude])) refs.push(reference);
         }
         enqueueVisibleReferences(refs);
     }
 
-// Augment marker creation to use cached counts without blocking
+    // Helper used by marker rendering (if needed elsewhere)
     function modeCountsForParkRef(reference) {
         return getModeCounts(reference);
     }
 
-// Set up worker after map is initialized and data loaded
-    document.addEventListener('DOMContentLoaded', () => {
-        // Kick map render first; worker init happens after first paint in initQsoWorkerIfNeeded()
-        setTimeout(() => initQsoWorkerIfNeeded(), 0);
-    });
-
-// Recompute visible batches on navigation
+    // Recompute visible batches on navigation
     function attachVisibleListenersOnce() {
         if (!map || map._modeCountListenersAttached) return;
         map._modeCountListenersAttached = true;
         map.on('moveend zoomend', () => {
             updateVisibleModeCounts();
         });
-        // Compute for initial viewport shortly after first paint
         setTimeout(() => updateVisibleModeCounts(), 100);
     }
 
-// Set up the menu
-    setupPOTAMap(); // Set up the map
-    await initializeActivationsDisplay(); // Check and display activations if available
+    // Defer the mode check & worker init so the UI paints first
+    setTimeout(async () => {
+        try {
+            const haveChanges = await detectModeChanges();
+            if (haveChanges) {
+                try { await checkAndUpdateModesAtStartup(); } catch (e) { console.warn(e); }
+                initQsoWorkerIfNeeded();
+                updateVisibleModeCounts();
+                attachVisibleListenersOnce();
+            }
+        } catch (e) {
+            console.warn('detectModeChanges() failed', e);
+        }
+    }, 250);
 });
+
 
 
 
@@ -362,16 +414,10 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
         const now = new Date();
         const createdDate = new Date(created);
         const ageInDays = isFinite(createdDate) ? ((now - createdDate) / (1000 * 60 * 60 * 24)) : Infinity;
-
-        // 1) New park badge stays purple
-        if (ageInDays <= 30) return "#800080"; // purple
-
-        // 2) 'MY' parks: use the same green formerly used for threshold-green
-        if (isUserActivated) return "#90ee90"; // light green
-
-        // 3) Everything else that isn't colored by mode/activation elsewhere: use red
-        return "#ff6666"; // red
-    } catch (e) {
+        if (ageInDays <= 30) return "#800080"; // new: purple
+        if (isUserActivated) return "#90ee90"; // 'My' parks: light green
+        return "#ff6666"; // default red
+    }catch (e) {
         // Fail-safe to red
         return "#ff6666";
     }
@@ -485,7 +531,7 @@ async function redrawMarkersWithFilters(){
     try{
         if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
         if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
-        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
 
         const bounds = getCurrentMapBounds();
         const userActivatedReferences = (activations || []).map(a => a.reference);
@@ -578,7 +624,7 @@ function refreshMarkers(options = {}) {
     const fullRedraw = !!options.full;
 
     // Prefer incremental updates unless a full redraw is requested
-    if (typeof updateVisibleModeCounts === 'function') {
+    if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
         updateVisibleModeCounts();
     }
 
@@ -610,9 +656,6 @@ function refreshMarkers(options = {}) {
 }
 
 /* ==== end Filters & Thresholds block ==== */
-
-/* ==== end Filters & Thresholds block ==== */
-
 /**
  * Initializes the hamburger menu.
  */
@@ -1896,7 +1939,7 @@ async function toggleActivations() {
 
     // Clear activationsLayer before updating map
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -2102,7 +2145,7 @@ function fallbackToDefaultLocation() {
     if (!map) return;
     userLat = 39.8283;
     userLng = -98.5795;
-    map.setView([userLat, userLng], 5, {
+    map.setView([userLat, userLng], map.getZoom(), {
         animate: true,
         duration: 1.5,
     });
@@ -2797,7 +2840,7 @@ function filterParksByActivations(maxActivations) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         console.log("Cleared existing markers."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -2906,7 +2949,7 @@ async function updateActivationsInView() {
     });
 
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -2954,7 +2997,7 @@ function updateMapWithFilteredParks(filteredParks) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         console.log("Cleared existing markers for filtered search."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -4039,7 +4082,11 @@ async function setupPOTAMap() {
         // Fetch and cache parks data
         await fetchAndCacheParks(csvUrl, cacheDuration);
         // After parks finished loading/caching:
-        setTimeout(() => { checkAndUpdateModesAtStartup().catch(console.warn); }, 250);
+        setTimeout(async () => {
+            const haveChanges = await detectModeChanges();
+            if (haveChanges) { try { if (await detectModeChanges()) { await checkAndUpdateModesAtStartup(); } } catch(e){ console.warn(e); } }
+            initQsoWorkerIfNeeded();
+        }, 250);
 // Now reload from IndexedDB, which will include merged changes
         parks = await getAllParksFromIndexedDB();
         console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
@@ -4277,7 +4324,7 @@ async function fetchAndDisplaySpots() {
         if (!map.activationsLayer) {
             map.activationsLayer = L.layerGroup().addTo(map);
         } else {
-            if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
+            if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         }
 
         const activatedReferences = activations.map(act => act.reference);
@@ -4439,7 +4486,7 @@ optimizeLeafletControlsAndPopups();
 function refreshMapActivations() {
     // Clear existing markers or layers if necessary
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         console.log("Cleared existing activation markers."); // Debugging
     }
 
