@@ -233,7 +233,6 @@ function shouldDisplayByMode(isActive, isNew, mode){
     if (!modeFilters[key]) return false;
     return true;
 }
-
 function getMarkerColorConfigured(activations, isUserActivated, created) {
     try {
         const now = new Date();
@@ -252,10 +251,6 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
         // Fail-safe to red
         return "#ff6666";
     }
-}
-catch(e) {
-    return "#0000ff";
-}
 }
 
 // Build Filters UI inside the hamburger menu (thresholdChip fully removed)
