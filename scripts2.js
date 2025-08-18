@@ -11,7 +11,7 @@ let userLng = null;
 let currentSearchResults = [];
 let previousMapState = {
     bounds: null,
-    displayedParks: [],
+    displayedParks: []
 };
 
 // --- Lightweight Toast UI -------------------------------------------------
@@ -156,7 +156,7 @@ const cacheDuration = (24 * 60 * 60 * 1000) * 2; // 8 days in milliseconds
 // See if we are in desktop mode
 const urlParams = new URLSearchParams(window.location.search);
 const isDesktopMode = urlParams.get('desktop') === '1';
-console.log('Reading desktop param: ' + isDesktopMode)
+console.log('Reading desktop param: ' + isDesktopMode);
 if (isDesktopMode) {
     document.body.classList.add('desktop-mode');
 }
@@ -4647,7 +4647,7 @@ function initializeFilterChips(){
         ['chipMyActs','myActivations'],
         ['chipOnAir','currentlyActivating'],
         ['chipNewParks','newParks'],
-        ['chipAllParks','allParks'],
+        ['chipAllParks','allParks']
     ];
 
     function setChip(btn, on){ btn.classList.toggle('active', !!on); btn.setAttribute('aria-pressed', !!on); }
