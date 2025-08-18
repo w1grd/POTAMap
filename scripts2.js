@@ -214,6 +214,7 @@ function initQsoWorkerIfNeeded(){
     }
 }
 
+
 function updateVisibleModeCounts() {
     if (!map || !parks || parks.length === 0) return;
     if (!MODE_CHANGES_AVAILABLE || !(MODE_CHANGE_REFS instanceof Set)) return; // nothing to do
@@ -2702,7 +2703,12 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const hasStateConstraint = !!parsed.state;
     const hasNferConstraint  = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
 
-    if (hasDistConstraint || hasStateConstraint || hasNferConstraint) {
+
+    const hasGlobalConstraint = hasDistConstraint || hasStateConstraint || hasNferConstraint
+        || (parsed.mine !== null) || (parsed.active !== null) || !!parsed.text || !!parsed.mode
+        || (parsed.min !== null) || (parsed.max !== null) || (parsed.isNew === true);
+
+    if (hasGlobalConstraint) {
         if (hasDistConstraint) {
             if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
             const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
@@ -2825,7 +2831,10 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 }
 
 function fitToMatchesIfGlobalScope(parsed, matched) {
-    const usedGlobalScope = (!!parsed.state) || (parsed.minDist !== null) || (parsed.maxDist !== null) || (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
+    const usedGlobalScope = (!!parsed.state) || (parsed.minDist !== null) || (parsed.maxDist !== null)
+        || (parsed.mine !== null) || (parsed.active !== null) || !!parsed.text || !!parsed.mode
+        || (parsed.min !== null) || (parsed.max !== null) || (parsed.isNew === true)
+        || (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
 
     if (!usedGlobalScope || !matched || !matched.length) return;
 
