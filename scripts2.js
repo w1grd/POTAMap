@@ -180,22 +180,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 
 
-/* ==== POTAmap Filters & Thresholds (Ada 2025-08-12) ==== */
+/* ==== POTAmap Filters (Ada 2025-08-12) ==== */
 // Configurable filters (OR semantics). Defaults: All parks on.
 window.potaFilters = JSON.parse(localStorage.getItem('potaFilters') || '{}');
 if (!('allParks' in potaFilters)) {
     potaFilters = { myActivations: true, currentlyActivating: true, newParks: true, allParks: true };
 }
 
-// Configurable color thresholds. 'greenMax' means 1..greenMax is green; >greenMax is red; 0 is blue.
-window.potaThresholds = JSON.parse(localStorage.getItem('potaThresholds') || '{}');
-if (!('greenMax' in potaThresholds)) {
-    potaThresholds = { greenMax: 5 }; // default per Perry's example
-}
-
 // Helpers
 function savePotaFilters() { localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); }
-function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
 
 // Mode filters for active spots
 window.modeFilters = JSON.parse(localStorage.getItem('modeFilters') || '{}');
@@ -247,16 +240,14 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
         const createdDate = new Date(created);
         const ageInDays = isFinite(createdDate) ? ((now - createdDate) / (1000 * 60 * 60 * 24)) : Infinity;
         if (ageInDays <= 30) return "#800080"; // New park: purple
-        if (isUserActivated) return "#ffa500"; // User activated: orange
-        if (typeof activations === 'number' && activations > (potaThresholds.greenMax ?? 5)) return "#ff6666"; // red
-        if (typeof activations === 'number' && activations > 0) return "#90ee90"; // green
-        return "#0000ff"; // blue
+        if (isUserActivated) return "#00ff00"; // User activated: green
+        return "#ff6666"; // default red
     } catch(e) {
-        return "#0000ff";
+        return "#ff6666";
     }
 }
 
-// Build Filters UI inside the hamburger menu (thresholdChip fully removed)
+// Build Filters UI inside the hamburger menu
 function buildFiltersPanel() {
     const menu = document.getElementById('menu');
     if (!menu) return;
@@ -379,7 +370,8 @@ async function redrawMarkersWithFilters(){
             return bounds.contains(latlng);
         }) : [];
 
-        await processInChunks(parksInBounds, 400, (park) => upsertParkMarker(park, { userActivatedReferences, spotByRef }));
+        const processed = await runMarkerWorker(parksInBounds, userActivatedReferences, spotByRef, potaFilters, modeFilters);
+        await processInChunks(processed, 400, (entry) => upsertParkMarker(entry.park, { precomputed: entry.state }));
 
         const toRemove = [];
         for (const [ref, m] of window.POTA_CACHE.parkMarkers.entries()) {
@@ -1332,19 +1324,19 @@ function enhanceHamburgerMenuForMobile() {
         #activationSlider::-webkit-slider-runnable-track {
             height: 8px;
             border-radius: 4px;
-            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+            background: #ff6666;
         }
 
         #activationSlider::-moz-range-track {
             height: 8px;
             border-radius: 4px;
-            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+            background: #ff6666;
         }
 
         #activationSlider::-ms-track {
             height: 8px;
             border-radius: 4px;
-            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+            background: #ff6666;
             border: none;
             color: transparent;
         }
@@ -3274,7 +3266,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             })
             : L.circleMarker([latitude, longitude], {
                 radius: 6,
-                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
+                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
                 color: "#000",
                 weight: 1,
                 opacity: 1,
@@ -4160,25 +4152,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 /**
- * Determines the marker color based on activations and user activation status.
- * @param {number} activations - The number of activations for the park.
- * @param {boolean} userActivated - Whether the user has activated the park.
- * @returns {string} The color code for the marker.
- */
-function getMarkerColor(activations, userActivated, created) {
-    const now = new Date();
-    const createdDate = new Date(created);
-    const ageInDays = (now - createdDate) / (1000 * 60 * 60 * 24);
-
-    if (ageInDays <= 30) return "#800080"; // Purple for new parks
-    if (userActivated) return "#ffa500";   // Orange for user-activated parks
-    if (activations > 10) return "#ff6666"; // Light red for highly active parks
-    if (activations > 0) return "#90ee90";  // Light green for active parks
-    return "#0000ff";                      // Vivid blue for inactive parks
-}
-
-
-/**
  * Optimizes Leaflet controls and popups for better mobile experience.
  */
 function optimizeLeafletControlsAndPopups() {
@@ -4457,6 +4430,43 @@ function processInChunks(items, chunkSize, fn) {
 }
 // === end helper ===
 
+// === helper: offload marker preparation to a Web Worker ===
+function runMarkerWorker(parks, userActivatedReferences, spotByRef, potaFilters, modeFilters) {
+    return new Promise((resolve) => {
+        if (!window.Worker) {
+            const results = [];
+            for (const park of parks) {
+                const reference = park.reference;
+                const currentActivation = spotByRef && spotByRef[reference] ? spotByRef[reference] : null;
+                const isUserActivated = Array.isArray(userActivatedReferences) && userActivatedReferences.includes(reference);
+                const createdTime = park.created ? new Date(park.created).getTime() : 0;
+                const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
+                const isActive = !!currentActivation;
+                const mode = currentActivation && currentActivation.mode ? currentActivation.mode.toUpperCase() : '';
+                if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) continue;
+                if (!shouldDisplayByMode(isActive, isNew, mode)) continue;
+                const state = computeMarkerStyleAndState(park, userActivatedReferences, spotByRef);
+                results.push({ park, state });
+            }
+            resolve(results);
+            return;
+        }
+
+        const worker = new Worker('markerWorker.js');
+        worker.onmessage = (e) => {
+            resolve(e.data || []);
+            worker.terminate();
+        };
+        worker.onerror = (err) => {
+            console.error('markerWorker error', err);
+            resolve([]);
+            worker.terminate();
+        };
+        worker.postMessage({ parks, userActivatedReferences, spotByRef, potaFilters, modeFilters });
+    });
+}
+// === end helper ===
+
 // === helper: compute marker styling/state ===
 function computeMarkerStyleAndState(park, userActivatedReferences, spotByRef) {
     const reference = park.reference;
@@ -4465,14 +4475,15 @@ function computeMarkerStyleAndState(park, userActivatedReferences, spotByRef) {
     const parkActivationCount = park.activations || 0;
 
     // Try to re-use a project-defined color function if present; else simple heuristic
-    let fillColor = "#1e90ff";
+    let fillColor = "#ff6666";
     if (typeof getMarkerColorConfigured === 'function') {
         fillColor = getMarkerColorConfigured(parkActivationCount, isUserActivated, park.created);
     } else {
-        if (isUserActivated) fillColor = "#ff7f00";
-        else if (!parkActivationCount) fillColor = "#0b3d91";
-        else if (parkActivationCount > 10) fillColor = "#c00";
-        else fillColor = "#228b22";
+        const createdTime = park.created ? new Date(park.created).getTime() : 0;
+        const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
+        if (isNew) fillColor = "#800080";
+        else if (isUserActivated) fillColor = "#00ff00";
+        else fillColor = "#ff6666";
     }
 
     return {
@@ -4493,12 +4504,12 @@ function computeMarkerStyleAndState(park, userActivatedReferences, spotByRef) {
 
 // === helper: upsert marker ===
 function upsertParkMarker(park, ctx){
-    const { userActivatedReferences, spotByRef } = ctx || {};
+    const { userActivatedReferences, spotByRef, precomputed } = ctx || {};
     const reference = park.reference;
     window.POTA_CACHE.parkInView.add(reference);
 
     const { markerClassName, useDivIcon, currentActivation, tooltipText, circleOpts } =
-        computeMarkerStyleAndState(park, userActivatedReferences, spotByRef);
+        precomputed || computeMarkerStyleAndState(park, userActivatedReferences, spotByRef);
 
     let marker = window.POTA_CACHE.parkMarkers.get(reference);
 
