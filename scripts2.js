@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//22
+//15
 //
 // Initialize global variables
 let activations = [];
@@ -310,7 +310,7 @@ if (!('greenMax' in potaThresholds)) {
 }
 
 // Helpers
-function savePotaFilters() { localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); }
+function savePotaFilters(){ localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); try{ refreshMarkers({full:true}); }catch(e){} }
 function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
 
 // Mode filters for active spots
@@ -318,7 +318,7 @@ window.modeFilters = JSON.parse(localStorage.getItem('modeFilters') || '{}');
 if (!('new' in modeFilters)) {
     modeFilters = { new: true, data: true, cw: true, ssb: true, unk: true };
 }
-function saveModeFilters() { localStorage.setItem('modeFilters', JSON.stringify(modeFilters)); }
+function saveModeFilters(){ localStorage.setItem('modeFilters', JSON.stringify(modeFilters)); try{ refreshMarkers({full:true}); }catch(e){} }
 
 
 function shouldDisplayParkFlags(flags){
@@ -485,7 +485,7 @@ async function redrawMarkersWithFilters(){
     try{
         if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
         if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
 
         const bounds = getCurrentMapBounds();
         const userActivatedReferences = (activations || []).map(a => a.reference);
@@ -573,25 +573,42 @@ async function redrawMarkersWithFilters(){
 }
 
 
-function refreshMarkers(){
+function refreshMarkers(options = {}) {
     if (!map) return;
-    // Prefer incremental refresh to avoid white-screen between clears and re-adds
+    const fullRedraw = !!options.full;
+
+    // Prefer incremental updates unless a full redraw is requested
     if (typeof updateVisibleModeCounts === 'function') {
         updateVisibleModeCounts();
     }
+
+    if (fullRedraw) {
+        // Full redraw path (clears layers)
+        if (typeof redrawMarkersWithFilters === 'function') {
+            try { window.__nonDestructiveRedraw = false; } catch (e) {}
+            redrawMarkersWithFilters();
+        }
+        return;
+    }
+
+    // Non-destructive redraw to avoid white-screen
     if (window.requestAnimationFrame) {
         window.requestAnimationFrame(() => {
             if (typeof redrawMarkersWithFilters === 'function') {
-                // Use an internal flag to avoid clearing everything if not necessary
-                try { window.__nonDestructiveRedraw = true; } catch(e){}
+                try { window.__nonDestructiveRedraw = true; } catch (e) {}
                 redrawMarkersWithFilters();
-                try { window.__nonDestructiveRedraw = false; } catch(e){}
+                try { window.__nonDestructiveRedraw = false; } catch (e) {}
             }
         });
     } else {
-        setTimeout(() => redrawMarkersWithFilters && redrawMarkersWithFilters(), 0);
+        setTimeout(() => {
+            if (typeof redrawMarkersWithFilters === 'function') {
+                redrawMarkersWithFilters();
+            }
+        }, 0);
     }
 }
+
 /* ==== end Filters & Thresholds block ==== */
 
 /* ==== end Filters & Thresholds block ==== */
@@ -693,6 +710,7 @@ function initializeMenu() {
     // });
     //Listener for Activations button
     document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
+    try{ refreshMarkers({full:true}); }catch(e){}
 
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
@@ -1878,7 +1896,7 @@ async function toggleActivations() {
 
     // Clear activationsLayer before updating map
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -2779,7 +2797,7 @@ function filterParksByActivations(maxActivations) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
         console.log("Cleared existing markers."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -2888,7 +2906,7 @@ async function updateActivationsInView() {
     });
 
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -2936,7 +2954,7 @@ function updateMapWithFilteredParks(filteredParks) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
         console.log("Cleared existing markers for filtered search."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -4259,7 +4277,7 @@ async function fetchAndDisplaySpots() {
         if (!map.activationsLayer) {
             map.activationsLayer = L.layerGroup().addTo(map);
         } else {
-            if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+            if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
         }
 
         const activatedReferences = activations.map(act => act.reference);
@@ -4421,7 +4439,7 @@ optimizeLeafletControlsAndPopups();
 function refreshMapActivations() {
     // Clear existing markers or layers if necessary
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) { if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); } }
         console.log("Cleared existing activation markers."); // Debugging
     }
 
