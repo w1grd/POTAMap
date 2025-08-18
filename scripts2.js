@@ -4,6 +4,7 @@ const log = (...args) => { if (DEBUG) console.log(...args); };
 //20
 //
 // Initialize global variables
+//adding comment...
 let activations = [];
 let map;
 // === POTAmap performance: marker cache ===
