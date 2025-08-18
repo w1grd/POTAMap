@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//15
+//23
 //
 // Initialize global variables
 let activations = [];
@@ -11,7 +11,7 @@ let userLng = null;
 let currentSearchResults = [];
 let previousMapState = {
     bounds: null,
-    displayedParks: [],
+    displayedParks: []
 };
 
 // --- Lightweight Toast UI -------------------------------------------------
@@ -156,7 +156,7 @@ const cacheDuration = (24 * 60 * 60 * 1000) * 2; // 8 days in milliseconds
 // See if we are in desktop mode
 const urlParams = new URLSearchParams(window.location.search);
 const isDesktopMode = urlParams.get('desktop') === '1';
-console.log('Reading desktop param: ' + isDesktopMode)
+console.log('Reading desktop param: ' + isDesktopMode);
 if (isDesktopMode) {
     document.body.classList.add('desktop-mode');
 }
@@ -164,14 +164,205 @@ if (isDesktopMode) {
 /**
  * Ensures that the DOM is fully loaded before executing scripts.
  */
+
+// ==== Mode changes gating (performance) ====
+let MODE_CHANGES_AVAILABLE = false;
+let MODE_CHANGE_REFS = new Set();
+
+async function detectModeChanges() {
+    const candidates = [
+        '/potamap/data/mode-changes.json',
+        '/potamap/data/mode_changes.json',
+    ];
+    for (const url of candidates) {
+        try {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) continue;
+            const json = await res.json().catch(() => null);
+            if (!json) continue;
+            const refs = Array.isArray(json)
+                ? json
+                : Array.isArray(json.references)
+                    ? json.references
+                    : Array.isArray(json.refs)
+                        ? json.refs
+                        : [];
+            if (refs.length > 0) {
+                MODE_CHANGES_AVAILABLE = true;
+                MODE_CHANGE_REFS = new Set(refs);
+                console.log(`[modes] mode-changes found: ${refs.length} references`);
+                return true;
+            }
+            console.log('[modes] mode-changes present but empty; skipping computations.');
+            MODE_CHANGES_AVAILABLE = false;
+            MODE_CHANGE_REFS = new Set();
+            return false;
+        } catch (_) {
+            // try next candidate
+        }
+    }
+    MODE_CHANGES_AVAILABLE = false;
+    MODE_CHANGE_REFS = new Set();
+    console.log('[modes] no mode-changes.json; skipping per-mode computations.');
+    return false;
+}
+
+// === Worker helper wrappers (global) ===
+function initQsoWorkerIfNeeded(){
+    if (typeof window.initQsoWorkerIfNeededInner === 'function') {
+        return window.initQsoWorkerIfNeededInner();
+    }
+}
+
+
+function updateVisibleModeCounts() {
+    if (!map || !parks || parks.length === 0) return;
+    if (!MODE_CHANGES_AVAILABLE || !(MODE_CHANGE_REFS instanceof Set)) return; // nothing to do
+    const b = map.getBounds();
+    const refs = [];
+    for (const park of parks) {
+        const { latitude, longitude, reference } = park || {};
+        if (latitude == null || longitude == null || !reference) continue;
+        if (!MODE_CHANGE_REFS.has(reference)) continue; // Only compute where changes exist
+        if (b.contains([latitude, longitude])) refs.push(reference);
+    }
+    enqueueVisibleReferences(refs);
+}
+function modeCountsForParkRef(reference){
+    if (typeof window.modeCountsForParkRefInner === 'function') {
+        return window.modeCountsForParkRefInner(reference);
+    }
+    return { cw:0, data:0, ssb:0, unk:0 };
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
-    initializeMenu(); // Set up the menu
-    setupPOTAMap(); // Set up the map
-    await initializeActivationsDisplay(); // Check and display activations if available
+    try {
+        initializeMenu();
+
+        // === Off-main-thread per-mode QSO counting (performance patch) ===
+        let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
+        let qsoWorker = null;
+        let workerReady = false;
+        let pendingVisibleBatch = [];
+        let visibleComputeScheduled = false;
+
+        function initQsoWorkerIfNeeded() {
+            if (!MODE_CHANGES_AVAILABLE) return;
+            if (qsoWorker) return;
+            try {
+                qsoWorker = new Worker('qsoWorker.js');
+                qsoWorker.onmessage = (e) => {
+                    const { type, payload } = e.data || {};
+                    if (type === 'INIT_OK') {
+                        workerReady = true;
+                        scheduleVisibleCompute();
+                    } else if (type === 'COMPUTE_DONE') {
+                        const res = (payload && payload.result) || {};
+                        for (const ref in res) {
+                            modeCountCache.set(ref, res[ref]);
+                        }
+                        if (typeof updateMarkersForReferences === 'function') {
+                            updateMarkersForReferences(Object.keys(res));
+                        } else if (typeof refreshMarkers === 'function') {
+                            if (window.requestIdleCallback) {
+                                requestIdleCallback(() => refreshMarkers(), { timeout: 200 });
+                            } else {
+                                setTimeout(() => refreshMarkers(), 50);
+                            }
+                        }
+                    }
+                };
+                // Defer INIT until after initial map render so paint happens ASAP
+                setTimeout(() => {
+                    try {
+                        qsoWorker.postMessage({ type: 'INIT', payload: { parks, activations } });
+                    } catch (_) {}
+                }, 0);
+            } catch (e) {
+                console.warn('QSO worker failed to initialize, falling back to main thread.', e);
+            }
+        }
+
+        function getModeCounts(ref) {
+            return modeCountCache.get(ref) || { cw: 0, data: 0, ssb: 0, unk: 0 };
+        }
+
+        // Batch compute for visible parks only (and only missing entries)
+        function enqueueVisibleReferences(refs) {
+            for (const r of refs) {
+                if (!modeCountCache.has(r)) pendingVisibleBatch.push(r);
+            }
+            scheduleVisibleCompute();
+        }
+
+        function scheduleVisibleCompute() {
+            if (visibleComputeScheduled) return;
+            visibleComputeScheduled = true;
+            const run = () => {
+                visibleComputeScheduled = false;
+                if (!qsoWorker || !workerReady || pendingVisibleBatch.length === 0) return;
+                const batch = pendingVisibleBatch.splice(0, 250); // small chunks
+                try {
+                    qsoWorker.postMessage({ type: 'COMPUTE', payload: { references: batch } });
+                } catch (_) {}
+                if (pendingVisibleBatch.length > 0) {
+                    if (window.requestIdleCallback) {
+                        requestIdleCallback(scheduleVisibleCompute, { timeout: 200 });
+                    } else {
+                        setTimeout(scheduleVisibleCompute, 30);
+                    }
+                }
+            };
+            if (window.requestIdleCallback) {
+                requestIdleCallback(run, { timeout: 200 });
+            } else {
+                setTimeout(run, 30);
+            }
+        }
+
+        // Hook visibility: compute only for parks in current bounds AND with mode changes
+        function updateVisibleModeCounts() {
+            if (!map || !parks || parks.length === 0) return;
+            if (!MODE_CHANGES_AVAILABLE || !(MODE_CHANGE_REFS instanceof Set)) return;
+            const b = map.getBounds();
+            const refs = [];
+            for (const park of parks) {
+                const { latitude, longitude, reference } = park || {};
+                if (latitude == null || longitude == null || !reference) continue;
+                if (!MODE_CHANGE_REFS.has(reference)) continue;
+                if (b.contains([latitude, longitude])) refs.push(reference);
+            }
+            enqueueVisibleReferences(refs);
+        }
+
+        // Helper used by marker rendering
+        function modeCountsForParkRef(reference) {
+            return getModeCounts(reference);
+        }
+
+        // expose inner worker helpers to global wrappers
+        window.initQsoWorkerIfNeededInner = initQsoWorkerIfNeeded;
+        window.updateVisibleModeCountsInner = updateVisibleModeCounts;
+        window.modeCountsForParkRefInner = modeCountsForParkRef;
+
+        // Initialize the map, then kick off the mode check and worker if needed
+        await setupPOTAMap();
+        if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
+
+        setTimeout(async () => {
+            const haveChanges = await detectModeChanges();
+            if (haveChanges) {
+                try { await checkAndUpdateModesAtStartup(); } catch (e) { console.warn(e); }
+                initQsoWorkerIfNeeded();
+                updateVisibleModeCounts();
+            }
+        }, 250);
+
+        await initializeActivationsDisplay();
+    } catch (e) {
+        console.error(e);
+    }
 });
-
-
-
 /* ==== POTAmap Filters & Thresholds (Ada 2025-08-12) ==== */
 // Configurable filters (OR semantics). Defaults: All parks on.
 window.potaFilters = JSON.parse(localStorage.getItem('potaFilters') || '{}');
@@ -186,7 +377,7 @@ if (!('greenMax' in potaThresholds)) {
 }
 
 // Helpers
-function savePotaFilters() { localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); }
+function savePotaFilters(){ localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); try{ refreshMarkers({full:true}); }catch(e){} }
 function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
 
 // Mode filters for active spots
@@ -194,7 +385,7 @@ window.modeFilters = JSON.parse(localStorage.getItem('modeFilters') || '{}');
 if (!('new' in modeFilters)) {
     modeFilters = { new: true, data: true, cw: true, ssb: true, unk: true };
 }
-function saveModeFilters() { localStorage.setItem('modeFilters', JSON.stringify(modeFilters)); }
+function saveModeFilters(){ localStorage.setItem('modeFilters', JSON.stringify(modeFilters)); try{ refreshMarkers({full:true}); }catch(e){} }
 
 
 function shouldDisplayParkFlags(flags){
@@ -233,20 +424,27 @@ function shouldDisplayByMode(isActive, isNew, mode){
     if (!modeFilters[key]) return false;
     return true;
 }
+
 function getMarkerColorConfigured(activations, isUserActivated, created) {
     try {
-        const now = new Date();
         const createdDate = new Date(created);
-        const ageInDays = isFinite(createdDate) ? ((now - createdDate) / (1000 * 60 * 60 * 24)) : Infinity;
-        if (ageInDays <= 30) return "#800080"; // New park: purple
-        if (isUserActivated) return "#ffa500"; // User activated: orange
-        if (typeof activations === 'number' && activations > (potaThresholds.greenMax ?? 5)) return "#ff6666"; // red
-        if (typeof activations === 'number' && activations > 0) return "#90ee90"; // green
-        return "#0000ff"; // blue
-    } catch(e) {
-        return "#0000ff";
+        const ts = createdDate.getTime();
+        const ageInDays = Number.isFinite(ts) ? (Date.now() - ts) / 86400000 : Infinity;
+
+        // 1) New parks
+        if (ageInDays <= 30) return "#800080"; // purple
+
+        // 2) 'My' parks
+        if (isUserActivated) return "#90ee90"; // light green
+
+        // 3) Default
+        return "#ff6666"; // red
+    } catch (e) {
+        // Fail-safe
+        return "#ff6666";
     }
 }
+
 
 // Build Filters UI inside the hamburger menu (thresholdChip fully removed)
 function buildFiltersPanel() {
@@ -356,7 +554,7 @@ async function redrawMarkersWithFilters(){
     try{
         if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
         if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
 
         const bounds = getCurrentMapBounds();
         const userActivatedReferences = (activations || []).map(a => a.reference);
@@ -443,14 +641,44 @@ async function redrawMarkersWithFilters(){
     }
 }
 
-function refreshMarkers(){
+
+function refreshMarkers(options = {}) {
     if (!map) return;
-    redrawMarkersWithFilters();
+    const fullRedraw = !!options.full;
+
+    // Prefer incremental updates unless a full redraw is requested
+    if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
+        updateVisibleModeCounts();
+    }
+
+    if (fullRedraw) {
+        // Full redraw path (clears layers)
+        if (typeof redrawMarkersWithFilters === 'function') {
+            try { window.__nonDestructiveRedraw = false; } catch (e) {}
+            redrawMarkersWithFilters();
+        }
+        return;
+    }
+
+    // Non-destructive redraw to avoid white-screen
+    if (window.requestAnimationFrame) {
+        window.requestAnimationFrame(() => {
+            if (typeof redrawMarkersWithFilters === 'function') {
+                try { window.__nonDestructiveRedraw = true; } catch (e) {}
+                redrawMarkersWithFilters();
+                try { window.__nonDestructiveRedraw = false; } catch (e) {}
+            }
+        });
+    } else {
+        setTimeout(() => {
+            if (typeof redrawMarkersWithFilters === 'function') {
+                redrawMarkersWithFilters();
+            }
+        }, 0);
+    }
 }
-/* ==== end Filters & Thresholds block ==== */
 
 /* ==== end Filters & Thresholds block ==== */
-
 /**
  * Initializes the hamburger menu.
  */
@@ -548,6 +776,7 @@ function initializeMenu() {
     // });
     //Listener for Activations button
     document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
+    try{ refreshMarkers({full:true}); }catch(e){}
 
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
@@ -1376,19 +1605,19 @@ function enhanceHamburgerMenuForMobile() {
         #activationSlider::-webkit-slider-runnable-track {
             height: 8px;
             border-radius: 4px;
-            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+            background: #ff6666;
         }
 
         #activationSlider::-moz-range-track {
             height: 8px;
             border-radius: 4px;
-            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+            background: #ff6666;
         }
 
         #activationSlider::-ms-track {
             height: 8px;
             border-radius: 4px;
-            background: linear-gradient(to right, #90ee90, #ffa500, #ff6666);
+            background: #ff6666;
             border: none;
             color: transparent;
         }
@@ -1733,7 +1962,7 @@ async function toggleActivations() {
 
     // Clear activationsLayer before updating map
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -1903,7 +2132,7 @@ function centerMapOnGeolocation() {
             console.log(`Centering map on geolocation: ${userLat}, ${userLng}`);
 
             if (map) {
-                map.setView([userLat, userLng], 12, {
+                map.setView([userLat, userLng], map.getZoom(), {
                     animate: true,
                     duration: 1.5,
                 });
@@ -1939,7 +2168,7 @@ function fallbackToDefaultLocation() {
     if (!map) return;
     userLat = 39.8283;
     userLng = -98.5795;
-    map.setView([userLat, userLng], 5, {
+    map.setView([userLat, userLng], map.getZoom(), {
         animate: true,
         duration: 1.5,
     });
@@ -2474,7 +2703,12 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const hasStateConstraint = !!parsed.state;
     const hasNferConstraint  = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
 
-    if (hasDistConstraint || hasStateConstraint || hasNferConstraint) {
+
+    const hasGlobalConstraint = hasDistConstraint || hasStateConstraint || hasNferConstraint
+        || (parsed.mine !== null) || (parsed.active !== null) || !!parsed.text || !!parsed.mode
+        || (parsed.min !== null) || (parsed.max !== null) || (parsed.isNew === true);
+
+    if (hasGlobalConstraint) {
         if (hasDistConstraint) {
             if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
             const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
@@ -2597,7 +2831,10 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 }
 
 function fitToMatchesIfGlobalScope(parsed, matched) {
-    const usedGlobalScope = (!!parsed.state) || (parsed.minDist !== null) || (parsed.maxDist !== null) || (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
+    const usedGlobalScope = (!!parsed.state) || (parsed.minDist !== null) || (parsed.maxDist !== null)
+        || (parsed.mine !== null) || (parsed.active !== null) || !!parsed.text || !!parsed.mode
+        || (parsed.min !== null) || (parsed.max !== null) || (parsed.isNew === true)
+        || (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
 
     if (!usedGlobalScope || !matched || !matched.length) return;
 
@@ -2634,7 +2871,7 @@ function filterParksByActivations(maxActivations) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         console.log("Cleared existing markers."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -2743,7 +2980,7 @@ async function updateActivationsInView() {
     });
 
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -2791,7 +3028,7 @@ function updateMapWithFilteredParks(filteredParks) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         console.log("Cleared existing markers for filtered search."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -3876,9 +4113,12 @@ async function setupPOTAMap() {
         // Fetch and cache parks data
         await fetchAndCacheParks(csvUrl, cacheDuration);
         // After parks finished loading/caching:
-        await checkAndUpdateModesAtStartup();
-
-        // Now reload from IndexedDB, which will include merged changes
+        setTimeout(async () => {
+            const haveChanges = await detectModeChanges();
+            if (haveChanges) { try { if (await detectModeChanges()) { await checkAndUpdateModesAtStartup(); } } catch(e){ console.warn(e); } }
+            initQsoWorkerIfNeeded();
+        }, 250);
+// Now reload from IndexedDB, which will include merged changes
         parks = await getAllParksFromIndexedDB();
         console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
         console.log("Parks Loaded from IndexedDB:", parks); // Debugging
@@ -4115,7 +4355,7 @@ async function fetchAndDisplaySpots() {
         if (!map.activationsLayer) {
             map.activationsLayer = L.layerGroup().addTo(map);
         } else {
-            map.activationsLayer.clearLayers();
+            if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         }
 
         const activatedReferences = activations.map(act => act.reference);
@@ -4211,7 +4451,7 @@ function getMarkerColor(activations, userActivated, created) {
     const ageInDays = (now - createdDate) / (1000 * 60 * 60 * 24);
 
     if (ageInDays <= 30) return "#800080"; // Purple for new parks
-    if (userActivated) return "#ffa500";   // Orange for user-activated parks
+    if (userActivated) return "#90ee90";   // Light green for user-activated parks
     if (activations > 10) return "#ff6666"; // Light red for highly active parks
     if (activations > 0) return "#90ee90";  // Light green for active parks
     return "#0000ff";                      // Vivid blue for inactive parks
@@ -4277,7 +4517,7 @@ optimizeLeafletControlsAndPopups();
 function refreshMapActivations() {
     // Clear existing markers or layers if necessary
     if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
+        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         console.log("Cleared existing activation markers."); // Debugging
     }
 
@@ -4416,7 +4656,7 @@ function initializeFilterChips(){
         ['chipMyActs','myActivations'],
         ['chipOnAir','currentlyActivating'],
         ['chipNewParks','newParks'],
-        ['chipAllParks','allParks'],
+        ['chipAllParks','allParks']
     ];
 
     function setChip(btn, on){ btn.classList.toggle('active', !!on); btn.setAttribute('aria-pressed', !!on); }
