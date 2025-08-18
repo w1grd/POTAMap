@@ -165,7 +165,131 @@ if (isDesktopMode) {
  * Ensures that the DOM is fully loaded before executing scripts.
  */
 document.addEventListener('DOMContentLoaded', async () => {
-    initializeMenu(); // Set up the menu
+    initializeMenu();
+
+// === Off-main-thread per-mode QSO counting (performance patch) ===
+    let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
+    let qsoWorker = null;
+    let workerReady = false;
+    let pendingVisibleBatch = [];
+    let visibleComputeScheduled = false;
+
+    function initQsoWorkerIfNeeded() {
+        if (qsoWorker) return;
+        try {
+            qsoWorker = new Worker('qsoWorker.js');
+            qsoWorker.onmessage = (e) => {
+                const { type, payload } = e.data || {};
+                if (type === 'INIT_OK') {
+                    workerReady = true;
+                    // Once ready, schedule first visible compute (if any queued)
+                    scheduleVisibleCompute();
+                } else if (type === 'COMPUTE_DONE') {
+                    const res = payload?.result || {};
+                    for (const ref in res) {
+                        modeCountCache.set(ref, res[ref]);
+                    }
+                    // Trigger a light marker refresh for those refs without a full redraw
+                    if (typeof updateMarkersForReferences === 'function') {
+                        updateMarkersForReferences(Object.keys(res));
+                    } else {
+                        // Fallback: debounce a general refresh
+                        if (window.requestIdleCallback) {
+                            requestIdleCallback(() => refreshMarkers(), { timeout: 200 });
+                        } else {
+                            setTimeout(() => refreshMarkers(), 50);
+                        }
+                    }
+                }
+            };
+            // Defer INIT until after initial map render so paint happens ASAP
+            const doInit = () => {
+                try {
+                    qsoWorker.postMessage({ type: 'INIT', payload: { parks, activations } });
+                } catch (e) {}
+            };
+            // Schedule after current frame
+            setTimeout(doInit, 0);
+        } catch (e) {
+            console.warn('QSO worker failed to initialize, falling back to main thread.', e);
+        }
+    }
+
+    function getModeCounts(ref) {
+        return modeCountCache.get(ref) || { cw: 0, data: 0, ssb: 0, unk: 0 };
+    }
+
+// Batch compute for visible parks only (and only missing entries)
+    function enqueueVisibleReferences(refs) {
+        for (const r of refs) {
+            if (!modeCountCache.has(r)) pendingVisibleBatch.push(r);
+        }
+        scheduleVisibleCompute();
+    }
+
+    function scheduleVisibleCompute() {
+        if (visibleComputeScheduled) return;
+        visibleComputeScheduled = true;
+        const run = () => {
+            visibleComputeScheduled = false;
+            if (!qsoWorker || !workerReady || pendingVisibleBatch.length === 0) return;
+            const batch = pendingVisibleBatch.splice(0, 250); // small chunks
+            try {
+                qsoWorker.postMessage({ type: 'COMPUTE', payload: { references: batch } });
+            } catch (e) {}
+            // If more remain, schedule the next batch cooperatively
+            if (pendingVisibleBatch.length > 0) {
+                if (window.requestIdleCallback) {
+                    requestIdleCallback(scheduleVisibleCompute, { timeout: 200 });
+                } else {
+                    setTimeout(scheduleVisibleCompute, 30);
+                }
+            }
+        };
+        // Cooperative scheduling so rendering stays snappy
+        if (window.requestIdleCallback) {
+            requestIdleCallback(run, { timeout: 200 });
+        } else {
+            setTimeout(run, 30);
+        }
+    }
+
+// Hook visibility: compute only for parks in current bounds
+    function updateVisibleModeCounts() {
+        if (!map || !parks || parks.length === 0) return;
+        const b = map.getBounds();
+        const refs = [];
+        for (const park of parks) {
+            const { latitude, longitude, reference } = park || {};
+            if (latitude == null || longitude == null || !reference) continue;
+            if (b.contains([latitude, longitude])) refs.push(reference);
+        }
+        enqueueVisibleReferences(refs);
+    }
+
+// Augment marker creation to use cached counts without blocking
+    function modeCountsForParkRef(reference) {
+        return getModeCounts(reference);
+    }
+
+// Set up worker after map is initialized and data loaded
+    document.addEventListener('DOMContentLoaded', () => {
+        // Kick map render first; worker init happens after first paint in initQsoWorkerIfNeeded()
+        setTimeout(() => initQsoWorkerIfNeeded(), 0);
+    });
+
+// Recompute visible batches on navigation
+    function attachVisibleListenersOnce() {
+        if (!map || map._modeCountListenersAttached) return;
+        map._modeCountListenersAttached = true;
+        map.on('moveend zoomend', () => {
+            updateVisibleModeCounts();
+        });
+        // Compute for initial viewport shortly after first paint
+        setTimeout(() => updateVisibleModeCounts(), 100);
+    }
+
+// Set up the menu
     setupPOTAMap(); // Set up the map
     await initializeActivationsDisplay(); // Check and display activations if available
 });
