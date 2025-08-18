@@ -1,7 +1,7 @@
 const DEBUG = false;
 const log = (...args) => { if (DEBUG) console.log(...args); };
 //POTAmap (c) POTA News & Reviews https://pota.review
-//15
+//20
 //
 // Initialize global variables
 let activations = [];
