@@ -3230,112 +3230,110 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
     layerGroup.clearLayers(); // Clear existing markers before adding new ones
 
-    parks.forEach((park) => {
-        const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
-        const isUserActivated = userActivatedReferences.includes(reference);
-        let createdTime = null;
-        if (created) {
-            createdTime = typeof created === 'number'
-                ? created
-                : new Date(created).getTime();
-        }
-        const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
-//        const isNew = (Date.now() - new Date(created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
-        const currentActivation = spots?.find(spot => spot.reference === reference);
-        const isActive = !!currentActivation;
-        const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
+    const BATCH_SIZE = 200;
+    let index = 0;
 
-        // Apply Filters (OR semantics)
-        if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
-        if (!shouldDisplayByMode(isActive, isNew, mode)) return;
-
-        // Debugging
-        // if (isNew) {
-        //     const delta = Date.now() - new Date(created).getTime();
-        //     console.log(`Park ${reference} created: ${created}, delta: ${delta}, isNew: true`);
-        // }
-
-        // Determine marker class for animated divIcon
-        const markerClasses = [];
-        if (isNew) markerClasses.push('pulse-marker');
-        if (isActive) {
-            markerClasses.push('active-pulse-marker');
-            if (mode === 'CW') markerClasses.push('mode-cw');
-            else if (mode === 'SSB') markerClasses.push('mode-ssb');
-            else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
-        }
-        const markerClassName = markerClasses.join(' ');
-
-        const marker = markerClasses.length > 0
-            ? L.marker([latitude, longitude], {
-                icon: L.divIcon({
-                    className: markerClassName,
-                    iconSize: [20, 20],
-                })
-            })
-            : L.circleMarker([latitude, longitude], {
-                radius: 6,
-                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
-                color: "#000",
-                weight: 1,
-                opacity: 1,
-                fillOpacity: 0.9,
-            });
-
-        marker.park = park;
-        marker.currentActivation = currentActivation;
-        //Set up data block
-        //
-        const tooltipText = currentActivation
-            ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
-            : `${reference}: ${name} (${parkActivationCount} activations)`;
-
-        marker
-            .addTo(layerGroup)
-            .bindPopup("<b>Loading park info...</b>", {
-                // keep the popup fully in view
-                keepInView: true,
-                autoPan: true,
-                // add a little breathing room around the popup
-                autoPanPadding: [20, 20],
-                // cap its width on small screens
-                maxWidth: 280
-            })
-
-            .bindTooltip(tooltipText, {
-                direction: "top",
-                opacity: 0.9,
-                sticky: false,
-                className: "custom-tooltip",
-            })
-            .on('click', function () {
-                this.closeTooltip();
-            });
-
-        marker.on('popupopen', async function () {
-            try {
-                parkActivations = await fetchParkActivations(reference);
-                await saveParkActivationsToIndexedDB(reference, parkActivations);
-
-                let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
-
-                if (park.change) {
-                    popupContent += `
-                        <div style="font-size: 0.85em; font-style: italic; margin-top: 0.5em;">
-                            <b>Recent change:</b> ${park.change}
-                        </div>
-                    `;
-                }
-
-                this.setPopupContent(popupContent);
-            } catch (error) {
-                console.error(`Error fetching activations for park ${reference}:`, error);
-                this.setPopupContent("<b>Error loading park info.</b>");
+    function processBatch() {
+        const end = Math.min(index + BATCH_SIZE, parks.length);
+        for (let i = index; i < end; i++) {
+            const park = parks[i];
+            const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+            const isUserActivated = userActivatedReferences.includes(reference);
+            let createdTime = null;
+            if (created) {
+                createdTime = typeof created === 'number'
+                    ? created
+                    : new Date(created).getTime();
             }
-        });
-    });
+            const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
+            const currentActivation = spots?.find(spot => spot.reference === reference);
+            const isActive = !!currentActivation;
+            const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
-    console.log("All parks displayed with appropriate highlights.");
+            if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) continue;
+            if (!shouldDisplayByMode(isActive, isNew, mode)) continue;
+
+            const markerClasses = [];
+            if (isNew) markerClasses.push('pulse-marker');
+            if (isActive) {
+                markerClasses.push('active-pulse-marker');
+                if (mode === 'CW') markerClasses.push('mode-cw');
+                else if (mode === 'SSB') markerClasses.push('mode-ssb');
+                else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
+            }
+            const markerClassName = markerClasses.join(' ');
+
+            const marker = markerClasses.length > 0
+                ? L.marker([latitude, longitude], {
+                    icon: L.divIcon({
+                        className: markerClassName,
+                        iconSize: [20, 20],
+                    })
+                })
+                : L.circleMarker([latitude, longitude], {
+                    radius: 6,
+                    fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
+                    color: "#000",
+                    weight: 1,
+                    opacity: 1,
+                    fillOpacity: 0.9,
+                });
+
+            marker.park = park;
+            marker.currentActivation = currentActivation;
+            const tooltipText = currentActivation
+                ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
+                : `${reference}: ${name} (${parkActivationCount} activations)`;
+
+            marker
+                .addTo(layerGroup)
+                .bindPopup("<b>Loading park info...</b>", {
+                    keepInView: true,
+                    autoPan: true,
+                    autoPanPadding: [20, 20],
+                    maxWidth: 280
+                })
+                .bindTooltip(tooltipText, {
+                    direction: "top",
+                    opacity: 0.9,
+                    sticky: false,
+                    className: "custom-tooltip",
+                })
+                .on('click', function () {
+                    this.closeTooltip();
+                });
+
+            marker.on('popupopen', async function () {
+                try {
+                    parkActivations = await fetchParkActivations(reference);
+                    await saveParkActivationsToIndexedDB(reference, parkActivations);
+
+                    let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+
+                    if (park.change) {
+                        popupContent += `
+                            <div style="font-size: 0.85em; font-style: italic; margin-top: 0.5em;">
+                                <b>Recent change:</b> ${park.change}
+                            </div>
+                        `;
+                    }
+
+                    this.setPopupContent(popupContent);
+                } catch (error) {
+                    console.error(`Error fetching activations for park ${reference}:`, error);
+                    this.setPopupContent("<b>Error loading park info.</b>");
+                }
+            });
+        }
+        index = end;
+        if (index < parks.length) {
+            requestAnimationFrame(processBatch);
+        } else {
+            console.log("All parks displayed with appropriate highlights.");
+        }
+    }
+
+    processBatch();
 }
 // ---- helper: extract 2-letter US state/territory codes from locationDesc ----
 // ---- helpers ----
