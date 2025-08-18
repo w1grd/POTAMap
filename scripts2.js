@@ -2725,57 +2725,18 @@ function getActivatedParksInBounds(activations, parks, bounds) {
 /**
  * Updates the map to display activated parks within the current map view.
  */
-async function updateActivationsInView() {
+function updateActivationsInView() {
     if (!map) {
         console.error("Map instance is not initialized.");
         return;
     }
 
-    const bounds = getCurrentMapBounds();
-    const allParks = await getAllParksFromIndexedDB();
-
-    const parksInBounds = allParks.filter(park => {
-        if (park.latitude && park.longitude) {
-            const latLng = L.latLng(park.latitude, park.longitude);
-            return bounds.contains(latLng);
-        }
-        return false;
-    });
-
-    if (map.activationsLayer) {
-        map.activationsLayer.clearLayers();
-    } else {
-        map.activationsLayer = L.layerGroup().addTo(map);
-    }
-
-    const userActivatedReferences = activations.map(act => act.reference);
-    const onAirReferences = spots.map(spot => spot.reference);
-
-    let parksToDisplay = parksInBounds;
-
-    switch (activationToggleState) {
-        case 1: // Show just user's activations
-            parksToDisplay = parksInBounds.filter(park =>
-                userActivatedReferences.includes(park.reference)
-            );
-            break;
-
-        case 2: // Show all spots except user's activations
-            parksToDisplay = parksInBounds.filter(park =>
-                !userActivatedReferences.includes(park.reference)
-            );
-            break;
-
-        case 3: // Show only currently active parks (on air)
-            parksToDisplay = parksInBounds.filter(park =>
-                onAirReferences.includes(park.reference)
-            );
-            break;
-
-        // case 0 and default: Show all parks in bounds
-    }
-
-//    displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
+    // Parks are already loaded into the global `parks` array. Previously this
+    // function reloaded every park from IndexedDB and filtered them again on
+    // each refresh, which caused a noticeable pause on the UI. Instead, simply
+    // reapply the current activation toggle state using the in-memory data.
+    // `applyActivationToggleState` will handle clearing and redrawing markers
+    // for the parks currently in view.
     applyActivationToggleState();
 }
 
