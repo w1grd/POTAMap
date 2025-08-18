@@ -1,3 +1,6 @@
+//POTAmap (c) POTA News & Reviews https://pota.review
+//15
+//
 // Initialize global variables
 let activations = [];
 let map; // Leaflet map instance
@@ -10,10 +13,145 @@ let previousMapState = {
     bounds: null,
     displayedParks: [],
 };
+
+// --- Lightweight Toast UI -------------------------------------------------
+function ensureToastCss() {
+    if (document.getElementById('pql-toast-css')) return;
+    const css = `
+  .toast-container{position:fixed;right:14px;top:14px;z-index:10000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  .toast{min-width:260px;max-width:360px;background:rgba(24,24,24,.92);color:#fff;border-radius:10px;padding:10px 12px;box-shadow:0 8px 20px rgba(0,0,0,.25);display:flex;align-items:flex-start;gap:10px;font:14px/1.35 system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  .toast .icon{flex:0 0 auto;margin-top:1px}
+  .toast .msg{flex:1 1 auto;white-space:pre-wrap}
+  .toast.success{background:rgba(24,120,24,.92)}
+  .toast.error{background:rgba(168,28,28,.92)}
+  .toast .spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  `;
+    const style = document.createElement('style');
+    style.id = 'pql-toast-css';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
+function showToast(message, opts = {}) {
+    ensureToastCss();
+    const { sticky = true, kind = '', showSpinner = true } = opts;
+    let cont = document.querySelector('.toast-container');
+    if (!cont) {
+        cont = document.createElement('div');
+        cont.className = 'toast-container';
+        document.body.appendChild(cont);
+    }
+    const el = document.createElement('div');
+    el.className = 'toast' + (kind ? (' ' + kind) : '');
+    const icon = document.createElement('div');
+    icon.className = 'icon';
+    icon.innerHTML = showSpinner ? '<div class="spinner"></div>' : 'ℹ️';
+    const msg = document.createElement('div');
+    msg.className = 'msg';
+    msg.textContent = message;
+    el.appendChild(icon); el.appendChild(msg);
+    cont.appendChild(el);
+    el.style.pointerEvents = 'auto';
+
+    let closed = false;
+    const api = {
+        update(m, k) {
+            if (m != null) msg.textContent = m;
+            if (k != null) {
+                el.classList.remove('success','error');
+                if (k) el.classList.add(k);
+            }
+        },
+        close(delay = 0) {
+            if (closed) return;
+            closed = true;
+            setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 220); }, delay);
+        }
+    };
+    if (!sticky) api.close(3000);
+    return api;
+}
+
+
+// --- PQL display filter helpers (highlight-only; keep base parks visible) --------
+function ensurePqlPulseCss() {
+    if (document.getElementById('pql-pulse-css')) return;
+    const css = `
+.pql-pulse-icon { pointer-events: auto; }
+.pql-pulse {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 0, 0.95);
+  box-shadow: 0 0 0 2px #000 inset, 0 0 4px rgba(0,0,0,0.6);
+}
+.pql-pulse::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%) scale(1);
+  border-radius: 50%;
+  border: 2px solid rgba(255, 215, 0, 0.9);
+  animation: pqlPulse 1.8s ease-out infinite;
+}
+@keyframes pqlPulse {
+  0%   { transform: translate(-50%, -50%) scale(1.0); opacity: 0.9; }
+  70%  { transform: translate(-50%, -50%) scale(2.0); opacity: 0; }
+  100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+}`;
+    const style = document.createElement('style');
+    style.id = 'pql-pulse-css';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
+
+
+function _addPqlHighlightMarker(layer, park) {
+    if (!(park.latitude && park.longitude)) return;
+    ensurePqlPulseCss();
+    const icon = L.divIcon({
+        className: 'pql-pulse-icon',
+        html: '<div class="pql-pulse"></div>',
+        iconSize: [28,28],
+        iconAnchor: [14,14]
+    });
+    const m = L.marker([park.latitude, park.longitude], { icon, riseOnHover: true, keyboard: false }).addTo(layer);
+    const tip = `${park.name} (${park.reference})`;
+    m.bindTooltip(tip, { direction: 'top', className: 'custom-tooltip' });
+    m.on('click', async () => {
+        const html = await fetchFullPopupContent(park);
+        m.bindPopup(html).openPopup();
+    });
+}
+
+function applyPqlFilterDisplay(matchedParks) {
+    if (!map) return;
+    map._pql = map._pql || {};
+
+    // Build/clear highlight layer (keep base parks visible for context)
+    if (!map._pql.highlightLayer) map._pql.highlightLayer = L.layerGroup().addTo(map);
+    map._pql.highlightLayer.clearLayers();
+
+    for (const park of matchedParks) _addPqlHighlightMarker(map._pql.highlightLayer, park);
+}
+
+function clearPqlFilterDisplay() {
+    if (!map) return;
+    const P = map._pql || {};
+    if (P.highlightLayer) {
+        P.highlightLayer.clearLayers();
+        if (map.hasLayer(P.highlightLayer)) map.removeLayer(P.highlightLayer);
+    }
+    map._pql = {};
+}
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
 const appVersion = "20250412a"; // manually update as needed
-const cacheDuration = (24 * 60 * 60 * 1000) * 8; // 8 days in milliseconds
+const cacheDuration = (24 * 60 * 60 * 1000) * 2; // 8 days in milliseconds
 
 // See if we are in desktop mode
 const urlParams = new URLSearchParams(window.location.search);
@@ -110,7 +248,7 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
     }
 }
 
-// Build Filters UI inside the hamburger menu
+// Build Filters UI inside the hamburger menu (thresholdChip fully removed)
 function buildFiltersPanel() {
     const menu = document.getElementById('menu');
     if (!menu) return;
@@ -119,28 +257,21 @@ function buildFiltersPanel() {
     const oldToggle = document.getElementById('toggleActivations');
     if (oldToggle) oldToggle.style.display = 'none';
 
-    // Remove any previously inserted filters panel or legacy copies
+    // Remove any previously-inserted filters panel or legacy copies
     const oldPanels = menu.querySelectorAll('.filters-panel');
     oldPanels.forEach(p => p.parentElement && p.parentElement.remove());
 
+    // Build the minimal panel (no threshold UI)
     const li = document.createElement('li');
     li.id = 'filtersPanelContainer';
-
     li.innerHTML = `
     <div class="filters-panel">
       <div class="filters-title">Filters</div>
       <div class="filters-grid">
-        <button class="filter-chip" id="chipMyActs"   type="button" aria-pressed="false">Mine</button>
+        <button class="filter-chip" id="chipMyActs"   type="button" aria-pressed="false">My</button>
         <button class="filter-chip" id="chipOnAir"    type="button" aria-pressed="false">Active</button>
         <button class="filter-chip" id="chipNewParks" type="button" aria-pressed="false">New</button>
         <button class="filter-chip" id="chipAllParks" type="button" aria-pressed="false">All / Clr</button>
-
-        <!-- Threshold chip with inline number input -->
-        <button class="filter-chip" id="chipThreshold" type="button" aria-pressed="false">
-          <span id="thresholdLabel">Threshold</span>
-          <input type="number" id="greenInlineInput" min="1" max="999" step="1"
-                 class="threshold-inline-input" inputmode="numeric" aria-label="Max activations for green">
-        </button>
       </div>
     </div>
   `;
@@ -148,69 +279,9 @@ function buildFiltersPanel() {
     // Insert at top of menu
     menu.insertBefore(li, menu.firstChild || null);
 
-    // Ensure state object exists + defaults
-    if (typeof window.potaThresholds !== 'object' || window.potaThresholds === null) {
-        window.potaThresholds = {};
-    }
-    if (typeof potaThresholds.greenMax !== 'number') potaThresholds.greenMax = 5;
-    if (typeof potaThresholds.thresholdEnabled !== 'boolean') potaThresholds.thresholdEnabled = true;
-
-    // Elements
-    const thresholdChip = document.getElementById('chipThreshold');
-    const thresholdLabel = document.getElementById('thresholdLabel');
-    const greenInline = document.getElementById('greenInlineInput');
-
-    const getEnabled = () => !!potaThresholds.thresholdEnabled;
-
-    const updateChipState = () => {
-        const enabled = getEnabled();
-        thresholdChip.setAttribute('aria-pressed', String(enabled));
-        thresholdChip.classList.toggle('active', enabled);
-
-        if (enabled) {
-            // Show "Green ≤" and reveal input (CSS handles visibility when .active)
-            thresholdLabel.textContent = 'Max A:';
-            greenInline.value = potaThresholds.greenMax;
-        } else {
-            // Hide input (via CSS) and show "Threshold"
-            thresholdLabel.textContent = 'Max A';
-        }
-    };
-
-    // Initialize
-    updateChipState();
-
-    // Prevent chip toggle when interacting with the input
-    const stopToggle = (e) => e.stopPropagation();
-    ['mousedown', 'click', 'touchstart'].forEach(evt =>
-        greenInline.addEventListener(evt, stopToggle, { passive: true })
-    );
-
-    // Toggle chip (only when not clicking in the input)
-    thresholdChip.addEventListener('click', () => {
-        potaThresholds.thresholdEnabled = !getEnabled();
-        if (typeof savePotaThresholds === 'function') savePotaThresholds();
-        updateChipState();
-        if (typeof refreshMarkers === 'function') refreshMarkers();
-        if (getEnabled()) setTimeout(() => greenInline.focus(), 0);
-    });
-
-    // Apply numeric value (updates on change & blur)
-    const applyGreen = (val) => {
-        const v = Math.max(1, Math.min(999, parseInt(val, 10)));
-        if (!isNaN(v)) {
-            potaThresholds.greenMax = v;
-            if (typeof savePotaThresholds === 'function') savePotaThresholds();
-            if (typeof refreshMarkers === 'function') refreshMarkers();
-        }
-    };
-
-    greenInline.addEventListener('change', (e) => applyGreen(e.target.value));
-    greenInline.addEventListener('blur', (e) => applyGreen(e.target.value));
-    greenInline.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') e.currentTarget.blur();
-    });
+    // Nothing else to initialize here — threshold UI is retired.
 }
+
 
 function buildModeFilterPanel(){
     const menu = document.getElementById('menu');
@@ -1880,82 +1951,62 @@ function fallbackToDefaultLocation() {
  * @param {Event} event - The input event from the search box.
  */
 function handleSearchInput(event) {
-    const query = normalizeString(event.target.value);
-    console.log(`Search query received: "${query}"`); // Debugging
+    const raw = event.target.value || '';
+    const trimmed = raw.trim();
 
-    // Clear previous highlights
-    if (map.highlightLayer) {
-        map.highlightLayer.clearLayers();
-    } else {
-        map.highlightLayer = L.layerGroup().addTo(map);
-    }
-
-    // Save the map's state before searching (only once)
-    if (query && !previousMapState.bounds) {
-        previousMapState = {
-            bounds: map.getBounds(),
-            displayedParks: [...parks], // Save the currently displayed parks
-        };
-        console.log("Saved map state before search:", previousMapState); // Debugging
-    }
-
-    if (query === '') {
-        // If the search box is empty, reset the park display based on current filters
-        currentSearchResults = [];
-        resetParkDisplay();
+    // If this looks like a PQL query, do NOTHING while typing (no filtering, no zoom, no logs).
+    if (trimmed.startsWith('?')) {
         return;
     }
 
-    // Get current map bounds
-    const bounds = getCurrentMapBounds();
+    // ===== Legacy (non-PQL) incremental search =====
+    const query = normalizeString(raw);
+    console.log(`Search query received: "${query}"`);
 
-    // Filter parks within the visible map bounds based on the search query
+    if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
+    map.highlightLayer.clearLayers();
+
+    if (!query) {
+        currentSearchResults = [];
+        return;
+    }
+
+    const bounds = getCurrentMapBounds();
     const filteredParks = parks.filter(park => {
-        const isWithinBounds =
-            park.latitude && park.longitude && bounds.contains([park.latitude, park.longitude]);
-        return (
-            isWithinBounds &&
-            (normalizeString(park.name).includes(query) ||
-                normalizeString(park.reference).includes(query))
-        );
+        if (!(park.latitude && park.longitude)) return false;
+        const latLng = L.latLng(park.latitude, park.longitude);
+        if (!bounds.contains(latLng)) return false;
+
+        const nameMatch = normalizeString(park.name).includes(query);
+        const idMatch = normalizeString(park.reference).includes(query);
+        const locMatch = normalizeString(park?.city || park?.state || park?.country || '').includes(query);
+        return nameMatch || idMatch || locMatch;
     });
 
-    console.log(`Parks matching search within bounds: ${filteredParks.length}`); // Debugging
-
-    // Update the global search results
     currentSearchResults = filteredParks;
 
-    // Highlight matching parks dynamically
-    filteredParks.forEach((park, index) => {
-        const markerSize = index === 0 ? 20 : 15; // Larger size for the top result
-        const markerColor = index === 0 ? "#ff6600" : "#ffa500"; // Different color for emphasis
-
-        const highlightMarker = L.circleMarker([park.latitude, park.longitude], {
-            radius: markerSize,
-            fillColor: markerColor,
-            color: "#000",
+    filteredParks.forEach((park) => {
+        const marker = L.circleMarker([park.latitude, park.longitude], {
+            radius: 8,
+            fillColor: '#ffff00',
+            color: '#000',
             weight: 2,
             opacity: 1,
             fillOpacity: 0.8
         }).addTo(map.highlightLayer);
 
-        highlightMarker.bindTooltip(`${park.name} (${park.reference})`, {
-            direction: "top",
-            className: "custom-tooltip"
+        marker.bindTooltip(`${park.name} (${park.reference})`, {
+            direction: 'top',
+            className: 'custom-tooltip'
         });
 
-        // Optionally bind the full popup content
-        highlightMarker.on('click', async () => {
+        marker.on('click', async () => {
             const popupContent = await fetchFullPopupContent(park);
-            highlightMarker.bindPopup(popupContent).openPopup();
+            marker.bindPopup(popupContent).openPopup();
         });
     });
-
-    // If there is a single match, zoom to it
-    if (filteredParks.length === 1) {
-        zoomToPark(filteredParks[0]);
-    }
 }
+
 
 /**
  * Handles the 'Enter' key press in the search box to zoom to the searched park(s).
@@ -1975,6 +2026,32 @@ function handleSearchEnter(event) {
 
         // Search for parks matching the input query
         const query = normalizeString(searchBox.value.trim());
+        // If structured query, honor structured results
+        if (searchBox.value.trim().startsWith('?')) {
+            const parsed = parseStructuredQuery(searchBox.value);
+            const bounds = getCurrentMapBounds();
+            const spotByRef = {};
+            if (Array.isArray(spots)) {
+                for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
+            }
+            const userActivatedRefs = (activations || []).map(a => a.reference);
+            const now = Date.now();
+            const nferByRef = buildNferByRef(parks);
+            const ctx = { bounds, spotByRef, userActivatedRefs, now, userLat, userLng, nferByRef };
+
+            const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
+            currentSearchResults = matched;
+
+//Handles things like ?state:ca when CA is not on the map
+            fitToMatchesIfGlobalScope(parsed, matched);
+            applyPqlFilterDisplay(matched);
+
+            if (matched.length === 0) {
+                alert('No parks match that query in the current view.');
+            }
+            return;
+        }
+
         console.log(`Searching for parks matching: "${query}"`); // Debugging
 
         if (currentSearchResults.length > 0) {
@@ -2251,6 +2328,285 @@ function normalizeString(str) {
 
 
 /**
+ * Parses a structured query that begins with '?'.
+ * Keys (case-insensitive):
+ *  - MODE: CW | PHONE | SSB | DATA | FT8 | FT4
+ *  - MAX: <number>        (max total activations)
+ *  - ACTIVE: 1|0|true|false
+ *  - NEW: 1|0|true|false
+ *  - MINE: 1|0|true|false
+ *  - STATE: <US state/territory 2-letter code>
+ * Free text (quoted "like this" or bare) is matched against name/reference.
+ */
+function parseStructuredQuery(raw) {
+    const q = (raw || '').trim().replace(/^\?\s*/, '');
+    const result = {
+        isStructured: true,
+        text: '',
+        mode: null,
+        max: null,
+        min: null,
+        active: null,
+        isNew: null,
+        mine: null,
+        state: null,
+        minDist: null,
+        maxDist: null,
+        nferWithRefs: [],
+        hasNfer: null          // ← NEW: boolean or null (no filter)
+    };
+    if (!q) return result;
+
+    function parseDistanceValue(rawVal) {
+        const m = String(rawVal).trim().match(/^(\d+(?:\.\d+)?)(\s*(km|mi))?$/i);
+        if (!m) return { miles: NaN };
+        const val = parseFloat(m[1]);
+        const unit = (m[3] || 'mi').toLowerCase();
+        return { miles: unit === 'km' ? val * 0.621371 : val };
+    }
+
+    // tokenize
+    const tokens = [];
+    let i = 0;
+    while (i < q.length) {
+        const ch = q[i];
+        if (ch === '"') {
+            let j = i + 1; while (j < q.length && q[j] !== '"') j++;
+            tokens.push(`TEXT:${q.slice(i + 1, j)}`); i = (j < q.length) ? j + 1 : q.length;
+        } else if (/\s/.test(ch)) { i++; }
+        else { let j = i + 1; while (j < q.length && !/\s/.test(q[j])) j++; tokens.push(q.slice(i, j)); i = j; }
+    }
+
+    // parse
+    for (const t of tokens) {
+        const kv = t.includes(':') ? t.split(':') : null;
+        if (!kv) { result.text = (result.text ? result.text + ' ' : '') + t; continue; }
+
+        const key = kv[0].toUpperCase();
+        const valueRaw = kv.slice(1).join(':');
+        const value = (valueRaw || '').replace(/^TEXT:/, '');
+
+        if (key === 'MODE') {
+            const v = value.toUpperCase();
+            if (v === 'CW') result.mode = 'CW';
+            else if (v === 'SSB' || v === 'PHONE') result.mode = 'SSB';
+            else if (v === 'DATA' || v === 'FT8' || v === 'FT4') result.mode = 'DATA';
+
+        } else if (key === 'MAX') {
+            const n = parseInt(value, 10); if (!Number.isNaN(n)) result.max = n;
+
+        } else if (key === 'MIN') {
+            const n = parseInt(value, 10); if (!Number.isNaN(n)) result.min = n;
+
+        } else if (key === 'ACTIVE') {
+            const v = value.toLowerCase(); result.active = (v === '1' || v === 'true');
+
+        } else if (key === 'NEW') {
+            const v = value.toLowerCase(); result.isNew = (v === '1' || v === 'true');
+
+        } else if (key === 'MINE') {
+            const v = value.toLowerCase(); result.mine = (v === '1' || v === 'true');
+
+        } else if (key === 'STATE') {
+            const st = value.toUpperCase().match(/([A-Z]{2})$/); if (st && st[1]) result.state = st[1];
+
+        } else if (key === 'MINDIST') {
+            const { miles } = parseDistanceValue(value); if (!Number.isNaN(miles)) result.minDist = miles;
+
+        } else if (key === 'MAXDIST') {
+            const { miles } = parseDistanceValue(value); if (!Number.isNaN(miles)) result.maxDist = miles;
+
+        } else if (key === 'DIST') {
+            const m = value.replace(/\s+/g, '').toLowerCase().match(/^([^-]*?)(?:-([^-]*))?$/);
+            if (m) {
+                const left  = m[1], right = m[2] || '';
+                if (left)  { const { miles } = parseDistanceValue(left);  if (!Number.isNaN(miles)) result.minDist = miles; }
+                if (right) { const { miles } = parseDistanceValue(right); if (!Number.isNaN(miles)) result.maxDist = miles; }
+            }
+
+        } else if (key === 'NFERWITH') {
+            result.nferWithRefs = String(value).split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+
+        } else if (key === 'NFER' || key === 'NFERS') {   // ← NEW
+            const v = value.trim().toLowerCase();
+            if (v === '1' || v === 'true' || v === 'yes') result.hasNfer = true;
+            else if (v === '0' || v === 'false' || v === 'no') result.hasNfer = false;
+
+        } else if (key === 'TEXT') {
+            result.text = (result.text ? result.text + ' ' : '') + value;
+        }
+    }
+
+    result.text = normalizeString(result.text);
+    return result;
+}
+
+function buildNferByRef(parks) {
+    // Map<REF, Set<REF>>
+    const map = new Map();
+    for (const p of parks) {
+        // accept p.nfer or p.nferWith arrays
+        const arr = Array.isArray(p.nfer) ? p.nfer
+            : Array.isArray(p.nferWith) ? p.nferWith
+                : null;
+        if (!arr) continue;
+        const key = String(p.reference).toUpperCase();
+        const vals = arr.map(r => String(r).toUpperCase()).filter(Boolean);
+        map.set(key, new Set(vals));
+    }
+    return map;
+}
+
+
+/**
+ * Tests whether a given park matches the parsed structured query.
+ * Uses current map state (spots, activations) for ACTIVE/MODE/MINE filters.
+ */
+/**
+ * Tests whether a given park matches the parsed structured query.
+ * Uses current map state (spots, activations) for ACTIVE/MODE/MINE filters.
+ */
+function parkMatchesStructuredQuery(park, parsed, ctx) {
+    const { bounds } = ctx || {};
+
+    // 1) Proximity or in-view constraint
+    const hasDistConstraint  = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    const hasStateConstraint = !!parsed.state;
+    const hasNferConstraint  = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
+
+    if (hasDistConstraint || hasStateConstraint || hasNferConstraint) {
+        if (hasDistConstraint) {
+            if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
+            const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
+            if (parsed.minDist !== null && dMiles < parsed.minDist) return false;
+            if (parsed.maxDist !== null && dMiles > parsed.maxDist) return false;
+            park._distMiles = dMiles;
+        }
+    } else {
+        const latLng = L.latLng(park.latitude, park.longitude);
+        if (!bounds || !bounds.contains(latLng)) return false;
+    }
+
+    // 2) Free-text
+    if (parsed.text) {
+        const hay = [
+            park.name, park.reference, park.city,
+            Array.isArray(park.states) ? park.states.join(' ') : park.state,
+            park.country
+        ].filter(Boolean).join(' ');
+        if (!normalizeString(hay).includes(parsed.text)) return false;
+    }
+
+    // 3) STATE
+    if (parsed.state) {
+        const statesArr = Array.isArray(park.states) ? park.states.map(s => String(s).toUpperCase()) : [];
+        const single = String(park.state || park.primaryState || '').toUpperCase();
+        if (!(statesArr.includes(parsed.state) || single === parsed.state)) return false;
+    }
+
+    // 4) NFERWITH (union)
+    if (hasNferConstraint) {
+        const ref = String(park.reference || '').toUpperCase();
+        const map = ctx && ctx.nferByRef;
+        let ok = false;
+        for (const target of parsed.nferWithRefs) {
+            const T = String(target).toUpperCase();
+            if (map && map.get(T) && map.get(T).has(ref)) { ok = true; break; } // forward
+            if (Array.isArray(park.nfer) && park.nfer.some(r => String(r).toUpperCase() === T)) { ok = true; break; } // backward
+        }
+        if (!ok) return false;
+    }
+
+    // 5) NFERS / NFER boolean (does this park have *any* NFERs?)
+    if (parsed.hasNfer !== null) {
+        const ref = String(park.reference || '').toUpperCase();
+        const fwd = Array.isArray(park.nfer) ? park.nfer
+            : Array.isArray(park.nferWith) ? park.nferWith
+                : null;
+        let has = Array.isArray(fwd) && fwd.length > 0;
+
+        // Optional inbound detection via ctx.nferByRef (so parks that appear only as someone else's neighbor count as "has NFER")
+        if (!has && ctx && ctx.nferByRef) {
+            const inboundSet = ctx.nferByRef._inboundSet; // may exist if you use the optimized builder below
+            if (inboundSet) {
+                has = inboundSet.has(ref);
+            } else {
+                for (const set of ctx.nferByRef.values()) { if (set.has(ref)) { has = true; break; } }
+            }
+        }
+
+        if (parsed.hasNfer && !has) return false;
+        if (parsed.hasNfer === false && has) return false;
+    }
+
+    // 6) NEW
+    if (parsed.isNew === true) {
+        const created = park.created || 0;
+        const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+        if (!created || (Date.now() - created) > THIRTY_DAYS) return false;
+    }
+
+    // 7) MINE
+    // 7) MINE (robust to Set | Array | Object)
+    if (parsed.mine !== null && ctx && ctx.userActivatedRefs) {
+        const refRaw = String(park.reference || '');
+        const refU = refRaw.toUpperCase();
+        const s = ctx.userActivatedRefs;
+
+        let mine = false;
+        if (s instanceof Set) {
+            mine = s.has(refU) || s.has(refRaw);
+        } else if (Array.isArray(s)) {
+            // array of refs
+            mine = s.includes(refU) || s.includes(refRaw);
+        } else if (typeof s === 'object') {
+            // map/dict or anything else keyed by ref
+            mine = !!(s[refU] || s[refRaw] || (typeof s.has === 'function' && (s.has(refU) || s.has(refRaw))));
+        }
+
+        if (parsed.mine && !mine) return false;
+        if (!parsed.mine && mine) return false;
+    }
+
+
+    // 8) ACTIVE (live)
+    if (parsed.active !== null && ctx && ctx.spotByRef) {
+        const active = !!ctx.spotByRef[park.reference];
+        if (parsed.active && !active) return false;
+        if (!parsed.active && active) return false;
+    }
+
+    // 9) MODE / MIN / MAX — QSO bucket check
+    if (parsed.min !== null || parsed.max !== null || parsed.mode) {
+        const mode  = parsed.mode;
+        const lower = mode ? mode.toLowerCase() : null;
+        let qsoCount = park.qsos || 0;
+
+        if (mode) {
+            const byRef = ctx?.modeQsosByRef && ctx.modeQsosByRef[park.reference];
+            if (byRef && typeof byRef[lower] === 'number') qsoCount = byRef[lower];
+            else if (typeof park[`qsos_${lower}`] === 'number') qsoCount = park[`qsos_${lower}`];
+            else if (park.qsosByMode && typeof park.qsosByMode[mode] === 'number') qsoCount = park.qsosByMode[mode];
+        }
+
+        if (parsed.min !== null && qsoCount < parsed.min) return false;
+        if (parsed.max !== null && qsoCount > parsed.max) return false;
+    }
+
+    return true;
+}
+
+function fitToMatchesIfGlobalScope(parsed, matched) {
+    const usedGlobalScope = (!!parsed.state) || (parsed.minDist !== null) || (parsed.maxDist !== null) || (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
+
+    if (!usedGlobalScope || !matched || !matched.length) return;
+
+    const latlngs = matched.map(p => [p.latitude, p.longitude]);
+    const b = L.latLngBounds(latlngs);
+    map.fitBounds(b.pad(0.1)); // slight padding so edge markers are visible
+}
+
+/**
  * Filters and displays parks based on the maximum number of activations.
  * @param {number} maxActivations - The maximum number of activations to display.
  */
@@ -2454,32 +2810,49 @@ function updateMapWithFilteredParks(filteredParks) {
     applyActivationToggleState();
     console.log("Displayed filtered parks on the map."); // Debugging
 }
+// Unified Clear Search
 function clearSearchInput() {
+    // 1) Clear pulsing PQL overlay (if any)
+    try { clearPqlFilterDisplay(); } catch (e) {}
+
+    // 2) Clear legacy highlight layer (non-PQL incremental search)
+    if (map && map.highlightLayer) {
+        try { map.highlightLayer.clearLayers(); } catch (e) {}
+    }
+
+    // 3) Clear the search box
     const searchBox = document.getElementById('searchBox');
     if (searchBox) {
-        searchBox.value = ''; // Clear the input
-        console.log("Search input cleared."); // Debugging
+        searchBox.value = '';
+        // If you want to force downstream listeners to react, you can emit input:
+        // searchBox.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    // Clear highlights and reset the map view
-    if (map.highlightLayer) {
-        map.highlightLayer.clearLayers();
-    }
+    // 4) Drop any cached results from the last search
+    try { currentSearchResults = []; } catch (e) {}
 
-    if (previousMapState.bounds) {
-        // Restore the previous map bounds
-        map.fitBounds(previousMapState.bounds);
-
-        // Display the previously shown parks
-        const activatedReferences = activations.map((act) => act.reference);
-        //displayParksOnMap(map, previousMapState.displayedParks, activatedReferences, map.activationsLayer);
-        applyActivationToggleState();
-        console.log("Map view restored to prior state."); // Debugging
-
-        // Clear the saved state
-        previousMapState = { bounds: null, displayedParks: [] };
+    // 5) Restore the previous map view (if we saved it before the search)
+    if (previousMapState && previousMapState.bounds) {
+        try {
+            map.fitBounds(previousMapState.bounds);
+            // Restore base display according to current toggles/filters
+            if (typeof applyActivationToggleState === 'function') {
+                applyActivationToggleState();
+            }
+            // Clear saved state
+            previousMapState = { bounds: null, displayedParks: [] };
+            console.log('Map view restored to prior state.');
+        } catch (e) {
+            console.warn('Failed to restore previous map view:', e);
+        }
+    } else {
+        // If we didn’t save a state, at least ensure the base display is consistent
+        if (typeof applyActivationToggleState === 'function') {
+            applyActivationToggleState();
+        }
     }
 }
+
 
 /**
  * Adds event listeners to the search box and Clear button.
@@ -3003,6 +3376,29 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
     console.log("All parks displayed with appropriate highlights.");
 }
+// ---- helper: extract 2-letter US state/territory codes from locationDesc ----
+// ---- helpers ----
+function extractStates(locationDesc) {
+    if (!locationDesc) return [];
+    const tokens = String(locationDesc)
+        .split(/[,\s/|]+/)
+        .map(s => s.trim().toUpperCase())
+        .map(s => s.replace(/^US-/, ''))      // accept "US-XX" and "XX"
+        .filter(s => /^[A-Z]{2}$/.test(s));   // keep only 2-letter codes
+    return [...new Set(tokens)];            // de-dupe, preserve order
+}
+
+function haversineMiles(lat1, lon1, lat2, lon2) {
+    const toRad = d => d * Math.PI / 180;
+    const R = 3958.7613; // Earth radius in miles
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon/2)**2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+}
 
 async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     const db = await getDatabase();
@@ -3010,32 +3406,58 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     const lastFullFetch = await getLastFetchTimestamp('allparks.json');
     let parks = [];
 
-    // Force a full fetch for now (you can restore the caching logic later)
-    if (!lastFullFetch || (now - lastFullFetch > cacheDuration)) {
+    // Full fetch if stale; when using cache, also backfill states
+    if (!lastFullFetch || (Date.now() - lastFullFetch > cacheDuration)) {
         console.log('Fetching full park data from JSON...');
         const response = await fetch(jsonUrl);
         if (!response.ok) throw new Error(`Failed to fetch park data: ${response.statusText}`);
 
         const parsed = await response.json();
 
-        // Don't assign "created" here — allparks.json is the baseline
-        parks = parsed.map(park => ({
-            reference: park.reference,
-            name: park.name,
-            latitude: parseFloat(park.latitude),
-            longitude: parseFloat(park.longitude),
-            activations: parseInt(park.activations, 10) || 0
-            // No `created` field at all
-        }));
+        // Baseline load from allparks.json; no "created" here
+        parks = parsed.map(park => {
+            const states = extractStates(park.locationDesc);
+            return {
+                reference: park.reference,
+                name: park.name,
+                latitude: parseFloat(park.latitude),
+                longitude: parseFloat(park.longitude),
+                grid: park.grid,                  // keep if present in allparks.json
+                locationDesc: park.locationDesc,  // keep raw source string
+                attempts: parseInt(park.attempts, 10) || 0,
+                activations: parseInt(park.activations, 10) || 0,
+                qsos: parseInt(park.qsos, 10) || 0,
+                states: states,                           // e.g., ['MD','DC','WV']
+                primaryState: states[0] || null
+            };
+        });
 
         await upsertParksToIndexedDB(parks);
         await setLastFetchTimestamp('allparks.json', now);
     } else {
         console.log('Using cached full park data');
-        parks = await getAllParksFromIndexedDB();
+        const cached = await getAllParksFromIndexedDB();
+
+        // Backfill states for any records that predate this change
+        const patched = cached.map(p => {
+            if (p.states && Array.isArray(p.states) && p.states.length) return p;
+            const states = extractStates(p.locationDesc);
+            return {
+                ...p,
+                states,
+                primaryState: p.primaryState ?? (states[0] || null)
+            };
+        });
+
+        // Only write back if we actually added anything
+        const needsUpsert = patched.some((p, i) => p !== cached[i]);
+        if (needsUpsert) {
+            await upsertParksToIndexedDB(patched);
+        }
+        parks = patched;
     }
 
-    // Apply updates from changes.json
+    // Apply updates from changes.json and ensure states stay in sync
     try {
         const changesResponse = await fetchIfModified('/potamap/data/changes.json', 'changes.json');
         if (changesResponse && changesResponse.ok) {
@@ -3043,26 +3465,27 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
 
             const updatedParks = changesData.map(park => {
                 const isNew = park.change === 'Park added';
-
+                const states = extractStates(park.locationDesc);
                 return {
                     reference: park.reference,
                     name: park.name,
-                    latitude: park.latitude,
-                    longitude: park.longitude,
+                    latitude: parseFloat(park.latitude),
+                    longitude: parseFloat(park.longitude),
                     grid: park.grid,
                     locationDesc: park.locationDesc,
-                    attempts: park.attempts,
-                    activations: park.activations,
-                    qsos: park.qsos,
+                    attempts: parseInt(park.attempts, 10) || 0,
+                    activations: parseInt(park.activations, 10) || 0,
+                    qsos: parseInt(park.qsos, 10) || 0,
+                    states: states,
+                    primaryState: states[0] || null,
                     created: isNew
-                        ? (park.timestamp ? new Date(park.timestamp).getTime() : now)
+                        ? (park.timestamp ? new Date(park.timestamp).getTime() : Date.now())
                         : undefined,
                     change: park.change
                 };
             });
 
             console.log("Final updatedParks going to IndexedDB:", updatedParks);
-
             await upsertParksToIndexedDB(updatedParks);
             await setLastModifiedHeader('changes.json', changesResponse.headers.get('last-modified'));
             console.log('Applied updates from changes.json');
@@ -3072,8 +3495,10 @@ async function fetchAndCacheParks(jsonUrl, cacheDuration) {
     } catch (err) {
         console.warn('Failed to apply park changes:', err);
     }
+
     return parks;
 }
+
 async function fetchAndApplyUserActivations(callsign = null) {
     // Try to load stored callsign
     if (!callsign) {
@@ -3150,7 +3575,230 @@ async function fetchAndApplyUserActivations(callsign = null) {
         console.error("Error fetching or processing user activations:", error);
     }
 }
+// === Modes ingestion (initial + rolling updates) =============================
 
+const MODES_URL = '/potamap/backend/modes.json';
+const MODES_CHANGES_URLS = [
+    '/potamap/backend/modes-changes.json',     // your preferred name
+    '/potamap/backend/modes-changes.json'       // fallback if you used the earlier name
+];
+
+const MODES_KEYS = {
+    initialized:      'modes.initialized',             // "1" after initial modes.json load
+    baseETag:         'modes.base.etag',
+    baseLM:           'modes.base.lastModified',
+    baseUpdatedAt:    'modes.base.updatedAt',
+    changesETag:      'modes.changes.etag',
+    changesLM:        'modes.changes.lastModified',
+    changesUpdatedAt: 'modes.changes.updatedAt',
+    changesLastDate:  'modes.changes.lastDate'         // last applied batch date (when using "batches")
+};
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function headProbe(url, etagKey, lmKey) {
+    const prevETag = localStorage.getItem(etagKey) || null;
+    const prevLM   = localStorage.getItem(lmKey) || null;
+    try {
+        const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        if (!r.ok) return { ok: false };
+        const etag = r.headers.get('ETag');
+        const lm   = r.headers.get('Last-Modified');
+        if (etag && prevETag && etag === prevETag) return { ok: true, isNew: false, etag, lm };
+        if (!etag && lm && prevLM && lm === prevLM) return { ok: true, isNew: false, etag, lm };
+        return { ok: true, isNew: true, etag, lm };
+    } catch {
+        // HEAD not supported or network hiccup — treat as potentially new
+        return { ok: true, isNew: true, etag: null, lm: null, noHead: true };
+    }
+}
+
+function rowsToPatches(rows) {
+    const patches = [];
+    for (const row of rows || []) {
+        const reference = row.reference || row.ref || row.id;
+        if (!reference) continue;
+        patches.push({
+            reference,
+            modeTotals: {
+                cw:   Number(row.cw)   || 0,
+                ssb:  Number(row.ssb)  || 0,
+                data: Number(row.data) || 0
+            }
+        });
+    }
+    return patches;
+}
+
+async function applyPatchesToIDBAndMemory(patches, { chunkSize = 1000, yieldEvery = 1 } = {}) {
+    if (!patches.length) return 0;
+    if (typeof upsertParksToIndexedDB !== 'function') {
+        console.warn('[modes] upsertParksToIndexedDB not found; cannot persist modeTotals.');
+        return 0;
+    }
+    for (let i = 0, batch = 0; i < patches.length; i += chunkSize, batch++) {
+        const slice = patches.slice(i, i + chunkSize);
+        await upsertParksToIndexedDB(slice);
+        // keep in-memory parks[] synced immediately
+        if (Array.isArray(parks) && parks.length) {
+            const m = new Map(slice.map(p => [p.reference, p.modeTotals]));
+            for (const park of parks) {
+                const mt = m.get(park.reference);
+                if (mt) park.modeTotals = mt;
+            }
+        }
+        if (yieldEvery && batch % yieldEvery === 0) await sleep(0);
+    }
+    return patches.length;
+}
+
+/**
+ * Fetch-and-cache modes:
+ * - First run: GET modes.json and upsert once, set initialized flag.
+ * - Later runs: check for modes-changes.json; if new, upsert only changed rows.
+ * Supports two formats for modes-changes.json:
+ *   1) Flat array: [{reference,cw,ssb,data}, ...]
+ *   2) {batches:[{date:"YYYY-MM-DD", changes:[{reference,cw,ssb,data}]}]}
+ */
+async function fetchAndCacheModes({ chunkSize = 1000 } = {}) {
+    const initialized = localStorage.getItem(MODES_KEYS.initialized) === '1';
+
+    if (!initialized) {
+        // --- Initial bootstrap from modes.json ---
+        const head = await headProbe(MODES_URL, MODES_KEYS.baseETag, MODES_KEYS.baseLM);
+        const resp = await fetch(MODES_URL, { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`Failed to fetch ${MODES_URL}: ${resp.status}`);
+        const rows = await resp.json();
+        if (!Array.isArray(rows)) throw new Error('modes.json must be an array');
+
+        const applied = await applyPatchesToIDBAndMemory(rowsToPatches(rows), { chunkSize });
+        const etag = resp.headers.get('ETag') || head.etag || null;
+        const lm   = resp.headers.get('Last-Modified') || head.lm || null;
+        if (etag) localStorage.setItem(MODES_KEYS.baseETag, etag);
+        if (lm)   localStorage.setItem(MODES_KEYS.baseLM, lm);
+        localStorage.setItem(MODES_KEYS.baseUpdatedAt, String(Date.now()));
+        localStorage.setItem(MODES_KEYS.initialized, '1');
+        console.log(`[modes] initial load applied ${applied} rows from modes.json`);
+        return { applied, phase: 'initial' };
+    }
+
+    // --- Incremental: modes-changes.json ---
+    let chosenUrl = null, head = null;
+    for (const u of MODES_CHANGES_URLS) {
+        head = await headProbe(u, MODES_KEYS.changesETag, MODES_KEYS.changesLM);
+        // if HEAD returned ok=false (e.g., 404), try next candidate
+        if (!head.ok) continue;
+        chosenUrl = u;
+        break;
+    }
+    if (!chosenUrl) {
+        console.log('[modes] no modes-changes file found; skipping.');
+        return { applied: 0, phase: 'changes', skipped: true };
+    }
+    if (head && head.isNew === false) {
+        console.log('[modes] modes-changes unchanged; skipping.');
+        return { applied: 0, phase: 'changes', skipped: true };
+    }
+
+    const resp = await fetch(chosenUrl, { cache: 'no-store' });
+    if (!resp.ok) {
+        console.warn(`[modes] failed to fetch ${chosenUrl}: ${resp.status}`);
+        return { applied: 0, phase: 'changes', skipped: true };
+    }
+    const body = await resp.json();
+
+    let changeRows = [];
+    if (Array.isArray(body)) {
+        // flat list
+        changeRows = body;
+    } else if (body && Array.isArray(body.batches)) {
+        // rolling window of dated batches
+        const lastDate = localStorage.getItem(MODES_KEYS.changesLastDate) || '';
+        const batches = [...body.batches].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+        let maxDate = lastDate;
+        for (const b of batches) {
+            const d = String(b.date || '');
+            if (lastDate && d <= lastDate) continue;   // already applied
+            if (Array.isArray(b.changes)) changeRows.push(...b.changes);
+            if (!maxDate || d > maxDate) maxDate = d;
+        }
+        if (maxDate) localStorage.setItem(MODES_KEYS.changesLastDate, maxDate);
+    } else {
+        console.warn('[modes] unexpected modes-changes format; skipping.');
+        return { applied: 0, phase: 'changes', skipped: true };
+    }
+
+    // Dedup by reference; last one wins
+    const byRef = new Map();
+    for (const r of changeRows) {
+        const ref = r.reference || r.ref || r.id;
+        if (!ref) continue;
+        byRef.set(ref, { reference: ref, cw: Number(r.cw) || 0, ssb: Number(r.ssb) || 0, data: Number(r.data) || 0 });
+    }
+    const patches = [...byRef.values()].map(r => ({ reference: r.reference, modeTotals: { cw: r.cw, ssb: r.ssb, data: r.data }}));
+    const applied = await applyPatchesToIDBAndMemory(patches, { chunkSize });
+
+    const etag = resp.headers.get('ETag') || (head && head.etag) || null;
+    const lm   = resp.headers.get('Last-Modified') || (head && head.lm) || null;
+    if (etag) localStorage.setItem(MODES_KEYS.changesETag, etag);
+    if (lm)   localStorage.setItem(MODES_KEYS.changesLM, lm);
+    localStorage.setItem(MODES_KEYS.changesUpdatedAt, String(Date.now()));
+
+    console.log(`[modes] applied ${applied} mode changes from ${chosenUrl}`);
+    return { applied, phase: 'changes', skipped: applied === 0 };
+}
+
+// Keep this simple wrapper if you like having a single call site:
+async function checkAndUpdateModesAtStartup() {
+    const key = (typeof MODES_KEYS === 'object' && MODES_KEYS && MODES_KEYS.initialized) || 'modes.initialized';
+    const firstRun = !(localStorage.getItem(key) === '1');
+
+    const toast = showToast(
+        firstRun
+            ? 'Loading mode totals for all parks… this may take a bit on first run.'
+            : 'Checking for mode total updates…',
+        { sticky: true, showSpinner: true }
+    );
+
+    try {
+        const res = await fetchAndCacheModes({ chunkSize: 1000 });
+
+        if (!res) {
+            toast.update('Mode totals up to date.', 'success');
+            toast.close(1200);
+            return;
+        }
+        if (res.phase === 'initial') {
+            toast.update(`Mode totals loaded for ${res.applied} parks.`, 'success');
+            toast.close(1500);
+            return;
+        }
+        if (res.skipped) {
+            toast.update('Mode totals are already up to date.', 'success');
+            toast.close(1200);
+            return;
+        }
+        toast.update(`Mode totals updated (${res.applied} changes).`, 'success');
+        toast.close(1500);
+    } catch (err) {
+        console.warn('[modes] update failed:', err);
+        toast.update('Failed to load mode totals. Will retry later.', 'error');
+        toast.close(3500);
+    }
+}
+
+
+/**
+ * One-shot check+apply at startup. Call this after parks have been loaded/cached.
+ */
+// async function checkAndUpdateModesAtStartup() {
+//     try {
+//         // If you keep modes at a different URL/path, change it here:
+//         await fetchAndCacheModes({ url: MODES_URL, chunkSize: 1000 });
+//     } catch (err) {
+//         console.warn('[modes] update failed:', err);
+//     }
+// }
 
 function getFromStore(store, key) {
     return new Promise((resolve, reject) => {
@@ -3227,6 +3875,9 @@ async function setupPOTAMap() {
     try {
         // Fetch and cache parks data
         await fetchAndCacheParks(csvUrl, cacheDuration);
+        // After parks finished loading/caching:
+        await checkAndUpdateModesAtStartup();
+
         // Now reload from IndexedDB, which will include merged changes
         parks = await getAllParksFromIndexedDB();
         console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
@@ -3695,11 +4346,16 @@ function addGoToParkButton() {
     if (searchBox) {
         searchBox.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
+                const raw = searchBox.value.trim();
+                if (raw.startsWith('?')) {
+                    // Let handleSearchEnter manage PQL Enter
+                    return;
+                }
                 event.preventDefault();
                 triggerGoToPark(true);
             }
         });
-        console.log("Enter key bound to Go To Park functionality.");
+        console.log("Enter key bound to Go To Park functionality (non-PQL only).");
     }
 }
 
@@ -3708,8 +4364,14 @@ function addGoToParkButton() {
  */
 function triggerGoToPark() {
     const searchBox = document.getElementById('searchBox');
+
     if (!searchBox || !searchBox.value.trim()) {
         alert('Please enter a search term.');
+        return;
+    }
+
+    if (searchBox.value.trim().startsWith('?')) {
+        // PQL Enter is handled by handleSearchEnter; ignore here to avoid duplicate alerts.
         return;
     }
 
@@ -3725,6 +4387,7 @@ function triggerGoToPark() {
         alert('No matching park.');
     }
 }
+
 
 // Initialize Go To Park button on DOMContentLoaded
 addEventListener('DOMContentLoaded', () => {
@@ -3813,4 +4476,3 @@ function initializeFilterChips(){
         refreshMarkers();
     });
 }
-
