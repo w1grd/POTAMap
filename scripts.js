@@ -3791,14 +3791,14 @@ async function checkAndUpdateModesAtStartup() {
 /**
  * One-shot check+apply at startup. Call this after parks have been loaded/cached.
  */
-async function checkAndUpdateModesAtStartup() {
-    try {
-        // If you keep modes at a different URL/path, change it here:
-        await fetchAndCacheModes({ url: MODES_URL, chunkSize: 1000 });
-    } catch (err) {
-        console.warn('[modes] update failed:', err);
-    }
-}
+// async function checkAndUpdateModesAtStartup() {
+//     try {
+//         // If you keep modes at a different URL/path, change it here:
+//         await fetchAndCacheModes({ url: MODES_URL, chunkSize: 1000 });
+//     } catch (err) {
+//         console.warn('[modes] update failed:', err);
+//     }
+// }
 
 function getFromStore(store, key) {
     return new Promise((resolve, reject) => {
