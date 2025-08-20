@@ -474,7 +474,7 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
         if (ageInDays <= 30) return "#800080"; // purple
 
         // 2) 'My' parks
-        if (isUserActivated) return "#90ee90"; // light green
+        if (isUserActivated) return "#04f404"; // light green
 
         // 3) Parks with zero activations
         if (activations === 0) return "#00008b"; // dark blue
