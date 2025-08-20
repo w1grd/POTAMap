@@ -1,4 +1,6 @@
-
+//POTAmap (c) POTA News & Reviews https://pota.review
+//25
+//
 // Yield to the browser for first paint
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
 
@@ -24,9 +26,7 @@ async function ensureModesInitOnce() {
     }
 }
 
-//POTAmap (c) POTA News & Reviews https://pota.review
-//23
-//
+
 // Initialize global variables
 let activations = [];
 let map; // Leaflet map instance
