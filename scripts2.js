@@ -446,6 +446,24 @@ function shouldDisplayByMode(isActive, isNew, mode){
     return true;
 }
 
+// Returns true if the parsed PQL specifies an explicit geographic scope
+function queryHasExplicitScope(parsed){
+    if (!parsed || typeof parsed !== 'object') return false;
+    const s = (parsed.state || parsed.STATE || parsed.region || parsed.country || parsed.COUNTRY || parsed.ref || parsed.reference || parsed.id);
+    if (s) return true;
+    // Some parsers return a list of filters; look for STATE:/COUNTRY:/REF:
+    const filters = parsed.filters || parsed.terms || [];
+    if (Array.isArray(filters)) {
+        for (const f of filters) {
+            const k = (f && (f.key || f.type || f.name || '')).toString().toUpperCase();
+            if (k === 'STATE' || k === 'COUNTRY' || k === 'REF' || k === 'REFERENCE' || k === 'ID') return true;
+        }
+    }
+    // A meta flag can force global behavior
+    if (parsed.meta && (parsed.meta.scope === 'global' || parsed.meta.global === true)) return true;
+    return false;
+}
+
 function getMarkerColorConfigured(activations, isUserActivated, created) {
     try {
         const createdDate = new Date(created);
@@ -2278,10 +2296,12 @@ function handleSearchEnter(event) {
 
         // Search for parks matching the input query
         const query = normalizeString(searchBox.value.trim());
-        // If structured query, honor structured results
+        // If structured query, honor structured results — but default to CURRENT VIEW scope
         if (searchBox.value.trim().startsWith('?')) {
             const parsed = parseStructuredQuery(searchBox.value);
             const bounds = getCurrentMapBounds();
+
+            // Build context used by matchers
             const spotByRef = {};
             if (Array.isArray(spots)) {
                 for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
@@ -2291,11 +2311,20 @@ function handleSearchEnter(event) {
             const nferByRef = buildNferByRef(parks);
             const ctx = { bounds, spotByRef, userActivatedRefs, now, userLat, userLng, nferByRef };
 
-            const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
+            // Default scope: only parks inside current bounds
+            const scoped = queryHasExplicitScope(parsed);
+            const candidates = scoped
+                ? parks
+                : parks.filter(p => p.latitude && p.longitude && bounds.contains(L.latLng(p.latitude, p.longitude)));
+
+            const matched = candidates.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
             currentSearchResults = matched;
 
-//Handles things like ?state:ca when CA is not on the map
-            fitToMatchesIfGlobalScope(parsed, matched);
+            // If the query had explicit scope (e.g., STATE:MA), fit to results; otherwise keep current view
+            if (scoped && matched.length > 0) {
+                fitToMatchesIfGlobalScope ? fitToMatchesIfGlobalScope(parsed, matched) : zoomToParks(matched);
+            }
+
             applyPqlFilterDisplay(matched);
 
             if (matched.length === 0) {
