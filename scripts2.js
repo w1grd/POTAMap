@@ -98,6 +98,87 @@ function showToast(message, opts = {}) {
     return api;
 }
 
+// === User geolocation pin (global) =========================================
+let userLocationMarker = null;
+
+function setUserLocationMarker(lat, lng) {
+    if (!map || typeof lat !== 'number' || typeof lng !== 'number') return;
+    if (userLocationMarker) {
+        userLocationMarker.setLatLng([lat, lng]);
+    } else {
+        userLocationMarker = L.marker([lat, lng], {
+            title: 'Your location',
+            alt: 'Your location',
+            zIndexOffset: 1000
+        }).addTo(map);
+    }
+}
+
+/**
+ * Centers the map on the user's current geolocation and drops/updates a pin.
+ * Keeps the current zoom level.
+ */
+function centerMapOnGeolocation() {
+    if (!navigator.geolocation) {
+        console.warn('Geolocation not supported; falling back.');
+        const saved = localStorage.getItem('mapCenter');
+        if (saved) {
+            try {
+                const [lat, lng] = JSON.parse(saved);
+                map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+            } catch {}
+        } else if (typeof fallbackToDefaultLocation === 'function') {
+            fallbackToDefaultLocation();
+        }
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            userLat = position.coords.latitude;
+            userLng = position.coords.longitude;
+            setUserLocationMarker(userLat, userLng);
+            if (map) {
+                map.setView([userLat, userLng], map.getZoom(), { animate: true, duration: 1.0 });
+            }
+        },
+        (error) => {
+            console.warn('Geolocation error:', error && error.message);
+            const saved = localStorage.getItem('mapCenter');
+            if (saved) {
+                try {
+                    const [lat, lng] = JSON.parse(saved);
+                    map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+                } catch {}
+            } else if (typeof fallbackToDefaultLocation === 'function') {
+                fallbackToDefaultLocation();
+            }
+        },
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 }
+    );
+}
+
+/** Bind an existing “Center On My Location” button if present */
+function wireCenterOnMyLocationButton() {
+    const candidates = [
+        'centerOnGeolocation',      // actual menu button id
+        'centerOnMyLocation',
+        'btnCenterOnMyLocation',
+        'centerMapOnMyLocation',
+        'centerMapButton'
+    ];
+    let btn = null;
+    for (const id of candidates) {
+        const el = document.getElementById(id);
+        if (el) { btn = el; break; }
+    }
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        centerMapOnGeolocation();
+    });
+}
+
 
 // --- PQL display filter helpers (highlight-only; keep base parks visible) --------
 function ensurePqlPulseCss() {
@@ -2157,55 +2238,6 @@ function mapSliderValue(value) {
     }
 }
 
-/**
- * Centers the map on the user's current geolocation.
- */
-function centerMapOnGeolocation() {
-    if (!navigator.geolocation) {
-        alert("Geolocation is not supported by your browser.");
-        return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-        (position) => {
-            userLat = position.coords.latitude;
-            userLng = position.coords.longitude;
-
-            console.log(`Centering map on geolocation: ${userLat}, ${userLng}`);
-            setUserLocationMarker(userLat, userLng);
-
-            if (map) {
-                map.setView([userLat, userLng], map.getZoom(), {
-                    animate: true,
-                    duration: 1.5,
-                });
-            }
-        },
-        (error) => {
-            console.warn("Geolocation error:", error.message);
-
-            // Attempt fallback to saved location
-            const saved = localStorage.getItem("mapCenter");
-            if (saved) {
-                try {
-                    const [lat, lng] = JSON.parse(saved);
-                    console.log("Fallback to saved center:", lat, lng);
-                    map.setView([lat, lng], 10, {
-                        animate: true,
-                        duration: 1.5,
-                    });
-                } catch {
-                    console.warn("Could not parse saved center. Falling back to default.");
-                    fallbackToDefaultLocation();
-                }
-            } else {
-                fallbackToDefaultLocation();
-            }
-
-            alert("Unable to determine your location. Showing fallback.");
-        }
-    );
-}
 
 function fallbackToDefaultLocation() {
     if (!map) return;
@@ -3173,7 +3205,8 @@ function setupSearchBoxListeners() {
 // Call the setup function when the DOM is fully loaded
 document.addEventListener('DOMContentLoaded', () => {
     setupSearchBoxListeners();
-    console.log("Search box listeners initialized."); // Debugging
+    wireCenterOnMyLocationButton();
+    console.log("Search box listeners initialized and geolocation button wired."); // Debugging
 });
 
 /**
@@ -3543,22 +3576,22 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         map.activationsLayer = L.layerGroup().addTo(map);
 
 
-        let userLocationMarker = null;
-        function setUserLocationMarker(lat, lng) {
-            if (!map) return;
-            if (userLocationMarker) {
-                userLocationMarker.setLatLng([lat, lng]);
-            } else {
-                userLocationMarker = L.marker([lat, lng], {
-                    icon: L.icon({
-                        iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-                        iconSize: [30, 30],
-                        iconAnchor: [15, 30],
-                        popupAnchor: [0, -30],
-                    }),
-                }).addTo(map);
-            }
-        }
+        // let userLocationMarker = null;
+        // function setUserLocationMarker(lat, lng) {
+        //     if (!map) return;
+        //     if (userLocationMarker) {
+        //         userLocationMarker.setLatLng([lat, lng]);
+        //     } else {
+        //         userLocationMarker = L.marker([lat, lng], {
+        //             icon: L.icon({
+        //                 iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+        //                 iconSize: [30, 30],
+        //                 iconAnchor: [15, 30],
+        //                 popupAnchor: [0, -30],
+        //             }),
+        //         }).addTo(map);
+        //     }
+        // }
 
         layerGroup = map.activationsLayer;
         console.log("Created a new activations layer.");
@@ -4238,7 +4271,8 @@ async function setupPOTAMap() {
                 try {
                     userLat = position.coords.latitude;
                     userLng = position.coords.longitude;
-                    // Removed map.flyTo; don't re-center or zoom on geolocation
+// Do not re-center on load; just drop/update the pin
+                    try { setUserLocationMarker(userLat, userLng); } catch {}
                 } catch (e) { console.warn('geo location error', e); }
                 try { await fetchAndDisplaySpots(); applyActivationToggleState(); } catch (e) { console.warn(e); }
                 displayCallsign();
