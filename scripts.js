@@ -1,3 +1,29 @@
+
+// Yield to the browser for first paint
+const nextFrame = () => new Promise(r => requestAnimationFrame(r));
+
+
+// --- Single-run guard for modes init ---
+let __modesInitStarted = false;
+async function ensureModesInitOnce() {
+    if (__modesInitStarted) return;
+    __modesInitStarted = true;
+    try {
+        const haveChanges = await detectModeChanges();
+        if (haveChanges) {
+            try { await checkAndUpdateModesAtStartup(); } catch (e) { console.warn(e); }
+            if (typeof initQsoWorkerIfNeeded === 'function') {
+                try { initQsoWorkerIfNeeded(); } catch (e) { console.warn(e); }
+            }
+            if (typeof updateVisibleModeCounts === 'function') {
+                try { updateVisibleModeCounts(); } catch (e) { console.warn(e); }
+            }
+        }
+    } catch (e) {
+        console.warn("ensureModesInitOnce failed:", e);
+    }
+}
+
 //POTAmap (c) POTA News & Reviews https://pota.review
 //23
 //
@@ -70,6 +96,87 @@ function showToast(message, opts = {}) {
     };
     if (!sticky) api.close(3000);
     return api;
+}
+
+// === User geolocation pin (global) =========================================
+let userLocationMarker = null;
+
+function setUserLocationMarker(lat, lng) {
+    if (!map || typeof lat !== 'number' || typeof lng !== 'number') return;
+    if (userLocationMarker) {
+        userLocationMarker.setLatLng([lat, lng]);
+    } else {
+        userLocationMarker = L.marker([lat, lng], {
+            title: 'Your location',
+            alt: 'Your location',
+            zIndexOffset: 1000
+        }).addTo(map);
+    }
+}
+
+/**
+ * Centers the map on the user's current geolocation and drops/updates a pin.
+ * Keeps the current zoom level.
+ */
+function centerMapOnGeolocation() {
+    if (!navigator.geolocation) {
+        console.warn('Geolocation not supported; falling back.');
+        const saved = localStorage.getItem('mapCenter');
+        if (saved) {
+            try {
+                const [lat, lng] = JSON.parse(saved);
+                map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+            } catch {}
+        } else if (typeof fallbackToDefaultLocation === 'function') {
+            fallbackToDefaultLocation();
+        }
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            userLat = position.coords.latitude;
+            userLng = position.coords.longitude;
+            setUserLocationMarker(userLat, userLng);
+            if (map) {
+                map.setView([userLat, userLng], map.getZoom(), { animate: true, duration: 1.0 });
+            }
+        },
+        (error) => {
+            console.warn('Geolocation error:', error && error.message);
+            const saved = localStorage.getItem('mapCenter');
+            if (saved) {
+                try {
+                    const [lat, lng] = JSON.parse(saved);
+                    map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+                } catch {}
+            } else if (typeof fallbackToDefaultLocation === 'function') {
+                fallbackToDefaultLocation();
+            }
+        },
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 }
+    );
+}
+
+/** Bind an existing “Center On My Location” button if present */
+function wireCenterOnMyLocationButton() {
+    const candidates = [
+        'centerOnGeolocation',      // actual menu button id
+        'centerOnMyLocation',
+        'btnCenterOnMyLocation',
+        'centerMapOnMyLocation',
+        'centerMapButton'
+    ];
+    let btn = null;
+    for (const id of candidates) {
+        const el = document.getElementById(id);
+        if (el) { btn = el; break; }
+    }
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        centerMapOnGeolocation();
+    });
 }
 
 
@@ -178,7 +285,8 @@ async function detectModeChanges() {
         try {
             const res = await fetch(url, { cache: 'no-store' });
             if (!res.ok) continue;
-            const json = await res.json().catch(() => null);
+            const json = await res.json()
+            try { if (typeof window !== 'undefined') { window.__MODE_CHANGES_BODY = json; } } catch (_) {}
             if (!json) continue;
             const refs = Array.isArray(json)
                 ? json
@@ -346,17 +454,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.modeCountsForParkRefInner = modeCountsForParkRef;
 
         // Initialize the map, then kick off the mode check and worker if needed
+        await nextFrame();
         await setupPOTAMap();
         if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
 
-        setTimeout(async () => {
-            const haveChanges = await detectModeChanges();
-            if (haveChanges) {
-                try { await checkAndUpdateModesAtStartup(); } catch (e) { console.warn(e); }
-                initQsoWorkerIfNeeded();
-                updateVisibleModeCounts();
-            }
-        }, 250);
+        // removed duplicate modes init
 
         await initializeActivationsDisplay();
     } catch (e) {
@@ -425,6 +527,24 @@ function shouldDisplayByMode(isActive, isNew, mode){
     return true;
 }
 
+// Returns true if the parsed PQL specifies an explicit geographic scope
+function queryHasExplicitScope(parsed){
+    if (!parsed || typeof parsed !== 'object') return false;
+    const s = (parsed.state || parsed.STATE || parsed.region || parsed.country || parsed.COUNTRY || parsed.ref || parsed.reference || parsed.id);
+    if (s) return true;
+    // Some parsers return a list of filters; look for STATE:/COUNTRY:/REF:
+    const filters = parsed.filters || parsed.terms || [];
+    if (Array.isArray(filters)) {
+        for (const f of filters) {
+            const k = (f && (f.key || f.type || f.name || '')).toString().toUpperCase();
+            if (k === 'STATE' || k === 'COUNTRY' || k === 'REF' || k === 'REFERENCE' || k === 'ID') return true;
+        }
+    }
+    // A meta flag can force global behavior
+    if (parsed.meta && (parsed.meta.scope === 'global' || parsed.meta.global === true)) return true;
+    return false;
+}
+
 function getMarkerColorConfigured(activations, isUserActivated, created) {
     try {
         const createdDate = new Date(created);
@@ -437,11 +557,13 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
         // 2) 'My' parks
         if (isUserActivated) return "#90ee90"; // light green
 
-        // 3) Default
+        // 3) Parks with zero activations
+        if (activations === 0) return "#00008b"; // dark blue
+
+        // 4) Default
         return "#ff6666"; // red
-    } catch (e) {
-        // Fail-safe
-        return "#ff6666";
+    } catch (_) {
+        return "#ff6666"; // fallback to red
     }
 }
 
@@ -2116,53 +2238,6 @@ function mapSliderValue(value) {
     }
 }
 
-/**
- * Centers the map on the user's current geolocation.
- */
-function centerMapOnGeolocation() {
-    if (!navigator.geolocation) {
-        alert("Geolocation is not supported by your browser.");
-        return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-        (position) => {
-            userLat = position.coords.latitude;
-            userLng = position.coords.longitude;
-            console.log(`Centering map on geolocation: ${userLat}, ${userLng}`);
-
-            if (map) {
-                map.setView([userLat, userLng], map.getZoom(), {
-                    animate: true,
-                    duration: 1.5,
-                });
-            }
-        },
-        (error) => {
-            console.warn("Geolocation error:", error.message);
-
-            // Attempt fallback to saved location
-            const saved = localStorage.getItem("mapCenter");
-            if (saved) {
-                try {
-                    const [lat, lng] = JSON.parse(saved);
-                    console.log("Fallback to saved center:", lat, lng);
-                    map.setView([lat, lng], 10, {
-                        animate: true,
-                        duration: 1.5,
-                    });
-                } catch {
-                    console.warn("Could not parse saved center. Falling back to default.");
-                    fallbackToDefaultLocation();
-                }
-            } else {
-                fallbackToDefaultLocation();
-            }
-
-            alert("Unable to determine your location. Showing fallback.");
-        }
-    );
-}
 
 function fallbackToDefaultLocation() {
     if (!map) return;
@@ -2255,10 +2330,12 @@ function handleSearchEnter(event) {
 
         // Search for parks matching the input query
         const query = normalizeString(searchBox.value.trim());
-        // If structured query, honor structured results
+        // If structured query, honor structured results — but default to CURRENT VIEW scope
         if (searchBox.value.trim().startsWith('?')) {
             const parsed = parseStructuredQuery(searchBox.value);
             const bounds = getCurrentMapBounds();
+
+            // Build context used by matchers
             const spotByRef = {};
             if (Array.isArray(spots)) {
                 for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
@@ -2268,11 +2345,20 @@ function handleSearchEnter(event) {
             const nferByRef = buildNferByRef(parks);
             const ctx = { bounds, spotByRef, userActivatedRefs, now, userLat, userLng, nferByRef };
 
-            const matched = parks.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
+            // Default scope: only parks inside current bounds
+            const scoped = queryHasExplicitScope(parsed);
+            const candidates = scoped
+                ? parks
+                : parks.filter(p => p.latitude && p.longitude && bounds.contains(L.latLng(p.latitude, p.longitude)));
+
+            const matched = candidates.filter(p => parkMatchesStructuredQuery(p, parsed, ctx));
             currentSearchResults = matched;
 
-//Handles things like ?state:ca when CA is not on the map
-            fitToMatchesIfGlobalScope(parsed, matched);
+            // If the query had explicit scope (e.g., STATE:MA), fit to results; otherwise keep current view
+            if (scoped && matched.length > 0) {
+                fitToMatchesIfGlobalScope ? fitToMatchesIfGlobalScope(parsed, matched) : zoomToParks(matched);
+            }
+
             applyPqlFilterDisplay(matched);
 
             if (matched.length === 0) {
@@ -3119,7 +3205,8 @@ function setupSearchBoxListeners() {
 // Call the setup function when the DOM is fully loaded
 document.addEventListener('DOMContentLoaded', () => {
     setupSearchBoxListeners();
-    console.log("Search box listeners initialized."); // Debugging
+    wireCenterOnMyLocationButton();
+    console.log("Search box listeners initialized and geolocation button wired."); // Debugging
 });
 
 /**
@@ -3451,17 +3538,6 @@ function initializeMap(lat, lng) {
 
     console.log("Added OpenStreetMap tiles.");
 
-    // Add marker for user's location with adjusted icon size
-    L.marker([lat, lng], {
-        icon: L.icon({
-            iconUrl:
-                "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-            iconSize: [30, 30],
-            iconAnchor: [15, 30],
-            popupAnchor: [0, -30],
-        }),
-    }).addTo(mapInstance);
-    console.log("Added user location marker.");
 
     // Save center and zoom to localStorage whenever map is moved or zoomed
     mapInstance.on("moveend zoomend", () => {
@@ -3498,6 +3574,25 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
     if (!layerGroup) {
         map.activationsLayer = L.layerGroup().addTo(map);
+
+
+        // let userLocationMarker = null;
+        // function setUserLocationMarker(lat, lng) {
+        //     if (!map) return;
+        //     if (userLocationMarker) {
+        //         userLocationMarker.setLatLng([lat, lng]);
+        //     } else {
+        //         userLocationMarker = L.marker([lat, lng], {
+        //             icon: L.icon({
+        //                 iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+        //                 iconSize: [30, 30],
+        //                 iconAnchor: [15, 30],
+        //                 popupAnchor: [0, -30],
+        //             }),
+        //         }).addTo(map);
+        //     }
+        // }
+
         layerGroup = map.activationsLayer;
         console.log("Created a new activations layer.");
     } else {
@@ -3521,6 +3616,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const isActive = !!currentActivation;
         const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
+        // Show pulsing active icon whenever the park is currently on-air, even if activations === 0 (first activation)
+        const useActiveDiv = !!isActive;
+
         // Apply Filters (OR semantics)
         if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
         if (!shouldDisplayByMode(isActive, isNew, mode)) return;
@@ -3542,7 +3640,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         }
         const markerClassName = markerClasses.join(' ');
 
-        const marker = markerClasses.length > 0
+        const marker = useActiveDiv
             ? L.marker([latitude, longitude], {
                 icon: L.divIcon({
                     className: markerClassName,
@@ -4011,7 +4109,7 @@ async function checkAndUpdateModesAtStartup() {
             return;
         }
         if (res.skipped) {
-            toast.update('Mode totals are already up to date.', 'success');
+            toast.update('Mode totals are up to date.', 'success');
             toast.close(1200);
             return;
         }
@@ -4079,6 +4177,29 @@ async function getAllParksFromIndexedDB() {
     });
 }
 
+// Quickly render whatever we already have in IndexedDB, limited to current map view
+async function renderInitialParksFromIDBInView() {
+    try {
+        if (!map) return; // map must exist so we can read bounds
+
+        const all = await getAllParksFromIndexedDB();
+        if (!Array.isArray(all) || all.length === 0) {
+            console.log('[boot] No parks in IDB yet — skipping early render.');
+            return;
+        }
+
+        // Keep global `parks` up to date so downstream code works,
+        // but only display the subset in bounds to keep it snappy.
+        parks = all;
+
+        // Reuse existing logic that filters to current bounds & applies toggles
+        applyActivationToggleState();
+        console.log(`[boot] Early render from IDB: ${all.length} parks available; showing in-bounds subset.`);
+    } catch (e) {
+        console.warn('[boot] Early IDB render failed:', e);
+    }
+}
+
 
 async function getLastFetchTimestamp(key) {
     return parseInt(localStorage.getItem(`lastFetch_${key}`), 10) || null;
@@ -4087,14 +4208,41 @@ async function getLastFetchTimestamp(key) {
 async function setLastFetchTimestamp(key, timestamp) {
     localStorage.setItem(`lastFetch_${key}`, timestamp.toString());
 }
-
+// Conditional fetch: returns Response if modified, or null if not modified / 404.
+// Persists ETag/Last-Modified in localStorage under the provided `key`.
 async function fetchIfModified(url, key) {
-    const response = await fetch('/potamap/data/changes.json', { cache: 'no-store' });
-    const data = await response;
-    console.log("Bypassed fetchIfModified — data:", data);
-    return data;
-}
+    const lmKey = `lastModified_${key}`;
+    const etKey = `etag_${key}`;
 
+    const prevLM = localStorage.getItem(lmKey);
+    const prevET = localStorage.getItem(etKey);
+
+    const headers = {};
+    if (prevET) headers['If-None-Match'] = prevET;
+    if (prevLM) headers['If-Modified-Since'] = prevLM;
+
+    let res;
+    try {
+        res = await fetch(url, { method: 'GET', headers, cache: 'no-store' });
+    } catch (e) {
+        console.warn('fetchIfModified: network error for', url, e);
+        return null;
+    }
+
+    if (res.status === 304) return null;     // Unchanged
+    if (!res.ok) {
+        if (res.status === 404) return null;   // Missing is not fatal
+        console.warn('fetchIfModified: not ok for', url, res.status);
+        return null;
+    }
+
+    const newET = res.headers.get('ETag');
+    const newLM = res.headers.get('Last-Modified');
+    if (newET) localStorage.setItem(etKey, newET);
+    if (newLM) localStorage.setItem(lmKey, newLM);
+
+    return res;
+}
 
 async function setLastModifiedHeader(key, value) {
     if (value) {
@@ -4110,86 +4258,70 @@ async function setupPOTAMap() {
     const csvUrl = '/potamap/data/allparks.json';
 
     try {
-        // Fetch and cache parks data
-        await fetchAndCacheParks(csvUrl, cacheDuration);
-        // After parks finished loading/caching:
-        setTimeout(async () => {
-            const haveChanges = await detectModeChanges();
-            if (haveChanges) { try { if (await detectModeChanges()) { await checkAndUpdateModesAtStartup(); } } catch(e){ console.warn(e); } }
-            initQsoWorkerIfNeeded();
-        }, 250);
-// Now reload from IndexedDB, which will include merged changes
-        parks = await getAllParksFromIndexedDB();
-        console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
-        console.log("Parks Loaded from IndexedDB:", parks); // Debugging
+        // 1) Paint FIRST: use saved center or a sensible default; do NOT wait on data.
+        let savedCenter = null;
+        try { savedCenter = JSON.parse(localStorage.getItem('mapCenter') || 'null'); } catch {}
+        const [defLat, defLng] = savedCenter || [39.8283, -98.5795]; // CONUS center as fallback
+        map = initializeMap(defLat, defLng);
+        map.activationsLayer = L.layerGroup().addTo(map);
 
-        //Pull nfer data from backend
-        await loadAndApplyNferData(); // ✅ Inject NFER links into park objects
-
-        // Retrieve activations from IndexedDB
-        activations = await getActivationsFromIndexedDB();
-        console.log("Initial Activations:", activations); // Debugging
-
-        // Optional: Validate that activations correspond to existing parks
-        activations.forEach(act => {
-            const exists = parks.some(p => p.reference === act.reference);
-            if (!exists) {
-                console.warn(`Activation reference ${act.reference} does not match any park.`);
-            }
-        });
-        const userCallsign = await getOrPromptUserCallsign();
-        if (userCallsign) {
-            await fetchAndApplyUserActivations(userCallsign);
-        } else {
-            console.log("No callsign provided. Skipping live user activation fetch.");
-        }
-
-        // Initialize the map with user's location
+        // 2) Kick geolocation WITHOUT blocking first paint; pan when it arrives
         navigator.geolocation.getCurrentPosition(
             async (position) => {
-                userLat = position.coords.latitude;
-                userLng = position.coords.longitude;
-                console.log(`User location acquired: ${userLat}, ${userLng}`);
-
-                map = initializeMap(userLat, userLng);
-                map.activationsLayer = L.layerGroup().addTo(map);
-
-                await fetchAndDisplaySpots();
-                applyActivationToggleState();
+                try {
+                    userLat = position.coords.latitude;
+                    userLng = position.coords.longitude;
+// Do not re-center on load; just drop/update the pin
+                    try { setUserLocationMarker(userLat, userLng); } catch {}
+                } catch (e) { console.warn('geo location error', e); }
+                try { await fetchAndDisplaySpots(); applyActivationToggleState(); } catch (e) { console.warn(e); }
                 displayCallsign();
             },
             async (error) => {
-                console.warn('Geolocation failed:', error.message);
-
-                // Try to use last saved location from localStorage
-                const saved = localStorage.getItem("mapCenter");
-                if (saved) {
-                    try {
-                        [userLat, userLng] = JSON.parse(saved);
-                        console.log(`Using last known map center from localStorage: ${userLat}, ${userLng}`);
-                    } catch (e) {
-                        console.warn("Failed to parse saved map center, falling back to default.");
-                        userLat = 39.8283; // Center of CONUS
-                        userLng = -98.5795;
-                    }
-                } else {
-                    console.log("No saved map center, using default center of U.S.");
-                    userLat = 39.8283;
-                    userLng = -98.5795;
-                }
-
-                map = initializeMap(userLat, userLng);
-                map.activationsLayer = L.layerGroup().addTo(map);
-
-                await fetchAndDisplaySpots();
-                applyActivationToggleState();
+                console.warn('Geolocation failed:', error && error.message);
+                try { await fetchAndDisplaySpots(); applyActivationToggleState(); } catch (e) { console.warn(e); }
                 displayCallsign();
             }
         );
 
-        console.log('XX Displaying active spots');
+        // Yield one frame so the shell can render before heavy work
+        await new Promise(r => requestAnimationFrame(r));
+
+        // 3) Immediately show any cached parks from IDB that are in view
+        await renderInitialParksFromIDBInView();
+
+        // 4) Start data pipeline in the background (parallel)
+        const parksP = (async () => {
+            await fetchAndCacheParks(csvUrl, cacheDuration);
+            parks = await getAllParksFromIndexedDB();
+        })().catch(err => { console.warn('parks load failed', err); });
+
+        const nferP = parksP.then(() => loadAndApplyNferData()).catch(e => console.warn(e));
+
+        const actsP = (async () => {
+            activations = await getActivationsFromIndexedDB();
+            const userCallsign = await getOrPromptUserCallsign();
+            if (userCallsign) {
+                await fetchAndApplyUserActivations(userCallsign);
+            }
+        })().catch(e => console.warn('activations init', e));
+
+        // 5) When parks are ready, render once (don’t block first paint)
+        await parksP;
+        try {
+            applyActivationToggleState();
+            displayCallsign();
+        } catch (e) { console.warn('initial render failed', e); }
+
+        // 6) Defer modes check so it never blocks map paint; ensure it runs only once
+        if (!window.__modesInitStarted && typeof checkAndUpdateModesAtStartup === 'function') {
+            window.__modesInitStarted = true;
+            const startModes = () => checkAndUpdateModesAtStartup().catch(console.warn);
+            if ('requestIdleCallback' in window) requestIdleCallback(startModes); else setTimeout(startModes, 0);
+        }
+
     } catch (error) {
-        console.error('Error setting up POTA map:', error.message);
+        console.error('Error setting up POTA map:', error && error.message);
         alert('Failed to set up the POTA map. Please try again later.');
     }
 }
@@ -4446,15 +4578,34 @@ document.addEventListener('DOMContentLoaded', () => {
  * @returns {string} The color code for the marker.
  */
 function getMarkerColor(activations, userActivated, created) {
-    const now = new Date();
-    const createdDate = new Date(created);
-    const ageInDays = (now - createdDate) / (1000 * 60 * 60 * 24);
+    // Treat missing/invalid dates as "old" (i.e., not new)
+    let isNew = false;
+    if (created) {
+        const createdDate = new Date(created);
+        if (!isNaN(createdDate)) {
+            const ageInDays = (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
+            isNew = ageInDays <= 30; // Purple for brand-new parks (<= 30 days)
+        }
+    }
 
-    if (ageInDays <= 30) return "#800080"; // Purple for new parks
-    if (userActivated) return "#90ee90";   // Light green for user-activated parks
-    if (activations > 10) return "#ff6666"; // Light red for highly active parks
-    if (activations > 0) return "#90ee90";  // Light green for active parks
-    return "#0000ff";                      // Vivid blue for inactive parks
+    if (isNew) return "#800080";   // Purple (new)
+    if (userActivated) return "#06f406"; // Light green (user-activated)
+
+    // --- Restore legacy behavior: dark blue for zero activations ---
+    if (!activations || activations === 0) return "#001a66"; // Dark blue (no activations)
+
+//    if (activations > 10) return "#ff6666"; // Light red (highly active)
+    if (activations > 0)  return "#90ee90"; // Light green (some activity)
+
+    // Fallback
+    return "#001a66"; // Dark blue
+}
+
+// Provide getMarkerColorConfigured wrapper if not already defined
+if (typeof getMarkerColorConfigured !== "function") {
+    function getMarkerColorConfigured(activations, userActivated, created) {
+        return getMarkerColor(activations, userActivated, created);
+    }
 }
 
 
