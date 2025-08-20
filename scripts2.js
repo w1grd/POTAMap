@@ -3144,9 +3144,8 @@ function updateMapWithFilteredParks(filteredParks) {
 
     console.log("Activated References in Filtered Search:", activatedReferences); // Debugging
 
-    // Display the filtered parks on the map
-    //displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
-    applyActivationToggleState();
+    // Display ONLY the filtered parks on the map (PQL result)
+    displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
     console.log("Displayed filtered parks on the map."); // Debugging
 }
 // Unified Clear Search
