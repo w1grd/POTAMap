@@ -4100,6 +4100,29 @@ async function getAllParksFromIndexedDB() {
     });
 }
 
+// Quickly render whatever we already have in IndexedDB, limited to current map view
+async function renderInitialParksFromIDBInView() {
+  try {
+    if (!map) return; // map must exist so we can read bounds
+
+    const all = await getAllParksFromIndexedDB();
+    if (!Array.isArray(all) || all.length === 0) {
+      console.log('[boot] No parks in IDB yet — skipping early render.');
+      return;
+    }
+
+    // Keep global `parks` up to date so downstream code works,
+    // but only display the subset in bounds to keep it snappy.
+    parks = all;
+
+    // Reuse existing logic that filters to current bounds & applies toggles
+    applyActivationToggleState();
+    console.log(`[boot] Early render from IDB: ${all.length} parks available; showing in-bounds subset.`);
+  } catch (e) {
+    console.warn('[boot] Early IDB render failed:', e);
+  }
+}
+
 
 async function getLastFetchTimestamp(key) {
     return parseInt(localStorage.getItem(`lastFetch_${key}`), 10) || null;
@@ -4186,7 +4209,10 @@ async function setupPOTAMap() {
         // Yield one frame so the shell can render before heavy work
         await new Promise(r => requestAnimationFrame(r));
 
-        // 3) Start data pipeline in the background (parallel)
+        // 3) Immediately show any cached parks from IDB that are in view
+        await renderInitialParksFromIDBInView();
+
+        // 4) Start data pipeline in the background (parallel)
         const parksP = (async () => {
             await fetchAndCacheParks(csvUrl, cacheDuration);
             parks = await getAllParksFromIndexedDB();
@@ -4202,14 +4228,14 @@ async function setupPOTAMap() {
             }
         })().catch(e => console.warn('activations init', e));
 
-        // 4) When parks are ready, render once (don’t block first paint)
+        // 5) When parks are ready, render once (don’t block first paint)
         await parksP;
         try {
             applyActivationToggleState();
             displayCallsign();
         } catch (e) { console.warn('initial render failed', e); }
 
-        // 5) Defer modes check so it never blocks map paint; ensure it runs only once
+        // 6) Defer modes check so it never blocks map paint; ensure it runs only once
         if (!window.__modesInitStarted && typeof checkAndUpdateModesAtStartup === 'function') {
             window.__modesInitStarted = true;
             const startModes = () => checkAndUpdateModesAtStartup().catch(console.warn);
