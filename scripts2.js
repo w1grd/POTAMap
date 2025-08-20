@@ -474,7 +474,7 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
         if (ageInDays <= 30) return "#800080"; // purple
 
         // 2) 'My' parks
-        if (isUserActivated) return "#04f404"; // light green
+        if (isUserActivated) return "#90ee90"; // light green
 
         // 3) Parks with zero activations
         if (activations === 0) return "#00008b"; // dark blue
@@ -2170,7 +2170,9 @@ function centerMapOnGeolocation() {
         (position) => {
             userLat = position.coords.latitude;
             userLng = position.coords.longitude;
+
             console.log(`Centering map on geolocation: ${userLat}, ${userLng}`);
+            setUserLocationMarker(userLat, userLng);
 
             if (map) {
                 map.setView([userLat, userLng], map.getZoom(), {
@@ -3503,17 +3505,6 @@ function initializeMap(lat, lng) {
 
     console.log("Added OpenStreetMap tiles.");
 
-    // Add marker for user's location with adjusted icon size
-    L.marker([lat, lng], {
-        icon: L.icon({
-            iconUrl:
-                "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-            iconSize: [30, 30],
-            iconAnchor: [15, 30],
-            popupAnchor: [0, -30],
-        }),
-    }).addTo(mapInstance);
-    console.log("Added user location marker.");
 
     // Save center and zoom to localStorage whenever map is moved or zoomed
     mapInstance.on("moveend zoomend", () => {
@@ -3550,6 +3541,25 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
     if (!layerGroup) {
         map.activationsLayer = L.layerGroup().addTo(map);
+
+
+        let userLocationMarker = null;
+        function setUserLocationMarker(lat, lng) {
+            if (!map) return;
+            if (userLocationMarker) {
+                userLocationMarker.setLatLng([lat, lng]);
+            } else {
+                userLocationMarker = L.marker([lat, lng], {
+                    icon: L.icon({
+                        iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+                        iconSize: [30, 30],
+                        iconAnchor: [15, 30],
+                        popupAnchor: [0, -30],
+                    }),
+                }).addTo(map);
+            }
+        }
+
         layerGroup = map.activationsLayer;
         console.log("Created a new activations layer.");
     } else {
@@ -3598,19 +3608,19 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const markerClassName = markerClasses.join(' ');
 
         const marker = useActiveDiv
-          ? L.marker([latitude, longitude], {
-              icon: L.divIcon({
-                className: markerClassName,
-                iconSize: [20, 20],
-              })
+            ? L.marker([latitude, longitude], {
+                icon: L.divIcon({
+                    className: markerClassName,
+                    iconSize: [20, 20],
+                })
             })
-          : L.circleMarker([latitude, longitude], {
-              radius: 6,
-              fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
-              color: "#000",
-              weight: 1,
-              opacity: 1,
-              fillOpacity: 0.9,
+            : L.circleMarker([latitude, longitude], {
+                radius: 6,
+                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.9,
             });
 
         marker.park = park;
@@ -4066,7 +4076,7 @@ async function checkAndUpdateModesAtStartup() {
             return;
         }
         if (res.skipped) {
-            toast.update('Mode totals are already up to date.', 'success');
+            toast.update('Mode totals are up to date.', 'success');
             toast.close(1200);
             return;
         }
@@ -4136,25 +4146,25 @@ async function getAllParksFromIndexedDB() {
 
 // Quickly render whatever we already have in IndexedDB, limited to current map view
 async function renderInitialParksFromIDBInView() {
-  try {
-    if (!map) return; // map must exist so we can read bounds
+    try {
+        if (!map) return; // map must exist so we can read bounds
 
-    const all = await getAllParksFromIndexedDB();
-    if (!Array.isArray(all) || all.length === 0) {
-      console.log('[boot] No parks in IDB yet — skipping early render.');
-      return;
+        const all = await getAllParksFromIndexedDB();
+        if (!Array.isArray(all) || all.length === 0) {
+            console.log('[boot] No parks in IDB yet — skipping early render.');
+            return;
+        }
+
+        // Keep global `parks` up to date so downstream code works,
+        // but only display the subset in bounds to keep it snappy.
+        parks = all;
+
+        // Reuse existing logic that filters to current bounds & applies toggles
+        applyActivationToggleState();
+        console.log(`[boot] Early render from IDB: ${all.length} parks available; showing in-bounds subset.`);
+    } catch (e) {
+        console.warn('[boot] Early IDB render failed:', e);
     }
-
-    // Keep global `parks` up to date so downstream code works,
-    // but only display the subset in bounds to keep it snappy.
-    parks = all;
-
-    // Reuse existing logic that filters to current bounds & applies toggles
-    applyActivationToggleState();
-    console.log(`[boot] Early render from IDB: ${all.length} parks available; showing in-bounds subset.`);
-  } catch (e) {
-    console.warn('[boot] Early IDB render failed:', e);
-  }
 }
 
 
@@ -4545,12 +4555,12 @@ function getMarkerColor(activations, userActivated, created) {
     }
 
     if (isNew) return "#800080";   // Purple (new)
-    if (userActivated) return "#90ee90"; // Light green (user-activated)
+    if (userActivated) return "#06f406"; // Light green (user-activated)
 
     // --- Restore legacy behavior: dark blue for zero activations ---
     if (!activations || activations === 0) return "#001a66"; // Dark blue (no activations)
 
-    if (activations > 10) return "#ff6666"; // Light red (highly active)
+//    if (activations > 10) return "#ff6666"; // Light red (highly active)
     if (activations > 0)  return "#90ee90"; // Light green (some activity)
 
     // Fallback
@@ -4559,9 +4569,9 @@ function getMarkerColor(activations, userActivated, created) {
 
 // Provide getMarkerColorConfigured wrapper if not already defined
 if (typeof getMarkerColorConfigured !== "function") {
-function getMarkerColorConfigured(activations, userActivated, created) {
-    return getMarkerColor(activations, userActivated, created);
-}
+    function getMarkerColorConfigured(activations, userActivated, created) {
+        return getMarkerColor(activations, userActivated, created);
+    }
 }
 
 
