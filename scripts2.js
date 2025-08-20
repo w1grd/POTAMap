@@ -4194,8 +4194,8 @@ async function setupPOTAMap() {
                 try {
                     userLat = position.coords.latitude;
                     userLng = position.coords.longitude;
-                    map.flyTo([userLat, userLng], map.getZoom());
-                } catch (e) { console.warn('geo flyTo failed', e); }
+                    // Removed map.flyTo; don't re-center or zoom on geolocation
+                } catch (e) { console.warn('geo location error', e); }
                 try { await fetchAndDisplaySpots(); applyActivationToggleState(); } catch (e) { console.warn(e); }
                 displayCallsign();
             },
