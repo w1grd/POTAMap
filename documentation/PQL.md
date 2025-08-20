@@ -1,10 +1,12 @@
 # PQL (Park Query Language)
 
 PQL lets you filter parks with structured terms in the search box.  
-**Start every structured query with `?`**. Keys are **case-insensitive**; values are mostly case-insensitive too.
+**Start every structured query with `?`**. Keys are **case‑insensitive**; values are mostly case‑insensitive too.
 
 You can mix structured keys with **free text** (bare words or `"quoted phrases"`).  
 Free text matches the park **name** and **reference** (e.g., `US-1234`), plus basic location text.
+
+Note that the keys  **MAX** and **MIN** work in two ways. If you have selected a mode (**?MODE:CW**), **MAX** will only look at that mode. Without a mode, it looks at the total number of QSOs in the reference.
 
 ---
 
@@ -13,11 +15,11 @@ Free text matches the park **name** and **reference** (e.g., `US-1234`), plus ba
 ```
 ? KEY:VALUE KEY:VALUE ... ["free text"]
 ```
-
-- Keys AND together (all conditions must match).
-- Unknown keys are ignored (forward-compatible).
+- Keys **AND** together (all conditions must match).
+- Unknown keys are ignored (forward‑compatible).
 - Booleans accept `1|0|true|false`.
 - Order doesn’t matter.
+- By default, matches are limited to the **current map view** (visible bounds). See *Global scope* below for exceptions.
 
 ---
 
@@ -25,20 +27,26 @@ Free text matches the park **name** and **reference** (e.g., `US-1234`), plus ba
 
 | Key | Value | Meaning | Notes |
 |---|---|---|---|
-| `MODE` | `CW` \| `SSB` \| `PHONE` \| `DATA` \| `FT8` \| `FT4` | Selects a QSO “bucket” | `PHONE` == `SSB`. `FT8/FT4` map to `DATA`. |
-| `MAX` | integer ≥ 0 | **Max QSOs** in the selected bucket | If `MODE` is set, applies to that mode’s QSO count. If no `MODE`, applies to **total QSOs**. Use `MAX:0` for “none yet”. |
-| `MIN` | integer ≥ 0 | **Min QSOs** in the selected bucket | Mirrors `MAX`. With `MODE`, applies to that mode’s QSO count; otherwise to **total QSOs**. |
-| `ACTIVE` | `1` \| `0` \| `true` \| `false` | Currently on-air | Uses live spot data; `ACTIVE:1` = only parks with a current spot. |
-| `NEW` | `1` \| `0` \| `true` \| `false` | Recently added parks | `NEW:1` ≈ created in last 30 days. |
-| `MINE` | `1` \| `0` \| `true` \| `false` | Your activations | `MINE:1` = only parks **you’ve activated**. `MINE:0` = parks you **haven’t** activated. |
-| `STATE` | 2-letter code | U.S. state/territory filter | Accepts `MA`, `us-ma`, etc. Matches multi-state parks too. **Disables map-bounds** and auto-pans to results. |
-| `MINDIST` | number with optional unit | Minimum distance from **you** | Default unit: miles. Accepts `mi`/`km` (e.g., `25km`). **Disables map-bounds** and auto-pans. |
-| `MAXDIST` | number with optional unit | Maximum distance from **you** | Same units as above. **Disables map-bounds** and auto-pans. |
-| `DIST` | `a-b`, `a-`, or `-b` (units optional) | Distance range shorthand | Examples: `DIST:20-50`, `DIST:-30km`, `DIST:100-`. **Disables map-bounds** and auto-pans. |
-| `NFERWITH` | reference or comma list | Match parks that are NFER-neighbors of any given reference(s) | Example: `NFERWITH:US-6909` or `NFERWITH:US-6909,US-3857`. **Disables map-bounds** and auto-pans. |
-| `NFER` | `1` \| `0` \| `true` \| `false` | Match parks that have one or more n-fers asociated | Example: `NFER:1 STATE:MA` = parks in MA that might have an n-fer. |
-### Global-scope behavior (auto-pan)
-If your query includes **any** of: `STATE`, `DIST`/`MINDIST`/`MAXDIST`, or `NFERWITH`, the search is not limited to what’s currently visible on the map. The app will **fit/zoom to all matches** automatically.
+| `ACTIVE` | `1` \| `0` \| `true` \| `false` | Currently on‑air | Uses live spot data; `ACTIVE:1` = only parks with a current spot. |
+| `COUNTRY` | name or 2‑letter code | Country filter | e.g., `COUNTRY:CA`. **Global scope** (auto‑pan/fit). |
+| `DIST` | `a-b`, `a-`, or `-b` (+ units) | Distance range shorthand | Examples: `DIST:20-50`, `DIST:-30km`, `DIST:100-`. **Global scope** (auto‑pan/fit). |
+| `MAX` | integer ≥ 0 | **Max QSOs** in selected bucket | If `MODE` is set, applies to that mode’s QSO count. If no `MODE`, applies to **total QSOs**. Use `MAX:0` for “none yet”. |
+| `MAXDIST` | number + optional unit | Max distance from **you** | Same units as above. **Global scope** (auto‑pan/fit). |
+| `MIN` | integer ≥ 0 | **Min QSOs** in selected bucket | Mirrors `MAX`. With `MODE`, applies to that mode’s QSO count; otherwise to **total QSOs**. |
+| `MINDIST` | number + optional unit | Min distance from **you** | Default unit: miles. Accepts `mi` / `km` (e.g., `25km`). **Global scope** (auto‑pan/fit). |
+| `MINE` | `1` \| `0` \| `true` \| `false` | Your activations | `MINE:1` = parks **you’ve activated**. `MINE:0` = parks you **haven’t** activated. |
+| `MODE` | `CW` \| `SSB` \| `PHONE` \| `DATA` \| `FT8` \| `FT4` | Select a QSO “bucket” | `PHONE` == `SSB`. `FT8/FT4` map to `DATA`. |
+| `NEW` | `1` \| `0` \| `true` \| `false` | Recently added parks | `NEW:1` = created in the last **30 days**. |
+| `NFER` | `1` \| `0` \| `true` \| `false` | Match parks that have ≥1 NFER | Example: `NFER:1 STATE:MA` = parks in MA that have an NFER relationship. |
+| `NFERWITH` | reference or comma list | Parks that are NFER‑neighbors of any given reference(s) | Example: `NFERWITH:US-6909` or `NFERWITH:US-6909,US-3857`. **Global scope** (auto‑pan/fit). |
+| `REF` / `REFERENCE` / `ID` | reference or comma list | Specific park(s) by reference | e.g., `REF:US-1234` or `REFERENCE:US-1234,US-5678`. **Global scope** (auto‑pan/fit). |
+| `SORT` | `DIST` \| `NAME` \| `QSOS` \| `ACTIVATIONS` | Sort result order | `DIST` requires a known user location (geolocate first). |
+| `STATE` | 2‑letter code | U.S. state/territory filter | Accepts `MA`, `US-MA`, etc. Matches multi‑state parks too. **Global scope** (auto‑pan/fit). |
+
+### Global scope (auto‑pan/fit)
+If your query includes **any** of the following keys, the search is **not** limited to what’s currently visible; the map will **fit/zoom to all matches** automatically:
+
+`STATE`, `COUNTRY`, `REF`/`REFERENCE`/`ID`, `DIST`/`MINDIST`/`MAXDIST`, `NFERWITH`
 
 ---
 
@@ -64,9 +72,9 @@ If your query includes **any** of: `STATE`, `DIST`/`MINDIST`/`MAXDIST`, or `NFER
 ?MINE:1 STATE:RI
 ```
 
-**DATA-light targets (≤5 QSOs data bucket) within 100 miles:**
+**DATA‑light targets (≤5 DATA QSOs) within 100 miles, closest first:**
 ```
-?MODE:DATA MAX:5 MAXDIST:100
+?MODE:DATA MAX:5 MAXDIST:100 SORT:DIST
 ```
 
 **Require at least 10 total QSOs (no mode specified):**
@@ -79,17 +87,17 @@ If your query includes **any** of: `STATE`, `DIST`/`MINDIST`/`MAXDIST`, or `NFER
 ?MODE:CW MIN:1 MAX:5
 ```
 
-**NFER neighbors of US-6909 (all parks that are in US-6909’s NFER list, or vice versa):**
+**NFER neighbors of US‑6909 (all parks that are in US‑6909’s NFER list, or vice versa):**
 ```
 ?NFERWITH:US-6909
 ```
 
-**NFER neighbors of either US-6909 or US-3857 that you haven’t activated, within 60 miles:**
+**NFER neighbors of either US‑6909 or US‑3857 that you haven’t activated, within 60 miles:**
 ```
 ?NFERWITH:US-6909,US-3857 MINE:0 MAXDIST:60 SORT:DIST
 ```
 
-**Free-text + structured: parks named “Lincoln Woods” with no CW QSOs:**
+**Free‑text + structured: parks named “Lincoln Woods” with no CW QSOs:**
 ```
 ?"Lincoln Woods" MODE:CW MAX:0
 ```
@@ -104,24 +112,29 @@ If your query includes **any** of: `STATE`, `DIST`/`MINDIST`/`MAXDIST`, or `NFER
 ?MINE:0 MAXDIST:40km
 ```
 
+**Specific references anywhere (global scope):**
+```
+?REF:US-1234,US-5678
+```
+
 ---
 
 ## Tips
-
 - If you start typing without `?`, the search runs as normal name/reference text search.
-- `STATE` matches multi-state parks: `STATE:MA` will include parks that span MA/RI, MA/NH, etc.
+- `STATE` matches multi‑state parks: `STATE:MA` will include parks that span MA/RI, MA/NH, etc.
 - `MODE:FT8` or `MODE:FT4` are treated as `MODE:DATA`.
 - Booleans accept `1/0` or `true/false`.
 - `NFERWITH` is a **union** over the listed references (matches neighbors of *any* target).
+- Distance requires a user location; use your browser’s geolocation or the **Center on My Location** button.
+- When no global‑scope key is present, results are constrained to the **current map bounds**.
 
 ---
 
 ## Known constraints
-
 - `ACTIVE:1` depends on the live spots feed; results change as spots appear/expire.
-- Distance requires a user location; use your browser’s geolocation or the “Center on My Location” button.
+- `DIST`/`MINDIST`/`MAXDIST` need a known user location (grant geolocation or manually center first).
 - `NFERWITH` depends on the available NFER graph in the dataset; if a park has no neighbors listed, it won’t match.
 
 ---
 
-*This document reflects the current PQL implementation in POTAmap as of today.*
+*This document reflects the current PQL implementation in POTAmap.*
