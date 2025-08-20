@@ -1,3 +1,26 @@
+
+
+// --- Single-run guard for modes init ---
+let __modesInitStarted = false;
+async function ensureModesInitOnce() {
+    if (__modesInitStarted) return;
+    __modesInitStarted = true;
+    try {
+        const haveChanges = await detectModeChanges();
+        if (haveChanges) {
+            try { await checkAndUpdateModesAtStartup(); } catch (e) { console.warn(e); }
+            if (typeof initQsoWorkerIfNeeded === 'function') {
+                try { initQsoWorkerIfNeeded(); } catch (e) { console.warn(e); }
+            }
+            if (typeof updateVisibleModeCounts === 'function') {
+                try { updateVisibleModeCounts(); } catch (e) { console.warn(e); }
+            }
+        }
+    } catch (e) {
+        console.warn("ensureModesInitOnce failed:", e);
+    }
+}
+
 //POTAmap (c) POTA News & Reviews https://pota.review
 //23
 //
@@ -178,7 +201,8 @@ async function detectModeChanges() {
         try {
             const res = await fetch(url, { cache: 'no-store' });
             if (!res.ok) continue;
-            const json = await res.json().catch(() => null);
+            const json = await res.json()
+            try { if (typeof window !== 'undefined') { window.__MODE_CHANGES_BODY = json; } } catch (_) {}
             if (!json) continue;
             const refs = Array.isArray(json)
                 ? json
@@ -349,14 +373,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await setupPOTAMap();
         if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
 
-        setTimeout(async () => {
-            const haveChanges = await detectModeChanges();
-            if (haveChanges) {
-                try { await checkAndUpdateModesAtStartup(); } catch (e) { console.warn(e); }
-                initQsoWorkerIfNeeded();
-                updateVisibleModeCounts();
-            }
-        }, 250);
+        // removed duplicate modes init
 
         await initializeActivationsDisplay();
     } catch (e) {
@@ -4087,14 +4104,45 @@ async function getLastFetchTimestamp(key) {
 async function setLastFetchTimestamp(key, timestamp) {
     localStorage.setItem(`lastFetch_${key}`, timestamp.toString());
 }
-
+// Conditional fetch: returns Response if modified, or null if not modified / not found.
+// Persists ETag/Last-Modified in localStorage under the provided `key`.
 async function fetchIfModified(url, key) {
-    const response = await fetch('/potamap/data/changes.json', { cache: 'no-store' });
-    const data = await response;
-    console.log("Bypassed fetchIfModified — data:", data);
-    return data;
-}
+    const lmKey = `lastModified_${key}`;
+    const etKey = `etag_${key}`;
 
+    const prevLM = localStorage.getItem(lmKey);
+    const prevET = localStorage.getItem(etKey);
+
+    const headers = {};
+    if (prevET) headers['If-None-Match'] = prevET;
+    if (prevLM) headers['If-Modified-Since'] = prevLM;
+
+    let res;
+    try {
+        res = await fetch(url, { method: 'GET', headers, cache: 'no-store' });
+    } catch (e) {
+        console.warn('fetchIfModified: network error for', url, e);
+        return null;
+    }
+
+    // Unchanged
+    if (res.status === 304) return null;
+
+    // Not found or not ok
+    if (!res.ok) {
+        if (res.status === 404) return null;
+        console.warn('fetchIfModified: fetch not ok for', url, res.status);
+        return null;
+    }
+
+    // Update stored validators
+    const newET = res.headers.get('ETag');
+    const newLM = res.headers.get('Last-Modified');
+    if (newET) localStorage.setItem(etKey, newET);
+    if (newLM) localStorage.setItem(lmKey, newLM);
+
+    return res;
+}
 
 async function setLastModifiedHeader(key, value) {
     if (value) {
@@ -4113,11 +4161,7 @@ async function setupPOTAMap() {
         // Fetch and cache parks data
         await fetchAndCacheParks(csvUrl, cacheDuration);
         // After parks finished loading/caching:
-        setTimeout(async () => {
-            const haveChanges = await detectModeChanges();
-            if (haveChanges) { try { if (await detectModeChanges()) { await checkAndUpdateModesAtStartup(); } } catch(e){ console.warn(e); } }
-            initQsoWorkerIfNeeded();
-        }, 250);
+        // removed duplicate modes init
 // Now reload from IndexedDB, which will include merged changes
         parks = await getAllParksFromIndexedDB();
         console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
