@@ -458,11 +458,13 @@ function getMarkerColorConfigured(activations, isUserActivated, created) {
         // 2) 'My' parks
         if (isUserActivated) return "#90ee90"; // light green
 
-        // 3) Default
+        // 3) Parks with zero activations
+        if (activations === 0) return "#00008b"; // dark blue
+
+        // 4) Default
         return "#ff6666"; // red
-    } catch (e) {
-        // Fail-safe
-        return "#ff6666";
+    } catch (_) {
+        return "#ff6666"; // fallback to red
     }
 }
 
