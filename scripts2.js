@@ -1,4 +1,7 @@
 
+// Yield to the browser for first paint
+const nextFrame = () => new Promise(r => requestAnimationFrame(r));
+
 
 // --- Single-run guard for modes init ---
 let __modesInitStarted = false;
@@ -370,6 +373,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.modeCountsForParkRefInner = modeCountsForParkRef;
 
         // Initialize the map, then kick off the mode check and worker if needed
+        await nextFrame();
         await setupPOTAMap();
         if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
 
@@ -4104,7 +4108,7 @@ async function getLastFetchTimestamp(key) {
 async function setLastFetchTimestamp(key, timestamp) {
     localStorage.setItem(`lastFetch_${key}`, timestamp.toString());
 }
-// Conditional fetch: returns Response if modified, or null if not modified / not found.
+// Conditional fetch: returns Response if modified, or null if not modified / 404.
 // Persists ETag/Last-Modified in localStorage under the provided `key`.
 async function fetchIfModified(url, key) {
     const lmKey = `lastModified_${key}`;
@@ -4125,17 +4129,13 @@ async function fetchIfModified(url, key) {
         return null;
     }
 
-    // Unchanged
-    if (res.status === 304) return null;
-
-    // Not found or not ok
+    if (res.status === 304) return null;     // Unchanged
     if (!res.ok) {
-        if (res.status === 404) return null;
-        console.warn('fetchIfModified: fetch not ok for', url, res.status);
+        if (res.status === 404) return null;   // Missing is not fatal
+        console.warn('fetchIfModified: not ok for', url, res.status);
         return null;
     }
 
-    // Update stored validators
     const newET = res.headers.get('ETag');
     const newLM = res.headers.get('Last-Modified');
     if (newET) localStorage.setItem(etKey, newET);
