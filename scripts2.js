@@ -4158,82 +4158,66 @@ async function setupPOTAMap() {
     const csvUrl = '/potamap/data/allparks.json';
 
     try {
-        // Fetch and cache parks data
-        await fetchAndCacheParks(csvUrl, cacheDuration);
-        // After parks finished loading/caching:
-        // removed duplicate modes init
-// Now reload from IndexedDB, which will include merged changes
-        parks = await getAllParksFromIndexedDB();
-        console.log("First 5 parks loaded into memory:", parks.slice(0, 5));
-        console.log("Parks Loaded from IndexedDB:", parks); // Debugging
+        // 1) Paint FIRST: use saved center or a sensible default; do NOT wait on data.
+        let savedCenter = null;
+        try { savedCenter = JSON.parse(localStorage.getItem('mapCenter') || 'null'); } catch {}
+        const [defLat, defLng] = savedCenter || [39.8283, -98.5795]; // CONUS center as fallback
+        map = initializeMap(defLat, defLng);
+        map.activationsLayer = L.layerGroup().addTo(map);
 
-        //Pull nfer data from backend
-        await loadAndApplyNferData(); // ✅ Inject NFER links into park objects
-
-        // Retrieve activations from IndexedDB
-        activations = await getActivationsFromIndexedDB();
-        console.log("Initial Activations:", activations); // Debugging
-
-        // Optional: Validate that activations correspond to existing parks
-        activations.forEach(act => {
-            const exists = parks.some(p => p.reference === act.reference);
-            if (!exists) {
-                console.warn(`Activation reference ${act.reference} does not match any park.`);
-            }
-        });
-        const userCallsign = await getOrPromptUserCallsign();
-        if (userCallsign) {
-            await fetchAndApplyUserActivations(userCallsign);
-        } else {
-            console.log("No callsign provided. Skipping live user activation fetch.");
-        }
-
-        // Initialize the map with user's location
+        // 2) Kick geolocation WITHOUT blocking first paint; pan when it arrives
         navigator.geolocation.getCurrentPosition(
             async (position) => {
-                userLat = position.coords.latitude;
-                userLng = position.coords.longitude;
-                console.log(`User location acquired: ${userLat}, ${userLng}`);
-
-                map = initializeMap(userLat, userLng);
-                map.activationsLayer = L.layerGroup().addTo(map);
-
-                await fetchAndDisplaySpots();
-                applyActivationToggleState();
+                try {
+                    userLat = position.coords.latitude;
+                    userLng = position.coords.longitude;
+                    map.flyTo([userLat, userLng], map.getZoom());
+                } catch (e) { console.warn('geo flyTo failed', e); }
+                try { await fetchAndDisplaySpots(); applyActivationToggleState(); } catch (e) { console.warn(e); }
                 displayCallsign();
             },
             async (error) => {
-                console.warn('Geolocation failed:', error.message);
-
-                // Try to use last saved location from localStorage
-                const saved = localStorage.getItem("mapCenter");
-                if (saved) {
-                    try {
-                        [userLat, userLng] = JSON.parse(saved);
-                        console.log(`Using last known map center from localStorage: ${userLat}, ${userLng}`);
-                    } catch (e) {
-                        console.warn("Failed to parse saved map center, falling back to default.");
-                        userLat = 39.8283; // Center of CONUS
-                        userLng = -98.5795;
-                    }
-                } else {
-                    console.log("No saved map center, using default center of U.S.");
-                    userLat = 39.8283;
-                    userLng = -98.5795;
-                }
-
-                map = initializeMap(userLat, userLng);
-                map.activationsLayer = L.layerGroup().addTo(map);
-
-                await fetchAndDisplaySpots();
-                applyActivationToggleState();
+                console.warn('Geolocation failed:', error && error.message);
+                try { await fetchAndDisplaySpots(); applyActivationToggleState(); } catch (e) { console.warn(e); }
                 displayCallsign();
             }
         );
 
-        console.log('XX Displaying active spots');
+        // Yield one frame so the shell can render before heavy work
+        await new Promise(r => requestAnimationFrame(r));
+
+        // 3) Start data pipeline in the background (parallel)
+        const parksP = (async () => {
+            await fetchAndCacheParks(csvUrl, cacheDuration);
+            parks = await getAllParksFromIndexedDB();
+        })().catch(err => { console.warn('parks load failed', err); });
+
+        const nferP = parksP.then(() => loadAndApplyNferData()).catch(e => console.warn(e));
+
+        const actsP = (async () => {
+            activations = await getActivationsFromIndexedDB();
+            const userCallsign = await getOrPromptUserCallsign();
+            if (userCallsign) {
+                await fetchAndApplyUserActivations(userCallsign);
+            }
+        })().catch(e => console.warn('activations init', e));
+
+        // 4) When parks are ready, render once (don’t block first paint)
+        await parksP;
+        try {
+            applyActivationToggleState();
+            displayCallsign();
+        } catch (e) { console.warn('initial render failed', e); }
+
+        // 5) Defer modes check so it never blocks map paint; ensure it runs only once
+        if (!window.__modesInitStarted && typeof checkAndUpdateModesAtStartup === 'function') {
+            window.__modesInitStarted = true;
+            const startModes = () => checkAndUpdateModesAtStartup().catch(console.warn);
+            if ('requestIdleCallback' in window) requestIdleCallback(startModes); else setTimeout(startModes, 0);
+        }
+
     } catch (error) {
-        console.error('Error setting up POTA map:', error.message);
+        console.error('Error setting up POTA map:', error && error.message);
         alert('Failed to set up the POTA map. Please try again later.');
     }
 }
