@@ -1,4 +1,6 @@
-
+//POTAmap (c) POTA News & Reviews https://pota.review
+//25
+//
 // Yield to the browser for first paint
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
 
@@ -24,9 +26,7 @@ async function ensureModesInitOnce() {
     }
 }
 
-//POTAmap (c) POTA News & Reviews https://pota.review
-//23
-//
+
 // Initialize global variables
 let activations = [];
 let map; // Leaflet map instance
@@ -2785,14 +2785,15 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const { bounds } = ctx || {};
 
     // 1) Proximity or in-view constraint
-    const hasDistConstraint  = (parsed.minDist !== null) || (parsed.maxDist !== null);
-    const hasStateConstraint = !!parsed.state;
-    const hasNferConstraint  = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
+    const hasDistConstraint   = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    const hasStateConstraint  = !!parsed.state;
+    const hasNferConstraint   = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
+    const hasCountryConstraint = !!parsed.country;
+    const hasRefConstraint     = Array.isArray(parsed.refs) && parsed.refs.length > 0;
 
-
+    // Default to in-bounds unless one of the *explicit* global-scope keys is present
     const hasGlobalConstraint = hasDistConstraint || hasStateConstraint || hasNferConstraint
-        || (parsed.mine !== null) || (parsed.active !== null) || !!parsed.text || !!parsed.mode
-        || (parsed.min !== null) || (parsed.max !== null) || (parsed.isNew === true);
+        || hasCountryConstraint || hasRefConstraint;
 
     if (hasGlobalConstraint) {
         if (hasDistConstraint) {
@@ -2899,14 +2900,27 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     // 9) MODE / MIN / MAX — QSO bucket check
     if (parsed.min !== null || parsed.max !== null || parsed.mode) {
         const mode  = parsed.mode;
-        const lower = mode ? mode.toLowerCase() : null;
+        // Normalize mode key: phone -> ssb, ft8/ft4 -> data
+        const lowerRaw = mode ? String(mode).toLowerCase() : null;
+        const key = (lowerRaw === 'phone' ? 'ssb'
+                   : (lowerRaw === 'ft8' || lowerRaw === 'ft4') ? 'data'
+                   : lowerRaw);
+
         let qsoCount = park.qsos || 0;
 
         if (mode) {
             const byRef = ctx?.modeQsosByRef && ctx.modeQsosByRef[park.reference];
-            if (byRef && typeof byRef[lower] === 'number') qsoCount = byRef[lower];
-            else if (typeof park[`qsos_${lower}`] === 'number') qsoCount = park[`qsos_${lower}`];
-            else if (park.qsosByMode && typeof park.qsosByMode[mode] === 'number') qsoCount = park.qsosByMode[mode];
+            if (byRef && typeof byRef[key] === 'number') {
+                qsoCount = byRef[key];
+            } else if (park.modeTotals && typeof park.modeTotals[key] === 'number') {
+                qsoCount = park.modeTotals[key];
+            } else if (typeof park[`qsos_${key}`] === 'number') {
+                qsoCount = park[`qsos_${key}`];
+            } else if (park.qsosByMode) {
+                // accept either lower or upper keys in qsosByMode
+                if (typeof park.qsosByMode[key] === 'number') qsoCount = park.qsosByMode[key];
+                else if (typeof park.qsosByMode[String(mode).toUpperCase()] === 'number') qsoCount = park.qsosByMode[String(mode).toUpperCase()];
+            }
         }
 
         if (parsed.min !== null && qsoCount < parsed.min) return false;
@@ -2917,10 +2931,12 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 }
 
 function fitToMatchesIfGlobalScope(parsed, matched) {
-    const usedGlobalScope = (!!parsed.state) || (parsed.minDist !== null) || (parsed.maxDist !== null)
-        || (parsed.mine !== null) || (parsed.active !== null) || !!parsed.text || !!parsed.mode
-        || (parsed.min !== null) || (parsed.max !== null) || (parsed.isNew === true)
-        || (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
+    const usedGlobalScope =
+        (!!parsed.state) ||
+        (!!parsed.country) ||
+        (Array.isArray(parsed.refs) && parsed.refs.length > 0) ||
+        (parsed.minDist !== null) || (parsed.maxDist !== null) ||
+        (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
 
     if (!usedGlobalScope || !matched || !matched.length) return;
 
