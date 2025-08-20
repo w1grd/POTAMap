@@ -3542,6 +3542,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const isActive = !!currentActivation;
         const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
+        // Show pulsing active icon whenever the park is currently on-air, even if activations === 0 (first activation)
+        const useActiveDiv = !!isActive;
+
         // Apply Filters (OR semantics)
         if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
         if (!shouldDisplayByMode(isActive, isNew, mode)) return;
@@ -3563,20 +3566,20 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         }
         const markerClassName = markerClasses.join(' ');
 
-        const marker = markerClasses.length > 0
-            ? L.marker([latitude, longitude], {
-                icon: L.divIcon({
-                    className: markerClassName,
-                    iconSize: [20, 20],
-                })
+        const marker = useActiveDiv
+          ? L.marker([latitude, longitude], {
+              icon: L.divIcon({
+                className: markerClassName,
+                iconSize: [20, 20],
+              })
             })
-            : L.circleMarker([latitude, longitude], {
-                radius: 6,
-                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
-                color: "#000",
-                weight: 1,
-                opacity: 1,
-                fillOpacity: 0.9,
+          : L.circleMarker([latitude, longitude], {
+              radius: 6,
+              fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
+              color: "#000",
+              weight: 1,
+              opacity: 1,
+              fillOpacity: 0.9,
             });
 
         marker.park = park;
