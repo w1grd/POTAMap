@@ -4500,15 +4500,34 @@ document.addEventListener('DOMContentLoaded', () => {
  * @returns {string} The color code for the marker.
  */
 function getMarkerColor(activations, userActivated, created) {
-    const now = new Date();
-    const createdDate = new Date(created);
-    const ageInDays = (now - createdDate) / (1000 * 60 * 60 * 24);
+    // Treat missing/invalid dates as "old" (i.e., not new)
+    let isNew = false;
+    if (created) {
+        const createdDate = new Date(created);
+        if (!isNaN(createdDate)) {
+            const ageInDays = (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
+            isNew = ageInDays <= 30; // Purple for brand-new parks (<= 30 days)
+        }
+    }
 
-    if (ageInDays <= 30) return "#800080"; // Purple for new parks
-    if (userActivated) return "#90ee90";   // Light green for user-activated parks
-    if (activations > 10) return "#ff6666"; // Light red for highly active parks
-    if (activations > 0) return "#90ee90";  // Light green for active parks
-    return "#0000ff";                      // Vivid blue for inactive parks
+    if (isNew) return "#800080";   // Purple (new)
+    if (userActivated) return "#90ee90"; // Light green (user-activated)
+
+    // --- Restore legacy behavior: dark blue for zero activations ---
+    if (!activations || activations === 0) return "#001a66"; // Dark blue (no activations)
+
+    if (activations > 10) return "#ff6666"; // Light red (highly active)
+    if (activations > 0)  return "#90ee90"; // Light green (some activity)
+
+    // Fallback
+    return "#001a66"; // Dark blue
+}
+
+// Provide getMarkerColorConfigured wrapper if not already defined
+if (typeof getMarkerColorConfigured !== "function") {
+function getMarkerColorConfigured(activations, userActivated, created) {
+    return getMarkerColor(activations, userActivated, created);
+}
 }
 
 
