@@ -3835,10 +3835,13 @@ function initializeMap(lat, lng) {
     });
 
     // Attach dynamic spot fetching to map movement
+    let skipNextSpotFetch = false;
+    mapInstance.on("popupopen", () => { skipNextSpotFetch = true; });
     if (!isDesktopMode) {
         mapInstance.on(
             "moveend",
             debounce(() => {
+                if (skipNextSpotFetch) { skipNextSpotFetch = false; return; }
                 console.log("Map moved or zoomed. Updating spots...");
                 fetchAndDisplaySpotsInCurrentBounds(mapInstance)
                     .then(() => applyActivationToggleState());
