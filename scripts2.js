@@ -2870,6 +2870,7 @@ function normalizeString(str) {
  *  - ACTIVE: 1|0|true|false
  *  - NEW: 1|0|true|false
  *  - MINE: 1|0|true|false
+ *  - REVIEW: 1|0|true|false
  *  - STATE: <US state/territory 2-letter code>
  * Free text (quoted "like this" or bare) is matched against name/reference.
  */
@@ -2888,7 +2889,8 @@ function parseStructuredQuery(raw) {
         minDist: null,
         maxDist: null,
         nferWithRefs: [],
-        hasNfer: null          // ← NEW: boolean or null (no filter)
+        hasNfer: null,         // ← NEW: boolean or null (no filter)
+        hasReview: null        // ← NEW: boolean or null (no filter)
     };
     if (!q) return result;
 
@@ -2944,6 +2946,9 @@ function parseStructuredQuery(raw) {
 
         } else if (key === 'STATE') {
             const st = value.toUpperCase().match(/([A-Z]{2})$/); if (st && st[1]) result.state = st[1];
+
+        } else if (key === 'REVIEW') {
+            const v = value.toLowerCase(); result.hasReview = (v === '1' || v === 'true');
 
         } else if (key === 'MINDIST') {
             const { miles } = parseDistanceValue(value); if (!Number.isNaN(miles)) result.minDist = miles;
@@ -3080,15 +3085,22 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (parsed.hasNfer === false && has) return false;
     }
 
-    // 6) NEW
+    // 6) REVIEW URL presence
+    if (parsed.hasReview !== null) {
+        const has = !!park.reviewURL;
+        if (parsed.hasReview && !has) return false;
+        if (parsed.hasReview === false && has) return false;
+    }
+
+    // 7) NEW
     if (parsed.isNew === true) {
         const created = park.created || 0;
         const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
         if (!created || (Date.now() - created) > THIRTY_DAYS) return false;
     }
 
-    // 7) MINE
-    // 7) MINE (robust to Set | Array | Object)
+    // 8) MINE
+    // 8) MINE (robust to Set | Array | Object)
     if (parsed.mine !== null && ctx && ctx.userActivatedRefs) {
         const refRaw = String(park.reference || '');
         const refU = refRaw.toUpperCase();
@@ -3110,14 +3122,14 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     }
 
 
-    // 8) ACTIVE (live)
+    // 9) ACTIVE (live)
     if (parsed.active !== null && ctx && ctx.spotByRef) {
         const active = !!ctx.spotByRef[park.reference];
         if (parsed.active && !active) return false;
         if (!parsed.active && active) return false;
     }
 
-    // 9) MODE / MIN / MAX — QSO bucket check
+    // 10) MODE / MIN / MAX — QSO bucket check
     if (parsed.min !== null || parsed.max !== null || parsed.mode) {
         const mode  = parsed.mode;
         // Normalize mode key: phone -> ssb, ft8/ft4 -> data
