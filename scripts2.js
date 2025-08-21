@@ -216,20 +216,6 @@ function ensurePqlPulseCss() {
     document.head.appendChild(style);
 }
 
-// Ensure CSS exists to visually highlight markers that have PN&R reviews
-function ensureReviewHaloCss() {
-    if (document.getElementById('review-halo-css')) return;
-    const css = `
-.leaflet-div-icon.has-review,
-.leaflet-marker-icon.has-review {
-  box-shadow: 0 0 0 3px rgba(173, 216, 230, 0.95), 0 0 0 5px rgba(0, 0, 0, 0.9) !important;
-  border-radius: 50%;
-}`;
-    const style = document.createElement('style');
-    style.id = 'review-halo-css';
-    style.textContent = css;
-    document.head.appendChild(style);
-}
 // Build an in-memory cache of review URLs from IndexedDB so redraws can highlight immediately
 async function ensureReviewCacheFromIndexedDB() {
     try {
@@ -710,7 +696,72 @@ function buildModeFilterPanel(){
     });
 }
 
+// Ensure CSS exists to visually highlight markers that have PN&R reviews
+function ensureReviewHaloCss() {
+    if (document.getElementById('review-halo-css')) return;
+    const css = `
+  .leaflet-div-icon.has-review,
+  .leaflet-marker-icon.has-review {
+    box-shadow: 0 0 0 3px rgba(173, 216, 230, 0.95), 0 0 0 5px rgba(0, 0, 0, 0.9) !important;
+    border-radius: 50%;
+  }`;
+    const style = document.createElement('style');
+    style.id = 'review-halo-css';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
 
+// Add visual halo to a marker (works for DivIcon markers and circle markers)
+function decorateReviewHalo(marker, park) {
+    if (!marker || !park || !park.reviewURL) return;
+
+    // DivIcon / standard markers (DOM element)
+    if (marker.getElement) {
+        const el = marker.getElement();
+        if (el) el.classList.add('has-review');
+        // also ensure it sticks after mount
+        if (marker.on) {
+            marker.on('add', () => {
+                const el2 = marker.getElement();
+                if (el2) el2.classList.add('has-review');
+            });
+        }
+    }
+
+    // Circle markers: draw concentric rings behind the dot once
+    if (marker.getRadius && !marker.__reviewHalos) {
+        if (!map.getPane('reviewHalos')) {
+            map.createPane('reviewHalos');
+            const pane = map.getPane('reviewHalos');
+            if (pane) pane.style.zIndex = 399; // just under default marker pane
+        }
+        const baseR = marker.options?.radius || 6;
+        const latLng = marker.getLatLng?.();
+        if (!latLng) return;
+
+        const haloOuter = L.circleMarker(latLng, {
+            pane: 'reviewHalos',
+            radius: baseR + 8,
+            color: '#000',
+            weight: 3,
+            fillOpacity: 0,
+            opacity: 1,
+            interactive: false
+        }).addTo(map.activationsLayer || map);
+
+        const haloInner = L.circleMarker(latLng, {
+            pane: 'reviewHalos',
+            radius: baseR + 5,
+            color: 'lightblue',
+            weight: 6,
+            fillOpacity: 0,
+            opacity: 0.95,
+            interactive: false
+        }).addTo(map.activationsLayer || map);
+
+        marker.__reviewHalos = [haloOuter, haloInner];
+    }
+}
 
 // Lightweight refresh: clear and redraw current view using existing flow
 
@@ -785,6 +836,7 @@ async function redrawMarkersWithFilters(){
                         iconSize: [20, 20],
                     })
                 });
+                if (hasReview) decorateReviewHalo(marker, park);
             } else {
                 marker = L.circleMarker([latitude, longitude], {
                     radius: 6,
@@ -797,31 +849,7 @@ async function redrawMarkersWithFilters(){
                 });
 
                 // If the park has a review, add two decorative, non-interactive rings behind the base dot
-                if (hasReview) {
-                    const baseR = (marker.options.radius || 6);
-
-                    // outer thin black ring
-                    L.circleMarker([latitude, longitude], {
-                        pane: 'reviewHalos',
-                        radius: baseR + 8,
-                        color: '#000',
-                        weight: 3,
-                        fillOpacity: 0,
-                        opacity: 1,
-                        interactive: false
-                    }).addTo(map.activationsLayer);
-
-                    // inner light-blue ring
-                    L.circleMarker([latitude, longitude], {
-                        pane: 'reviewHalos',
-                        radius: baseR + 5,
-                        color: 'lightblue',
-                        weight: 6,
-                        fillOpacity: 0,
-                        opacity: 0.95,
-                        interactive: false
-                    }).addTo(map.activationsLayer);
-                }
+                if (hasReview) { decorateReviewHalo(marker, park); }
             }
 
             const tooltipText = currentActivation
@@ -861,6 +889,7 @@ async function redrawMarkersWithFilters(){
                                 req.onerror = (e) => rej(e.target.error);
                             });
                             if (rec && rec.reviewURL) park.reviewURL = rec.reviewURL;
+                            if (park.reviewURL) decorateReviewHalo(this, park);
                         } catch (e) { /* non-fatal */ }
                     }
                     let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
