@@ -700,11 +700,28 @@ function buildModeFilterPanel(){
 function ensureReviewHaloCss() {
     if (document.getElementById('review-halo-css')) return;
     const css = `
-  .leaflet-div-icon.has-review,
+  /* DivIcon markers (active/new pulse) — add explicit overlay ring */
+  .leaflet-div-icon.has-review { position: relative; }
+  .leaflet-div-icon.has-review::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 26px;   /* slightly larger than the 20px icon */
+    height: 26px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 3px solid rgba(173, 216, 230, 0.95); /* light blue */
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.9);    /* thin black outer */
+    pointer-events: none;
+  }
+
+  /* Image markers (non-circle) — keep box-shadow fallback */
   .leaflet-marker-icon.has-review {
     box-shadow: 0 0 0 3px rgba(173, 216, 230, 0.95), 0 0 0 5px rgba(0, 0, 0, 0.9) !important;
     border-radius: 50%;
-  }`;
+  }
+  `;
     const style = document.createElement('style');
     style.id = 'review-halo-css';
     style.textContent = css;
