@@ -184,11 +184,11 @@ function wireCenterOnMyLocationButton() {
 function ensurePqlPulseCss() {
     if (document.getElementById('pql-pulse-css')) return;
     const css = `
-.pql-pulse-icon { pointer-events: auto; }
+.pql-pulse-icon { pointer-events: none; }
 .pql-pulse {
   position: relative;
-  width: 28px;
-  height: 28px;
+  width: 35px;
+  height: 35px;
   border-radius: 50%;
   background: rgba(255, 255, 0, 0.95);
   box-shadow: 0 0 0 2px #000 inset, 0 0 4px rgba(0,0,0,0.6);
@@ -198,8 +198,8 @@ function ensurePqlPulseCss() {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 28px;
-  height: 28px;
+  width: 35px;
+  height: 35px;
   transform: translate(-50%, -50%) scale(1);
   border-radius: 50%;
   border: 2px solid rgba(255, 215, 0, 0.9);
@@ -244,16 +244,15 @@ function _addPqlHighlightMarker(layer, park) {
     const icon = L.divIcon({
         className: 'pql-pulse-icon',
         html: '<div class="pql-pulse"></div>',
-        iconSize: [28,28],
-        iconAnchor: [14,14]
+        iconSize: [35,35],
+        iconAnchor: [17.5,17.5]
     });
-    const m = L.marker([park.latitude, park.longitude], { icon, riseOnHover: true, keyboard: false }).addTo(layer);
-    const tip = `${park.name} (${park.reference})`;
-    m.bindTooltip(tip, { direction: 'top', className: 'custom-tooltip' });
-    m.on('click', async () => {
-        const html = await fetchFullPopupContent(park);
-        m.bindPopup(html).openPopup();
-    });
+    L.marker([park.latitude, park.longitude], {
+        icon,
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: -1000
+    }).addTo(layer);
 }
 
 function applyPqlFilterDisplay(matchedParks) {
@@ -559,6 +558,7 @@ function shouldDisplayByMode(isActive, isNew, mode){
 // Returns true if the parsed PQL specifies an explicit geographic scope
 function queryHasExplicitScope(parsed){
     if (!parsed || typeof parsed !== 'object') return false;
+    if (parsed.callsign) return true;
     const s = (parsed.state || parsed.STATE || parsed.region || parsed.country || parsed.COUNTRY || parsed.ref || parsed.reference || parsed.id);
     if (s) return true;
     // Some parsers return a list of filters; look for STATE:/COUNTRY:/REF:
@@ -2553,13 +2553,23 @@ function handleSearchEnter(event) {
 
             // Build context used by matchers
             const spotByRef = {};
+            const spotByCall = {};
             if (Array.isArray(spots)) {
-                for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
+                for (const s of spots) {
+                    if (s && s.reference) {
+                        spotByRef[s.reference] = s;
+                        const call = (s.activator || s.callsign || '').trim().toUpperCase();
+                        if (call) {
+                            if (!spotByCall[call]) spotByCall[call] = [];
+                            spotByCall[call].push(s);
+                        }
+                    }
+                }
             }
             const userActivatedRefs = (activations || []).map(a => a.reference);
             const now = Date.now();
             const nferByRef = buildNferByRef(parks);
-            const ctx = { bounds, spotByRef, userActivatedRefs, now, userLat, userLng, nferByRef };
+            const ctx = { bounds, spotByRef, spotByCall, userActivatedRefs, now, userLat, userLng, nferByRef };
 
             // Default scope: only parks inside current bounds
             const scoped = queryHasExplicitScope(parsed);
@@ -2872,6 +2882,7 @@ function normalizeString(str) {
  *  - MINE: 1|0|true|false
  *  - REVIEW: 1|0|true|false
  *  - STATE: <US state/territory 2-letter code>
+ *  - CALL / CALLSIGN: <activator callsign>
  * Free text (quoted "like this" or bare) is matched against name/reference.
  */
 function parseStructuredQuery(raw) {
@@ -2886,6 +2897,7 @@ function parseStructuredQuery(raw) {
         isNew: null,
         mine: null,
         state: null,
+        callsign: null,
         minDist: null,
         maxDist: null,
         nferWithRefs: [],
@@ -2946,6 +2958,10 @@ function parseStructuredQuery(raw) {
 
         } else if (key === 'STATE') {
             const st = value.toUpperCase().match(/([A-Z]{2})$/); if (st && st[1]) result.state = st[1];
+
+        } else if (key === 'CALL' || key === 'CALLSIGN') {
+            result.callsign = value.trim().toUpperCase();
+            if (result.active === null) result.active = true; // default to ACTIVE:1 when filtering by callsign
 
         } else if (key === 'REVIEW') {
             const v = value.toLowerCase(); result.hasReview = (v === '1' || v === 'true');
@@ -3010,15 +3026,16 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const { bounds } = ctx || {};
 
     // 1) Proximity or in-view constraint
-    const hasDistConstraint   = (parsed.minDist !== null) || (parsed.maxDist !== null);
-    const hasStateConstraint  = !!parsed.state;
-    const hasNferConstraint   = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
+    const hasDistConstraint    = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    const hasStateConstraint   = !!parsed.state;
+    const hasNferConstraint    = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
     const hasCountryConstraint = !!parsed.country;
     const hasRefConstraint     = Array.isArray(parsed.refs) && parsed.refs.length > 0;
+    const hasCallConstraint    = !!parsed.callsign;
 
     // Default to in-bounds unless one of the *explicit* global-scope keys is present
     const hasGlobalConstraint = hasDistConstraint || hasStateConstraint || hasNferConstraint
-        || hasCountryConstraint || hasRefConstraint;
+        || hasCountryConstraint || hasRefConstraint || hasCallConstraint;
 
     if (hasGlobalConstraint) {
         if (hasDistConstraint) {
@@ -3129,6 +3146,12 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!parsed.active && active) return false;
     }
 
+    // 9.5) CALLSIGN filter (requires ACTIVE)
+    if (parsed.callsign && ctx && ctx.spotByCall) {
+        const arr = ctx.spotByCall[parsed.callsign];
+        if (!(Array.isArray(arr) && arr.some(s => s.reference === park.reference))) return false;
+    }
+
     // 10) MODE / MIN / MAX — QSO bucket check
     if (parsed.min !== null || parsed.max !== null || parsed.mode) {
         const mode  = parsed.mode;
@@ -3166,11 +3189,19 @@ function fitToMatchesIfGlobalScope(parsed, matched) {
     const usedGlobalScope =
         (!!parsed.state) ||
         (!!parsed.country) ||
+        (!!parsed.callsign) ||
         (Array.isArray(parsed.refs) && parsed.refs.length > 0) ||
         (parsed.minDist !== null) || (parsed.maxDist !== null) ||
         (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
 
     if (!usedGlobalScope || !matched || !matched.length) return;
+
+    // When filtering by callsign, keep the current zoom level and center on the park
+    if (parsed.callsign && matched.length === 1 && map) {
+        const park = matched[0];
+        map.flyTo([park.latitude, park.longitude], map.getZoom());
+        return;
+    }
 
     const latlngs = matched.map(p => [p.latitude, p.longitude]);
     const b = L.latLngBounds(latlngs);
