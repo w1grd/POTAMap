@@ -338,7 +338,7 @@
 
 /* Highlight parks that have PN&R reviews */
 .leaflet-marker-icon.has-review {
-    box-shadow: 0 0 0 3px lightblue, 0 0 0 5px black;
+    box-shadow: 0 0 0 1.5px rgba(255, 215, 0, 0.95), 0 0 0 2.5px rgba(0, 0, 0, 0.9);
     border-radius: 50%;
 }
 

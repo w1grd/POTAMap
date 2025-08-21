@@ -701,7 +701,7 @@ function ensureReviewHaloCss() {
     if (document.getElementById('review-halo-css')) return;
     const css = `
   .leaflet-marker-icon.has-review {
-    box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.95), 0 0 0 3px rgba(0, 0, 0, 0.9) !important;
+    box-shadow: 0 0 0 1.5px rgba(255, 215, 0, 0.95), 0 0 0 2.5px rgba(0, 0, 0, 0.9) !important;
     border-radius: 50%;
   }
   `;
@@ -735,6 +735,7 @@ function decorateReviewHalo(marker, park) {
 
     const haloGold = L.circleMarker(latLng, {
         pane: 'reviewHalos',
+        radius: baseR + 3,
         radius: baseR + 4,
         color: '#FFD700',
         weight: 2,
@@ -745,7 +746,7 @@ function decorateReviewHalo(marker, park) {
 
     const haloBlack = L.circleMarker(latLng, {
         pane: 'reviewHalos',
-        radius: baseR + 6,
+        radius: baseR + 5,
         color: '#000',
         weight: 2,
         fillOpacity: 0,
