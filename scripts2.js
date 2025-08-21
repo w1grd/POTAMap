@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//26
+//27
 //
 // Yield to the browser for first paint
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
@@ -736,8 +736,11 @@ async function redrawMarkersWithFilters(){
             if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
             // Does this park have a PN&R review URL?
-            const hasReview = !!park.reviewURL;
-
+            let hasReview = !!park.reviewURL;
+            if (!hasReview && window.__REVIEW_URLS instanceof Map) {
+                const urlFromCache = window.__REVIEW_URLS.get(reference);
+                if (urlFromCache) { park.reviewURL = urlFromCache; hasReview = true; }
+            }
             // Determine marker class for animated divIcon
             const markerClasses = [];
             if (isNew) markerClasses.push('pulse-marker');
@@ -775,12 +778,13 @@ async function redrawMarkersWithFilters(){
                 // If the park has a review, add two decorative, non-interactive rings behind the base dot
                 if (hasReview) {
                     const baseR = (marker.options.radius || 6);
+
                     // outer thin black ring
                     L.circleMarker([latitude, longitude], {
                         pane: 'reviewHalos',
-                        radius: baseR + 7,
+                        radius: baseR + 8,
                         color: '#000',
-                        weight: 2,
+                        weight: 3,
                         fillOpacity: 0,
                         opacity: 1,
                         interactive: false
@@ -789,9 +793,9 @@ async function redrawMarkersWithFilters(){
                     // inner light-blue ring
                     L.circleMarker([latitude, longitude], {
                         pane: 'reviewHalos',
-                        radius: baseR + 4,
+                        radius: baseR + 5,
                         color: 'lightblue',
-                        weight: 4,
+                        weight: 6,
                         fillOpacity: 0,
                         opacity: 0.95,
                         interactive: false
@@ -1927,6 +1931,12 @@ async function fetchAndApplyReviewUrls() {
         const res = await fetch(URL, { cache: 'no-store' });
         if (!res.ok) throw new Error('Failed to load park-urls.json');
         const rows = await res.json();
+        // Build a quick reference map { reference -> reviewURL } for use during redraws
+        const reviewMap = new Map();
+        for (const r of rows) {
+            if (r && r.reference && r.reviewURL) reviewMap.set(r.reference, r.reviewURL);
+        }
+        try { window.__REVIEW_URLS = reviewMap; } catch (_) {}
         if (!Array.isArray(rows)) return false;
 
         // Index current in-memory parks by ref for quick patch
