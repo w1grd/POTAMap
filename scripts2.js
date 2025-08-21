@@ -30,6 +30,7 @@ async function ensureModesInitOnce() {
 // Initialize global variables
 let activations = [];
 let map; // Leaflet map instance
+let isPopupOpen = false; // Tracks whether a map popup is currently open
 let parks = []; // Global variable to store parks data
 let userLat = null;
 let userLng = null;
@@ -3836,7 +3837,8 @@ function initializeMap(lat, lng) {
 
     // Attach dynamic spot fetching to map movement
     let skipNextSpotFetch = false;
-    mapInstance.on("popupopen", () => { skipNextSpotFetch = true; });
+    mapInstance.on("popupopen", () => { skipNextSpotFetch = true; isPopupOpen = true; });
+    mapInstance.on("popupclose", () => { isPopupOpen = false; });
     if (!isDesktopMode) {
         mapInstance.on(
             "moveend",
@@ -5096,7 +5098,9 @@ window.addEventListener('resize', debounce(() => {
     if (map) {
         map.invalidateSize();
         console.log("Map size invalidated on window resize.");
-        applyActivationToggleState();
+        if (!isPopupOpen) {
+            applyActivationToggleState();
+        }
     }
 }, 300));
 
