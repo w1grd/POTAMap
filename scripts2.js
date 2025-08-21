@@ -189,6 +189,7 @@ function ensurePqlPulseCss() {
   position: relative;
   width: 36px;
   height: 36px;
+  box-sizing: border-box;
   border-radius: 50%;
   background: rgba(255, 255, 0, 0.95);
   box-shadow: 0 0 0 2px #000 inset, 0 0 4px rgba(0,0,0,0.6);
@@ -200,6 +201,7 @@ function ensurePqlPulseCss() {
   top: 50%;
   width: 36px;
   height: 36px;
+  box-sizing: border-box;
   transform: translate(-50%, -50%) scale(1);
   border-radius: 50%;
   border: 2px solid rgba(255, 215, 0, 0.9);
