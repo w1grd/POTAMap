@@ -832,7 +832,8 @@ async function redrawMarkersWithFilters(){
             if (usingDivIcon) {
                 marker = L.marker([latitude, longitude], {
                     icon: L.divIcon({
-                        className: markerClassName, // includes 'has-review' when applicable
+                        // include Leaflet's default class so our CSS (which targets .leaflet-div-icon.has-review) applies
+                        className: `leaflet-div-icon ${markerClassName}`.trim(),
                         iconSize: [20, 20],
                     })
                 });
