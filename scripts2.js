@@ -3027,15 +3027,16 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const { bounds } = ctx || {};
 
     // 1) Proximity or in-view constraint
-    const hasDistConstraint   = (parsed.minDist !== null) || (parsed.maxDist !== null);
-    const hasStateConstraint  = !!parsed.state;
-    const hasNferConstraint   = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
+    const hasDistConstraint    = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    const hasStateConstraint   = !!parsed.state;
+    const hasNferConstraint    = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
     const hasCountryConstraint = !!parsed.country;
     const hasRefConstraint     = Array.isArray(parsed.refs) && parsed.refs.length > 0;
+    const hasCallConstraint    = !!parsed.callsign;
 
     // Default to in-bounds unless one of the *explicit* global-scope keys is present
     const hasGlobalConstraint = hasDistConstraint || hasStateConstraint || hasNferConstraint
-        || hasCountryConstraint || hasRefConstraint;
+        || hasCountryConstraint || hasRefConstraint || hasCallConstraint;
 
     if (hasGlobalConstraint) {
         if (hasDistConstraint) {
