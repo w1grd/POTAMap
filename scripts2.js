@@ -187,8 +187,8 @@ function ensurePqlPulseCss() {
 .pql-pulse-icon { pointer-events: none; }
 .pql-pulse {
   position: relative;
-  width: 35px;
-  height: 35px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: rgba(255, 255, 0, 0.95);
   box-shadow: 0 0 0 2px #000 inset, 0 0 4px rgba(0,0,0,0.6);
@@ -198,8 +198,8 @@ function ensurePqlPulseCss() {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 35px;
-  height: 35px;
+  width: 36px;
+  height: 36px;
   transform: translate(-50%, -50%) scale(1);
   border-radius: 50%;
   border: 2px solid rgba(255, 215, 0, 0.9);
@@ -244,8 +244,8 @@ function _addPqlHighlightMarker(layer, park) {
     const icon = L.divIcon({
         className: 'pql-pulse-icon',
         html: '<div class="pql-pulse"></div>',
-        iconSize: [35,35],
-        iconAnchor: [17.5,17.5]
+        iconSize: [36,36],
+        iconAnchor: [18,18]
     });
     L.marker([park.latitude, park.longitude], {
         icon,
