@@ -30,6 +30,7 @@ async function ensureModesInitOnce() {
 // Initialize global variables
 let activations = [];
 let map; // Leaflet map instance
+let isPopupOpen = false; // Tracks whether a map popup is currently open
 let parks = []; // Global variable to store parks data
 let userLat = null;
 let userLng = null;
@@ -864,7 +865,7 @@ async function redrawMarkersWithFilters(){
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", { keepInView: true, autoPan: true, autoPanPadding: [20,20] })
+                .bindPopup("<b>Loading park info...</b>", { keepInView: true, autoPan: true, autoPanPadding: [40,40] })
                 .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
                 .on('click', function(){ this.closeTooltip(); });
 
@@ -3835,10 +3836,14 @@ function initializeMap(lat, lng) {
     });
 
     // Attach dynamic spot fetching to map movement
+    let skipNextSpotFetch = false;
+    mapInstance.on("popupopen", () => { skipNextSpotFetch = true; isPopupOpen = true; });
+    mapInstance.on("popupclose", () => { isPopupOpen = false; });
     if (!isDesktopMode) {
         mapInstance.on(
             "moveend",
             debounce(() => {
+                if (skipNextSpotFetch) { skipNextSpotFetch = false; return; }
                 console.log("Map moved or zoomed. Updating spots...");
                 fetchAndDisplaySpotsInCurrentBounds(mapInstance)
                     .then(() => applyActivationToggleState());
@@ -3967,7 +3972,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 keepInView: true,
                 autoPan: true,
                 // add a little breathing room around the popup
-                autoPanPadding: [20, 20],
+                autoPanPadding: [40, 40],
                 // cap its width on small screens
                 maxWidth: 280
             })
@@ -5093,7 +5098,9 @@ window.addEventListener('resize', debounce(() => {
     if (map) {
         map.invalidateSize();
         console.log("Map size invalidated on window resize.");
-        applyActivationToggleState();
+        if (!isPopupOpen) {
+            applyActivationToggleState();
+        }
     }
 }, 300));
 
