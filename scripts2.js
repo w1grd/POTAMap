@@ -216,6 +216,20 @@ function ensurePqlPulseCss() {
     document.head.appendChild(style);
 }
 
+// Ensure CSS exists to visually highlight markers that have PN&R reviews
+function ensureReviewHaloCss() {
+    if (document.getElementById('review-halo-css')) return;
+    const css = `
+    .leaflet-marker-icon.has-review {
+      box-shadow: 0 0 0 3px rgba(173, 216, 230, 0.95), 0 0 0 5px rgba(0, 0, 0, 0.9);
+      border-radius: 50%;
+    }`;
+    const style = document.createElement('style');
+    style.id = 'review-halo-css';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
+
 
 function _addPqlHighlightMarker(layer, park) {
     if (!(park.latitude && park.longitude)) return;
@@ -346,6 +360,7 @@ function modeCountsForParkRef(reference){
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         initializeMenu();
+        ensureReviewHaloCss();
 
         // === Off-main-thread per-mode QSO counting (performance patch) ===
         let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
@@ -694,6 +709,13 @@ async function redrawMarkersWithFilters(){
             for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
         }
 
+        // Ensure a pane for review halos so the rings sit behind markers
+        if (!map.getPane('reviewHalos')) {
+            map.createPane('reviewHalos');
+            const pane = map.getPane('reviewHalos');
+            if (pane) pane.style.zIndex = 399; // just under default marker pane (~400)
+        }
+
         parks.forEach((park) => {
             const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
             if (!(latitude && longitude)) return;
@@ -752,11 +774,13 @@ async function redrawMarkersWithFilters(){
 
                 // If the park has a review, add two decorative, non-interactive rings behind the base dot
                 if (hasReview) {
+                    const baseR = (marker.options.radius || 6);
                     // outer thin black ring
                     L.circleMarker([latitude, longitude], {
-                        radius: (marker.options.radius || 6) + 5,
-                        color: "#000",
-                        weight: 1,
+                        pane: 'reviewHalos',
+                        radius: baseR + 7,
+                        color: '#000',
+                        weight: 2,
                         fillOpacity: 0,
                         opacity: 1,
                         interactive: false
@@ -764,11 +788,12 @@ async function redrawMarkersWithFilters(){
 
                     // inner light-blue ring
                     L.circleMarker([latitude, longitude], {
-                        radius: (marker.options.radius || 6) + 3,
-                        color: "lightblue",
-                        weight: 3,
+                        pane: 'reviewHalos',
+                        radius: baseR + 4,
+                        color: 'lightblue',
+                        weight: 4,
                         fillOpacity: 0,
-                        opacity: 1,
+                        opacity: 0.95,
                         interactive: false
                     }).addTo(map.activationsLayer);
                 }
