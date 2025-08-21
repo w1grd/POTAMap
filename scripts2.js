@@ -864,7 +864,7 @@ async function redrawMarkersWithFilters(){
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", { keepInView: true, autoPan: true, autoPanPadding: [20,20] })
+                .bindPopup("<b>Loading park info...</b>", { keepInView: true, autoPan: true, autoPanPadding: [40,40] })
                 .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
                 .on('click', function(){ this.closeTooltip(); });
 
@@ -3967,7 +3967,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 keepInView: true,
                 autoPan: true,
                 // add a little breathing room around the popup
-                autoPanPadding: [20, 20],
+                autoPanPadding: [40, 40],
                 // cap its width on small screens
                 maxWidth: 280
             })
