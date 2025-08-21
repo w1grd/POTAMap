@@ -28,6 +28,7 @@ Note that the keys  **MAX** and **MIN** work in two ways. If you have selected a
 | Key | Value | Meaning | Notes |
 |---|---|---|---|
 | `ACTIVE` | `1` \| `0` \| `true` \| `false` | Currently on‑air | Uses live spot data; `ACTIVE:1` = only parks with a current spot. |
+| `CALL` \| `CALLSIGN` | Station callsign | Look for active callsign | Looks at current activations and centers on selected callsign. Assumes `ACTIVE:1`|
 | `COUNTRY` | name or 2‑letter code | Country filter | e.g., `COUNTRY:CA`. **Global scope** (auto‑pan/fit). |
 | `DIST` | `a-b`, `a-`, or `-b` (+ units) | Distance range shorthand | Examples: `DIST:20-50`, `DIST:-30km`, `DIST:100-`. **Global scope** (auto‑pan/fit). |
 | `MAX` | integer ≥ 0 | **Max QSOs** in selected bucket | If `MODE` is set, applies to that mode’s QSO count. If no `MODE`, applies to **total QSOs**. Use `MAX:0` for “none yet”. |
@@ -40,6 +41,8 @@ Note that the keys  **MAX** and **MIN** work in two ways. If you have selected a
 | `NFER` | `1` \| `0` \| `true` \| `false` | Match parks that have ≥1 NFER | Example: `NFER:1 STATE:MA` = parks in MA that have an NFER relationship. |
 | `NFERWITH` | reference or comma list | Parks that are NFER‑neighbors of any given reference(s) | Example: `NFERWITH:US-6909` or `NFERWITH:US-6909,US-3857`. **Global scope** (auto‑pan/fit). |
 | `REF` / `REFERENCE` / `ID` | reference or comma list | Specific park(s) by reference | e.g., `REF:US-1234` or `REFERENCE:US-1234,US-5678`. **Global scope** (auto‑pan/fit). |
+| `REVIEW` | `1` \| `0` \| `true` \| `false` | Match parks that have a review published on POTA News & Reviews | Example: `REVIEW:1 STATE:MA` = parks in MA that have a published review. |
+
 | `SORT` | `DIST` \| `NAME` \| `QSOS` \| `ACTIVATIONS` | Sort result order | `DIST` requires a known user location (geolocate first). |
 | `STATE` | 2‑letter code | U.S. state/territory filter | Accepts `MA`, `US-MA`, etc. Matches multi‑state parks too. **Global scope** (auto‑pan/fit). |
 
