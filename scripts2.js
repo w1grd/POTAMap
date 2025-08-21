@@ -220,14 +220,35 @@ function ensurePqlPulseCss() {
 function ensureReviewHaloCss() {
     if (document.getElementById('review-halo-css')) return;
     const css = `
-    .leaflet-marker-icon.has-review {
-      box-shadow: 0 0 0 3px rgba(173, 216, 230, 0.95), 0 0 0 5px rgba(0, 0, 0, 0.9);
-      border-radius: 50%;
-    }`;
+.leaflet-div-icon.has-review,
+.leaflet-marker-icon.has-review {
+  box-shadow: 0 0 0 3px rgba(173, 216, 230, 0.95), 0 0 0 5px rgba(0, 0, 0, 0.9) !important;
+  border-radius: 50%;
+}`;
     const style = document.createElement('style');
     style.id = 'review-halo-css';
     style.textContent = css;
     document.head.appendChild(style);
+}
+// Build an in-memory cache of review URLs from IndexedDB so redraws can highlight immediately
+async function ensureReviewCacheFromIndexedDB() {
+    try {
+        if (window.__REVIEW_URLS instanceof Map && window.__REVIEW_URLS.size > 0) return;
+        const db = await getDatabase();
+        const tx = db.transaction('parks', 'readonly');
+        const store = tx.objectStore('parks');
+        const all = await new Promise((resolve, reject) => {
+            const req = store.getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = (e) => reject(e.target.error);
+        });
+        const map = new Map();
+        for (const p of all) {
+            if (p && p.reference && p.reviewURL) map.set(p.reference, p.reviewURL);
+        }
+        window.__REVIEW_URLS = map;
+        if (map.size) console.log(`[reviews] Loaded ${map.size} review URLs from IndexedDB.`);
+    } catch (e) { console.warn('ensureReviewCacheFromIndexedDB failed:', e); }
 }
 
 
@@ -474,7 +495,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
 
         // removed duplicate modes init
-
+        await ensureReviewCacheFromIndexedDB();   // <-- add this
         await initializeActivationsDisplay();
         // Load PN&R review URLs (incremental) and refresh markers/popups if updated
         try {
@@ -1925,8 +1946,12 @@ async function fetchAndApplyReviewUrls() {
         const head = await fetch(URL, { method: 'HEAD', cache: 'no-store' });
         const lastMod = head.ok ? head.headers.get('last-modified') : null;
         const prev = localStorage.getItem(KEY);
-        if (lastMod && prev && lastMod === prev) return false; // no change
-
+        if (lastMod && prev && lastMod === prev) {
+            // JSON unchanged — ensure cache from IndexedDB so highlights still work,
+            // and ask caller to do a light refresh if we populated anything.
+            await ensureReviewCacheFromIndexedDB();
+            return (window.__REVIEW_URLS instanceof Map && window.__REVIEW_URLS.size > 0);
+        }
         // GET the JSON
         const res = await fetch(URL, { cache: 'no-store' });
         if (!res.ok) throw new Error('Failed to load park-urls.json');
