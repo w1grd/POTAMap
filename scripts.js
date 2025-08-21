@@ -649,19 +649,19 @@ function buildModeFilterPanel(){
   <div class="mode-filter-panel" role="group" aria-label="Activation mode filters">
     <div class="mode-dots-row">
       <button class="mode-dot dot-new"  data-mode="new"  aria-pressed="${modeFilters.new}">
-        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+        <svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="9"/></svg>
       </button>
       <button class="mode-dot dot-data" data-mode="data" aria-pressed="${modeFilters.data}">
-        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+        <svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="9"/></svg>
       </button>
       <button class="mode-dot dot-cw"   data-mode="cw"   aria-pressed="${modeFilters.cw}">
-        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+        <svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="9"/></svg>
       </button>
       <button class="mode-dot dot-ssb"  data-mode="ssb"  aria-pressed="${modeFilters.ssb}">
-        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+        <svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="9"/></svg>
       </button>
       <button class="mode-dot dot-unk"  data-mode="unk"  aria-pressed="${modeFilters.unk}">
-        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/></svg>
+        <svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="9"/></svg>
       </button>
     </div>
     <div class="mode-dots-labels">
