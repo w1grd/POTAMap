@@ -3882,6 +3882,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         }
         const markerClassName = markerClasses.join(' ');
 
+        // Does this park have a PN&R review URL?
+        let hasReview = !!park.reviewURL;
+        if (!hasReview && window.__REVIEW_URLS instanceof Map) {
+            const urlFromCache = window.__REVIEW_URLS.get(reference);
+            if (urlFromCache) { park.reviewURL = urlFromCache; hasReview = true; }
+        }
+
         const marker = useActiveDiv
             ? L.marker([latitude, longitude], {
                 icon: L.divIcon({
@@ -3897,6 +3904,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 opacity: 1,
                 fillOpacity: 0.9,
             });
+
+        if (hasReview) decorateReviewHalo(marker, park);
 
         marker.park = park;
         marker.currentActivation = currentActivation;
