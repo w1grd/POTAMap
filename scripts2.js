@@ -461,6 +461,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         // removed duplicate modes init
 
         await initializeActivationsDisplay();
+        // Load PN&R review URLs (incremental) and refresh markers/popups if updated
+        try {
+            const changed = await fetchAndApplyReviewUrls();
+            if (changed && typeof refreshMarkers === 'function') {
+                refreshMarkers(); // light redraw
+            }
+        } catch (_) {}
     } catch (e) {
         console.error(e);
     }
@@ -750,6 +757,20 @@ async function redrawMarkersWithFilters(){
                 try {
                     const parkActivations = await fetchParkActivations(reference);
                     await saveParkActivationsToIndexedDB(reference, parkActivations);
+                    // Merge reviewURL from IndexedDB if the in-memory park lacks it
+                    if (!park.reviewURL && park.reference) {
+                        try {
+                            const db = await getDatabase();
+                            const tx = db.transaction('parks', 'readonly');
+                            const store = tx.objectStore('parks');
+                            const rec = await new Promise((res, rej) => {
+                                const req = store.get(park.reference);
+                                req.onsuccess = () => res(req.result || null);
+                                req.onerror = (e) => rej(e.target.error);
+                            });
+                            if (rec && rec.reviewURL) park.reviewURL = rec.reviewURL;
+                        } catch (e) { /* non-fatal */ }
+                    }
                     let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
                     this.setPopupContent(popupContent);
                 } catch (err) {
@@ -1799,6 +1820,77 @@ async function getDatabase() {
     });
 }
 
+/** Upsert arbitrary fields for a park in IndexedDB.parks (by reference). */
+async function upsertParkFieldsInIndexedDB(reference, patch) {
+    const db = await getDatabase();
+    const tx = db.transaction('parks', 'readwrite');
+    const store = tx.objectStore('parks');
+    return new Promise((resolve, reject) => {
+        const getReq = store.get(reference);
+        getReq.onsuccess = () => {
+            const current = getReq.result || { reference };
+            const updated = Object.assign({}, current, patch);
+            const putReq = store.put(updated);
+            putReq.onsuccess = () => resolve(updated);
+            putReq.onerror = (e) => reject(e.target.error);
+        };
+        getReq.onerror = (e) => reject(e.target.error);
+    });
+}
+
+/** Convenience: upsert just the review URL for a park. */
+async function upsertParkReviewURL(reference, reviewURL) {
+    if (!reference || !reviewURL) return null;
+    return upsertParkFieldsInIndexedDB(reference, { reviewURL });
+}
+
+/** Fetch and apply PN&R review URLs to parks (incremental). */
+async function fetchAndApplyReviewUrls() {
+    const URL = '/potamap/data/park-urls.json';
+    const KEY = 'parkUrlsLastModified';
+
+    try {
+        // HEAD to see if changed
+        const head = await fetch(URL, { method: 'HEAD', cache: 'no-store' });
+        const lastMod = head.ok ? head.headers.get('last-modified') : null;
+        const prev = localStorage.getItem(KEY);
+        if (lastMod && prev && lastMod === prev) return false; // no change
+
+        // GET the JSON
+        const res = await fetch(URL, { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load park-urls.json');
+        const rows = await res.json();
+        if (!Array.isArray(rows)) return false;
+
+        // Index current in-memory parks by ref for quick patch
+        const byRef = new Map();
+        if (Array.isArray(parks)) {
+            for (const p of parks) if (p && p.reference) byRef.set(p.reference, p);
+        }
+
+        const tasks = [];
+        for (const r of rows) {
+            const ref = r && r.reference;
+            const url = r && r.reviewURL;
+            if (!ref || !url) continue;
+
+            // IDB upsert
+            tasks.push(upsertParkReviewURL(ref, url));
+
+            // memory upsert (so popups can see it immediately)
+            const mem = byRef.get(ref);
+            if (mem) mem.reviewURL = url;
+        }
+        await Promise.allSettled(tasks);
+
+        if (lastMod) localStorage.setItem(KEY, lastMod);
+        return true;
+    } catch (e) {
+        console.warn('fetchAndApplyReviewUrls failed:', e);
+        return false;
+    }
+}
+
 /**
  * Retrieves all activations from IndexedDB.
  * @returns {Promise<Array>} Array of activation objects.
@@ -2528,6 +2620,10 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
     }
 
     if (directionsLink) popupContent += `<br>${directionsLink}`;
+    // If a PN&R review exists, show it under Get Directions
+    if (park && park.reviewURL) {
+        popupContent += `\n<br><a href="${park.reviewURL}" target="_blank" rel="noopener">Read PN&R Review</a>`;
+    }
 
     if (parkActivations.length > 0) {
         const cwTotal = parkActivations.reduce((sum, act) => sum + (act.qsosCW || act.cw || 0), 0);
@@ -3218,10 +3314,17 @@ function setupSearchBoxListeners() {
 }
 
 // Call the setup function when the DOM is fully loaded
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     setupSearchBoxListeners();
     wireCenterOnMyLocationButton();
     console.log("Search box listeners initialized and geolocation button wired."); // Debugging
+    // Load PN&R review URLs and refresh markers if updated
+    try {
+        const changed = await fetchAndApplyReviewUrls();
+        if (changed && typeof refreshMarkers === 'function') {
+            refreshMarkers();
+        }
+    } catch (_) {}
 });
 
 /**
