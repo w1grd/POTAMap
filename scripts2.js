@@ -736,6 +736,7 @@ function decorateReviewHalo(marker, park) {
     const haloGold = L.circleMarker(latLng, {
         pane: 'reviewHalos',
         radius: baseR + 3,
+        radius: baseR + 4,
         color: '#FFD700',
         weight: 2,
         fillOpacity: 0,
