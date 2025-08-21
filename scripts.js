@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//25
+//28
 //
 // Yield to the browser for first paint
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
@@ -216,6 +216,27 @@ function ensurePqlPulseCss() {
     document.head.appendChild(style);
 }
 
+// Build an in-memory cache of review URLs from IndexedDB so redraws can highlight immediately
+async function ensureReviewCacheFromIndexedDB() {
+    try {
+        if (window.__REVIEW_URLS instanceof Map && window.__REVIEW_URLS.size > 0) return;
+        const db = await getDatabase();
+        const tx = db.transaction('parks', 'readonly');
+        const store = tx.objectStore('parks');
+        const all = await new Promise((resolve, reject) => {
+            const req = store.getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = (e) => reject(e.target.error);
+        });
+        const map = new Map();
+        for (const p of all) {
+            if (p && p.reference && p.reviewURL) map.set(p.reference, p.reviewURL);
+        }
+        window.__REVIEW_URLS = map;
+        if (map.size) console.log(`[reviews] Loaded ${map.size} review URLs from IndexedDB.`);
+    } catch (e) { console.warn('ensureReviewCacheFromIndexedDB failed:', e); }
+}
+
 
 function _addPqlHighlightMarker(layer, park) {
     if (!(park.latitude && park.longitude)) return;
@@ -346,6 +367,9 @@ function modeCountsForParkRef(reference){
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         initializeMenu();
+        ensureReviewHaloCss();
+
+        await ensureReviewCacheFromIndexedDB();
 
         // === Off-main-thread per-mode QSO counting (performance patch) ===
         let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
@@ -458,9 +482,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         await setupPOTAMap();
         if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
 
-        // removed duplicate modes init
-
         await initializeActivationsDisplay();
+        // Load PN&R review URLs (incremental) and refresh markers/popups if updated
+        try {
+            const changed = await fetchAndApplyReviewUrls();
+            if (changed && typeof refreshMarkers === 'function') {
+                refreshMarkers(); // light redraw
+            }
+        } catch (_) {}
     } catch (e) {
         console.error(e);
     }
@@ -667,11 +696,80 @@ function buildModeFilterPanel(){
     });
 }
 
+// Optional CSS fallback for image markers
+function ensureReviewHaloCss() {
+    if (document.getElementById('review-halo-css')) return;
+    const css = `
+  .leaflet-marker-icon.has-review {
+    box-shadow: 0 0 0 1.5px rgba(255, 215, 0, 0.95), 0 0 0 2.5px rgba(0, 0, 0, 0.9) !important;
+    border-radius: 50%;
+  }
+  `;
+    const style = document.createElement('style');
+    style.id = 'review-halo-css';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
 
+// Add visual halo to a marker (two concentric rings) when a review exists
+function decorateReviewHalo(marker, park) {
+    if (!marker || !park || !park.reviewURL || marker.__reviewHalos) return;
+
+    if (!map.getPane('reviewHalos')) {
+        map.createPane('reviewHalos');
+        const pane = map.getPane('reviewHalos');
+        if (pane) pane.style.zIndex = 399; // just under default marker pane
+    }
+
+    const latLng = marker.getLatLng && marker.getLatLng();
+    if (!latLng) return;
+
+    let baseR;
+    if (marker.getRadius) {
+        baseR = marker.options?.radius || marker.getRadius();
+    } else if (marker.options?.icon?.options?.iconSize) {
+        baseR = marker.options.icon.options.iconSize[0] / 2;
+    } else {
+        baseR = 6;
+    }
+
+    const haloGold = L.circleMarker(latLng, {
+        pane: 'reviewHalos',
+        radius: baseR + 3,
+        color: '#FFD700',
+        weight: 2,
+        fillOpacity: 0,
+        opacity: 0.95,
+        interactive: false
+    }).addTo(map.activationsLayer || map);
+
+    const haloBlack = L.circleMarker(latLng, {
+        pane: 'reviewHalos',
+        radius: baseR + 4,
+        color: '#000',
+        weight: 2,
+        fillOpacity: 0,
+        opacity: 1,
+        interactive: false
+    }).addTo(map.activationsLayer || map);
+
+    marker.__reviewHalos = [haloBlack, haloGold];
+    if (marker.on) {
+        marker.on('remove', () => {
+            if (marker.__reviewHalos) {
+                marker.__reviewHalos.forEach(h => {
+                    if (map.activationsLayer) map.activationsLayer.removeLayer(h);
+                    else map.removeLayer(h);
+                });
+                marker.__reviewHalos = null;
+            }
+        });
+    }
+}
 
 // Lightweight refresh: clear and redraw current view using existing flow
 
-/* === Direct redraw path that respects potaFilters (Ada v7) === */
+/* === Direct redraw path that respects potaFilters (Ada v7, patched for PN&R rings) === */
 async function redrawMarkersWithFilters(){
     try{
         if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
@@ -685,6 +783,13 @@ async function redrawMarkersWithFilters(){
         const spotByRef = {};
         if (Array.isArray(spots)) {
             for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
+        }
+
+        // Ensure a pane for review halos so the rings sit behind markers
+        if (!map.getPane('reviewHalos')) {
+            map.createPane('reviewHalos');
+            const pane = map.getPane('reviewHalos');
+            if (pane) pane.style.zIndex = 399; // just under default marker pane (~400)
         }
 
         parks.forEach((park) => {
@@ -706,6 +811,12 @@ async function redrawMarkersWithFilters(){
             if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
             if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
+            // Does this park have a PN&R review URL?
+            let hasReview = !!park.reviewURL;
+            if (!hasReview && window.__REVIEW_URLS instanceof Map) {
+                const urlFromCache = window.__REVIEW_URLS.get(reference);
+                if (urlFromCache) { park.reviewURL = urlFromCache; hasReview = true; }
+            }
             // Determine marker class for animated divIcon
             const markerClasses = [];
             if (isNew) markerClasses.push('pulse-marker');
@@ -717,14 +828,20 @@ async function redrawMarkersWithFilters(){
             }
             const markerClassName = markerClasses.join(' ');
 
-            const marker = markerClasses.length > 0
-                ? L.marker([latitude, longitude], {
+            // Build the marker (animated divIcon vs. simple circle)
+            let marker;
+            const usingDivIcon = markerClasses.length > 0;
+            if (usingDivIcon) {
+                marker = L.marker([latitude, longitude], {
                     icon: L.divIcon({
-                        className: markerClassName,
+                        // include Leaflet's default class for compatibility with Leaflet styles
+                        className: `leaflet-div-icon ${markerClassName}`.trim(),
                         iconSize: [20, 20],
                     })
-                })
-                : L.circleMarker([latitude, longitude], {
+                });
+                if (hasReview) decorateReviewHalo(marker, park);
+            } else {
+                marker = L.circleMarker([latitude, longitude], {
                     radius: 6,
                     fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
                     color: "#000",
@@ -732,6 +849,9 @@ async function redrawMarkersWithFilters(){
                     opacity: 1,
                     fillOpacity: 0.9,
                 });
+
+                if (hasReview) { decorateReviewHalo(marker, park); }
+            }
 
             const tooltipText = currentActivation
                 ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
@@ -750,6 +870,21 @@ async function redrawMarkersWithFilters(){
                 try {
                     const parkActivations = await fetchParkActivations(reference);
                     await saveParkActivationsToIndexedDB(reference, parkActivations);
+                    // Merge reviewURL from IndexedDB if the in-memory park lacks it
+                    if (!park.reviewURL && park.reference) {
+                        try {
+                            const db = await getDatabase();
+                            const tx = db.transaction('parks', 'readonly');
+                            const store = tx.objectStore('parks');
+                            const rec = await new Promise((res, rej) => {
+                                const req = store.get(park.reference);
+                                req.onsuccess = () => res(req.result || null);
+                                req.onerror = (e) => rej(e.target.error);
+                            });
+                            if (rec && rec.reviewURL) park.reviewURL = rec.reviewURL;
+                            if (park.reviewURL) decorateReviewHalo(this, park);
+                        } catch (e) { /* non-fatal */ }
+                    }
                     let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
                     this.setPopupContent(popupContent);
                 } catch (err) {
@@ -1799,6 +1934,87 @@ async function getDatabase() {
     });
 }
 
+/** Upsert arbitrary fields for a park in IndexedDB.parks (by reference). */
+async function upsertParkFieldsInIndexedDB(reference, patch) {
+    const db = await getDatabase();
+    const tx = db.transaction('parks', 'readwrite');
+    const store = tx.objectStore('parks');
+    return new Promise((resolve, reject) => {
+        const getReq = store.get(reference);
+        getReq.onsuccess = () => {
+            const current = getReq.result || { reference };
+            const updated = Object.assign({}, current, patch);
+            const putReq = store.put(updated);
+            putReq.onsuccess = () => resolve(updated);
+            putReq.onerror = (e) => reject(e.target.error);
+        };
+        getReq.onerror = (e) => reject(e.target.error);
+    });
+}
+
+/** Convenience: upsert just the review URL for a park. */
+async function upsertParkReviewURL(reference, reviewURL) {
+    if (!reference || !reviewURL) return null;
+    return upsertParkFieldsInIndexedDB(reference, { reviewURL });
+}
+
+/** Fetch and apply PN&R review URLs to parks (incremental). */
+async function fetchAndApplyReviewUrls() {
+    const URL = '/potamap/data/park-urls.json';
+    const KEY = 'parkUrlsLastModified';
+
+    try {
+        // HEAD to see if changed
+        const head = await fetch(URL, { method: 'HEAD', cache: 'no-store' });
+        const lastMod = head.ok ? head.headers.get('last-modified') : null;
+        const prev = localStorage.getItem(KEY);
+        if (lastMod && prev && lastMod === prev) {
+            // JSON unchanged — ensure cache from IndexedDB so highlights still work,
+            // and ask caller to do a light refresh if we populated anything.
+            await ensureReviewCacheFromIndexedDB();
+            return (window.__REVIEW_URLS instanceof Map && window.__REVIEW_URLS.size > 0);
+        }
+        // GET the JSON
+        const res = await fetch(URL, { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load park-urls.json');
+        const rows = await res.json();
+        // Build a quick reference map { reference -> reviewURL } for use during redraws
+        const reviewMap = new Map();
+        for (const r of rows) {
+            if (r && r.reference && r.reviewURL) reviewMap.set(r.reference, r.reviewURL);
+        }
+        try { window.__REVIEW_URLS = reviewMap; } catch (_) {}
+        if (!Array.isArray(rows)) return false;
+
+        // Index current in-memory parks by ref for quick patch
+        const byRef = new Map();
+        if (Array.isArray(parks)) {
+            for (const p of parks) if (p && p.reference) byRef.set(p.reference, p);
+        }
+
+        const tasks = [];
+        for (const r of rows) {
+            const ref = r && r.reference;
+            const url = r && r.reviewURL;
+            if (!ref || !url) continue;
+
+            // IDB upsert
+            tasks.push(upsertParkReviewURL(ref, url));
+
+            // memory upsert (so popups can see it immediately)
+            const mem = byRef.get(ref);
+            if (mem) mem.reviewURL = url;
+        }
+        await Promise.allSettled(tasks);
+
+        if (lastMod) localStorage.setItem(KEY, lastMod);
+        return true;
+    } catch (e) {
+        console.warn('fetchAndApplyReviewUrls failed:', e);
+        return false;
+    }
+}
+
 /**
  * Retrieves all activations from IndexedDB.
  * @returns {Promise<Array>} Array of activation objects.
@@ -2528,6 +2744,10 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
     }
 
     if (directionsLink) popupContent += `<br>${directionsLink}`;
+    // If a PN&R review exists, show it under Get Directions
+    if (park && park.reviewURL) {
+        popupContent += `\n<br><a href="${park.reviewURL}" target="_blank" rel="noopener">Read PN&R Review</a>`;
+    }
 
     if (parkActivations.length > 0) {
         const cwTotal = parkActivations.reduce((sum, act) => sum + (act.qsosCW || act.cw || 0), 0);
@@ -3218,10 +3438,17 @@ function setupSearchBoxListeners() {
 }
 
 // Call the setup function when the DOM is fully loaded
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     setupSearchBoxListeners();
     wireCenterOnMyLocationButton();
     console.log("Search box listeners initialized and geolocation button wired."); // Debugging
+    // Load PN&R review URLs and refresh markers if updated
+    try {
+        const changed = await fetchAndApplyReviewUrls();
+        if (changed && typeof refreshMarkers === 'function') {
+            refreshMarkers();
+        }
+    } catch (_) {}
 });
 
 /**
@@ -3655,6 +3882,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         }
         const markerClassName = markerClasses.join(' ');
 
+        // Does this park have a PN&R review URL?
+        let hasReview = !!park.reviewURL;
+        if (!hasReview && window.__REVIEW_URLS instanceof Map) {
+            const urlFromCache = window.__REVIEW_URLS.get(reference);
+            if (urlFromCache) { park.reviewURL = urlFromCache; hasReview = true; }
+        }
+
         const marker = useActiveDiv
             ? L.marker([latitude, longitude], {
                 icon: L.divIcon({
@@ -3670,6 +3904,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 opacity: 1,
                 fillOpacity: 0.9,
             });
+
+        if (hasReview) decorateReviewHalo(marker, park);
 
         marker.park = park;
         marker.currentActivation = currentActivation;
