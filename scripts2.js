@@ -369,6 +369,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         initializeMenu();
         ensureReviewHaloCss();
 
+        await ensureReviewCacheFromIndexedDB();
+
         // === Off-main-thread per-mode QSO counting (performance patch) ===
         let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
         let qsoWorker = null;
@@ -480,8 +482,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         await setupPOTAMap();
         if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
 
-        // removed duplicate modes init
-        await ensureReviewCacheFromIndexedDB();   // <-- add this
         await initializeActivationsDisplay();
         // Load PN&R review URLs (incremental) and refresh markers/popups if updated
         try {
@@ -696,29 +696,12 @@ function buildModeFilterPanel(){
     });
 }
 
-// Ensure CSS exists to visually highlight markers that have PN&R reviews
+// Optional CSS fallback for image markers
 function ensureReviewHaloCss() {
     if (document.getElementById('review-halo-css')) return;
     const css = `
-  /* DivIcon markers (active/new pulse) — add explicit overlay ring */
-  .leaflet-div-icon.has-review { position: relative; }
-  .leaflet-div-icon.has-review::after {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 26px;   /* slightly larger than the 20px icon */
-    height: 26px;
-    transform: translate(-50%, -50%);
-    border-radius: 50%;
-    border: 3px solid rgba(173, 216, 230, 0.95); /* light blue */
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.9);    /* thin black outer */
-    pointer-events: none;
-  }
-
-  /* Image markers (non-circle) — keep box-shadow fallback */
   .leaflet-marker-icon.has-review {
-    box-shadow: 0 0 0 3px rgba(173, 216, 230, 0.95), 0 0 0 5px rgba(0, 0, 0, 0.9) !important;
+    box-shadow: 0 0 0 1.5px rgba(255, 215, 0, 0.95), 0 0 0 2.5px rgba(0, 0, 0, 0.9) !important;
     border-radius: 50%;
   }
   `;
@@ -728,55 +711,59 @@ function ensureReviewHaloCss() {
     document.head.appendChild(style);
 }
 
-// Add visual halo to a marker (works for DivIcon markers and circle markers)
+// Add visual halo to a marker (two concentric rings) when a review exists
 function decorateReviewHalo(marker, park) {
-    if (!marker || !park || !park.reviewURL) return;
+    if (!marker || !park || !park.reviewURL || marker.__reviewHalos) return;
 
-    // DivIcon / standard markers (DOM element)
-    if (marker.getElement) {
-        const el = marker.getElement();
-        if (el) el.classList.add('has-review');
-        // also ensure it sticks after mount
-        if (marker.on) {
-            marker.on('add', () => {
-                const el2 = marker.getElement();
-                if (el2) el2.classList.add('has-review');
-            });
-        }
+    if (!map.getPane('reviewHalos')) {
+        map.createPane('reviewHalos');
+        const pane = map.getPane('reviewHalos');
+        if (pane) pane.style.zIndex = 399; // just under default marker pane
     }
 
-    // Circle markers: draw concentric rings behind the dot once
-    if (marker.getRadius && !marker.__reviewHalos) {
-        if (!map.getPane('reviewHalos')) {
-            map.createPane('reviewHalos');
-            const pane = map.getPane('reviewHalos');
-            if (pane) pane.style.zIndex = 399; // just under default marker pane
-        }
-        const baseR = marker.options?.radius || 6;
-        const latLng = marker.getLatLng?.();
-        if (!latLng) return;
+    const latLng = marker.getLatLng && marker.getLatLng();
+    if (!latLng) return;
 
-        const haloOuter = L.circleMarker(latLng, {
-            pane: 'reviewHalos',
-            radius: baseR + 8,
-            color: '#000',
-            weight: 3,
-            fillOpacity: 0,
-            opacity: 1,
-            interactive: false
-        }).addTo(map.activationsLayer || map);
+    let baseR;
+    if (marker.getRadius) {
+        baseR = marker.options?.radius || marker.getRadius();
+    } else if (marker.options?.icon?.options?.iconSize) {
+        baseR = marker.options.icon.options.iconSize[0] / 2;
+    } else {
+        baseR = 6;
+    }
 
-        const haloInner = L.circleMarker(latLng, {
-            pane: 'reviewHalos',
-            radius: baseR + 5,
-            color: 'lightblue',
-            weight: 6,
-            fillOpacity: 0,
-            opacity: 0.95,
-            interactive: false
-        }).addTo(map.activationsLayer || map);
+    const haloGold = L.circleMarker(latLng, {
+        pane: 'reviewHalos',
+        radius: baseR + 3,
+        color: '#FFD700',
+        weight: 2,
+        fillOpacity: 0,
+        opacity: 0.95,
+        interactive: false
+    }).addTo(map.activationsLayer || map);
 
-        marker.__reviewHalos = [haloOuter, haloInner];
+    const haloBlack = L.circleMarker(latLng, {
+        pane: 'reviewHalos',
+        radius: baseR + 5,
+        color: '#000',
+        weight: 2,
+        fillOpacity: 0,
+        opacity: 1,
+        interactive: false
+    }).addTo(map.activationsLayer || map);
+
+    marker.__reviewHalos = [haloBlack, haloGold];
+    if (marker.on) {
+        marker.on('remove', () => {
+            if (marker.__reviewHalos) {
+                marker.__reviewHalos.forEach(h => {
+                    if (map.activationsLayer) map.activationsLayer.removeLayer(h);
+                    else map.removeLayer(h);
+                });
+                marker.__reviewHalos = null;
+            }
+        });
     }
 }
 
@@ -839,8 +826,6 @@ async function redrawMarkersWithFilters(){
                 else if (mode === 'SSB') markerClasses.push('mode-ssb');
                 else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
             }
-            // Add visual class when a review exists (used for divIcon markers)
-            if (hasReview) markerClasses.push('has-review');
             const markerClassName = markerClasses.join(' ');
 
             // Build the marker (animated divIcon vs. simple circle)
@@ -849,7 +834,7 @@ async function redrawMarkersWithFilters(){
             if (usingDivIcon) {
                 marker = L.marker([latitude, longitude], {
                     icon: L.divIcon({
-                        // include Leaflet's default class so our CSS (which targets .leaflet-div-icon.has-review) applies
+                        // include Leaflet's default class for compatibility with Leaflet styles
                         className: `leaflet-div-icon ${markerClassName}`.trim(),
                         iconSize: [20, 20],
                     })
@@ -863,10 +848,8 @@ async function redrawMarkersWithFilters(){
                     weight: 1,
                     opacity: 1,
                     fillOpacity: 0.9,
-                    // className: hasReview ? 'has-review' : undefined // (SVG paths don't support box-shadow well)
                 });
 
-                // If the park has a review, add two decorative, non-interactive rings behind the base dot
                 if (hasReview) { decorateReviewHalo(marker, park); }
             }
 
@@ -876,14 +859,6 @@ async function redrawMarkersWithFilters(){
 
             marker.park = park;
             marker.currentActivation = currentActivation;
-
-            // For divIcon markers, ensure the DOM node keeps the 'has-review' class after mount
-            if (usingDivIcon && hasReview) {
-                marker.on('add', () => {
-                    const el = marker.getElement && marker.getElement();
-                    if (el) el.classList.add('has-review');
-                });
-            }
 
             marker
                 .addTo(map.activationsLayer)
@@ -3907,6 +3882,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         }
         const markerClassName = markerClasses.join(' ');
 
+        // Does this park have a PN&R review URL?
+        let hasReview = !!park.reviewURL;
+        if (!hasReview && window.__REVIEW_URLS instanceof Map) {
+            const urlFromCache = window.__REVIEW_URLS.get(reference);
+            if (urlFromCache) { park.reviewURL = urlFromCache; hasReview = true; }
+        }
+
         const marker = useActiveDiv
             ? L.marker([latitude, longitude], {
                 icon: L.divIcon({
@@ -3922,6 +3904,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 opacity: 1,
                 fillOpacity: 0.9,
             });
+
+        if (hasReview) decorateReviewHalo(marker, park);
 
         marker.park = park;
         marker.currentActivation = currentActivation;
