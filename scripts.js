@@ -5118,4 +5118,3 @@ function initializeFilterChips(){
         refreshMarkers();
     });
 }
-
