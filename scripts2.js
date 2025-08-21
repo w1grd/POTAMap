@@ -678,7 +678,7 @@ function buildModeFilterPanel(){
 
 // Lightweight refresh: clear and redraw current view using existing flow
 
-/* === Direct redraw path that respects potaFilters (Ada v7) === */
+/* === Direct redraw path that respects potaFilters (Ada v7, patched for PN&R rings) === */
 async function redrawMarkersWithFilters(){
     try{
         if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
@@ -713,6 +713,9 @@ async function redrawMarkersWithFilters(){
             if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
             if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
+            // Does this park have a PN&R review URL?
+            const hasReview = !!park.reviewURL;
+
             // Determine marker class for animated divIcon
             const markerClasses = [];
             if (isNew) markerClasses.push('pulse-marker');
@@ -722,23 +725,54 @@ async function redrawMarkersWithFilters(){
                 else if (mode === 'SSB') markerClasses.push('mode-ssb');
                 else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
             }
+            // Add visual class when a review exists (used for divIcon markers)
+            if (hasReview) markerClasses.push('has-review');
             const markerClassName = markerClasses.join(' ');
 
-            const marker = markerClasses.length > 0
-                ? L.marker([latitude, longitude], {
+            // Build the marker (animated divIcon vs. simple circle)
+            let marker;
+            const usingDivIcon = markerClasses.length > 0;
+            if (usingDivIcon) {
+                marker = L.marker([latitude, longitude], {
                     icon: L.divIcon({
-                        className: markerClassName,
+                        className: markerClassName, // includes 'has-review' when applicable
                         iconSize: [20, 20],
                     })
-                })
-                : L.circleMarker([latitude, longitude], {
+                });
+            } else {
+                marker = L.circleMarker([latitude, longitude], {
                     radius: 6,
                     fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
                     color: "#000",
                     weight: 1,
                     opacity: 1,
                     fillOpacity: 0.9,
+                    // className: hasReview ? 'has-review' : undefined // (SVG paths don't support box-shadow well)
                 });
+
+                // If the park has a review, add two decorative, non-interactive rings behind the base dot
+                if (hasReview) {
+                    // outer thin black ring
+                    L.circleMarker([latitude, longitude], {
+                        radius: (marker.options.radius || 6) + 5,
+                        color: "#000",
+                        weight: 1,
+                        fillOpacity: 0,
+                        opacity: 1,
+                        interactive: false
+                    }).addTo(map.activationsLayer);
+
+                    // inner light-blue ring
+                    L.circleMarker([latitude, longitude], {
+                        radius: (marker.options.radius || 6) + 3,
+                        color: "lightblue",
+                        weight: 3,
+                        fillOpacity: 0,
+                        opacity: 1,
+                        interactive: false
+                    }).addTo(map.activationsLayer);
+                }
+            }
 
             const tooltipText = currentActivation
                 ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
@@ -746,6 +780,14 @@ async function redrawMarkersWithFilters(){
 
             marker.park = park;
             marker.currentActivation = currentActivation;
+
+            // For divIcon markers, ensure the DOM node keeps the 'has-review' class after mount
+            if (usingDivIcon && hasReview) {
+                marker.on('add', () => {
+                    const el = marker.getElement && marker.getElement();
+                    if (el) el.classList.add('has-review');
+                });
+            }
 
             marker
                 .addTo(map.activationsLayer)

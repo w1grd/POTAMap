@@ -336,6 +336,11 @@
     outline-offset: 2px;
 }
 
+/* Highlight parks that have PN&R reviews */
+.leaflet-marker-icon.has-review {
+    box-shadow: 0 0 0 3px lightblue, 0 0 0 5px black;
+    border-radius: 50%;
+}
 
 /* colors */
 .dot-new  { background: #800080; }             /* purple */
