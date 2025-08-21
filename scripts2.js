@@ -3196,6 +3196,13 @@ function fitToMatchesIfGlobalScope(parsed, matched) {
 
     if (!usedGlobalScope || !matched || !matched.length) return;
 
+    // When filtering by callsign, keep the current zoom level and center on the park
+    if (parsed.callsign && matched.length === 1 && map) {
+        const park = matched[0];
+        map.flyTo([park.latitude, park.longitude], map.getZoom());
+        return;
+    }
+
     const latlngs = matched.map(p => [p.latitude, p.longitude]);
     const b = L.latLngBounds(latlngs);
     map.fitBounds(b.pad(0.1)); // slight padding so edge markers are visible
