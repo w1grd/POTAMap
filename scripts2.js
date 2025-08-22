@@ -825,6 +825,11 @@ async function redrawMarkersWithFilters(){
             }
         }catch(_){}
 
+        // If we're constraining by specific references, force a clean layer so old markers don't linger
+        if (allowedRefs && map.activationsLayer) {
+            try { map.activationsLayer.clearLayers(); } catch(_) {}
+        }
+
         // Ensure a pane for review halos so the rings sit behind markers
         if (!map.getPane('reviewHalos')) {
             map.createPane('reviewHalos');
