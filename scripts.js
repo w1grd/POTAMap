@@ -564,6 +564,7 @@ function queryHasExplicitScope(parsed){
     if (parsed.callsign) return true;
     const s = (parsed.state || parsed.STATE || parsed.region || parsed.country || parsed.COUNTRY || parsed.ref || parsed.reference || parsed.id);
     if (s) return true;
+    if (Array.isArray(parsed.refs) && parsed.refs.length > 0) return true;
     // Some parsers return a list of filters; look for STATE:/COUNTRY:/REF:
     const filters = parsed.filters || parsed.terms || [];
     if (Array.isArray(filters)) {
@@ -2901,6 +2902,7 @@ function parseStructuredQuery(raw) {
         mine: null,
         state: null,
         callsign: null,
+        refs: [],
         minDist: null,
         maxDist: null,
         nferWithRefs: [],
@@ -2968,6 +2970,13 @@ function parseStructuredQuery(raw) {
 
         } else if (key === 'REVIEW') {
             const v = value.toLowerCase(); result.hasReview = (v === '1' || v === 'true');
+
+        } else if (key === 'REF' || key === 'REFERENCE' || key === 'ID') {
+            const arr = String(value).split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+            if (arr.length > 0) {
+                result.refs = arr;
+                result.ref = arr[0];
+            }
 
         } else if (key === 'MINDIST') {
             const { miles } = parseDistanceValue(value); if (!Number.isNaN(miles)) result.minDist = miles;
@@ -3061,6 +3070,12 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
             park.country
         ].filter(Boolean).join(' ');
         if (!normalizeString(hay).includes(parsed.text)) return false;
+    }
+
+    // 2.5) REFERENCE (REF/REFERENCE/ID)
+    if (hasRefConstraint) {
+        const ref = String(park.reference || '').toUpperCase();
+        if (!parsed.refs.includes(ref)) return false;
     }
 
     // 3) STATE
@@ -3197,18 +3212,18 @@ function fitToMatchesIfGlobalScope(parsed, matched) {
         (parsed.minDist !== null) || (parsed.maxDist !== null) ||
         (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
 
-    if (!usedGlobalScope || !matched || !matched.length) return;
-
-    // When filtering by callsign, keep the current zoom level and center on the park
-    if (parsed.callsign && matched.length === 1 && map) {
-        const park = matched[0];
-        map.flyTo([park.latitude, park.longitude], map.getZoom());
-        return;
-    }
+    if (!usedGlobalScope || !map || !matched || !matched.length) return;
 
     const latlngs = matched.map(p => [p.latitude, p.longitude]);
-    const b = L.latLngBounds(latlngs);
-    map.fitBounds(b.pad(0.1)); // slight padding so edge markers are visible
+    const bounds = L.latLngBounds(latlngs);
+
+    if (matched.length === 1) {
+        // Single park: keep current zoom and fly to it
+        map.flyTo(bounds.getCenter(), map.getZoom());
+    } else {
+        // Multiple parks: fit them all in view (may adjust zoom)
+        map.fitBounds(bounds, { padding: [50, 50], animate: true });
+    }
 }
 
 /**
