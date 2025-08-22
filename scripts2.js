@@ -218,7 +218,31 @@ function ensurePqlPulseCss() {
     style.textContent = css;
     document.head.appendChild(style);
 }
+// Parse REF / REFERENCE / ID filters from a PQL string (e.g., "? REF: US-1234, K-0456")
+function parseRefsFromPql(raw){
+    try{
+        if (!raw || typeof raw !== 'string') return null;
+        const s = raw.trim();
+        if (!s.startsWith('?')) return null;
 
+        // Collect all occurrences like REF: X, REFERENCE:"Y", ID:Z
+        const refs = [];
+        // allow multiple keys and comma/space separated values, quoted or unquoted
+        const re = /\b(?:REF|REFERENCE|ID)\s*:\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9\-_,.]+))/gi;
+        let m;
+        while ((m = re.exec(s)) !== null){
+            const val = (m[1] || m[2] || m[3] || '').trim();
+            if (!val) continue;
+            // split on commas if present
+            val.split(',').forEach(r => {
+                const rr = r.trim();
+                if (rr) refs.push(rr.toUpperCase());
+            });
+        }
+        if (refs.length === 0) return null;
+        return new Set(refs);
+    }catch(_){ return null; }
+}
 // Build an in-memory cache of review URLs from IndexedDB so redraws can highlight immediately
 async function ensureReviewCacheFromIndexedDB() {
     try {
@@ -788,6 +812,19 @@ async function redrawMarkersWithFilters(){
             for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
         }
 
+        // If PQL includes REF/REFERENCE/ID, constrain rendering to those references
+        let allowedRefs = null;
+        try{
+            const searchEl = document.getElementById('searchBox');
+            if (searchEl && typeof searchEl.value === 'string'){
+                allowedRefs = parseRefsFromPql(searchEl.value);
+            }
+            // Also support a programmatic hook if something upstream sets window.__PQL?.refs
+            if (!allowedRefs && window.__PQL && window.__PQL.refs instanceof Set){
+                allowedRefs = window.__PQL.refs;
+            }
+        }catch(_){}
+
         // Ensure a pane for review halos so the rings sit behind markers
         if (!map.getPane('reviewHalos')) {
             map.createPane('reviewHalos');
@@ -797,6 +834,8 @@ async function redrawMarkersWithFilters(){
 
         parks.forEach((park) => {
             const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+            // Enforce REF/REFERENCE/ID filter if present
+            if (allowedRefs && reference && !allowedRefs.has(String(reference).toUpperCase())) return;
             if (!(latitude && longitude)) return;
             const latLng = L.latLng(latitude, longitude);
             if (!bounds.contains(latLng)) return;
