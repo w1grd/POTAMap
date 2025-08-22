@@ -960,11 +960,33 @@ async function redrawMarkersWithFilters(){
             if (allowedRefs && Array.isArray(__refLatLngs) && __refLatLngs.length > 0) {
                 if (__refLatLngs.length === 1) {
                     const [lat, lng] = __refLatLngs[0];
-                    const targetZoom = Math.min((map.getZoom() || 10) + 2, map.getMaxZoom ? map.getMaxZoom() : 18);
-                    map.flyTo([lat, lng], targetZoom, { animate: true, duration: 1.2 });
+                    const curZ = Number.isFinite(map.getZoom()) ? map.getZoom() : 10;
+                    const mz = (typeof map.getMaxZoom === 'function')
+                        ? map.getMaxZoom()
+                        : (Number.isFinite(map.getMaxZoom)
+                            ? map.getMaxZoom
+                            : (Number.isFinite(map.options?.maxZoom) ? map.options.maxZoom : 18));
+                    const targetZoom = Math.min(curZ + 2, mz || 18);
+                    try {
+                        if (typeof map.flyTo === 'function') {
+                            map.flyTo([lat, lng], targetZoom, { animate: true, duration: 1.0 });
+                        } else {
+                            map.setView([lat, lng], targetZoom, { animate: true });
+                        }
+                    } catch (e) {
+                        map.setView([lat, lng], targetZoom, { animate: true });
+                    }
                 } else {
                     const b = L.latLngBounds(__refLatLngs);
-                    map.fitBounds(b.pad(0.1), { animate: true, duration: 1.2 });
+                    const padded = b.pad(0.1);
+                    try {
+                        // Leaflet's fitBounds supports animate, but duration is layer-dependent; keep it simple
+                        map.fitBounds(padded, { animate: true });
+                    } catch (e) {
+                        // Last resort: setView to the center
+                        const c = padded.getCenter();
+                        map.setView([c.lat, c.lng], map.getZoom() || 10, { animate: true });
+                    }
                 }
             }
         } catch (_) { /* non-fatal centering */ }
