@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//30
+//28
 //
 // Yield to the browser for first paint
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
@@ -218,31 +218,7 @@ function ensurePqlPulseCss() {
     style.textContent = css;
     document.head.appendChild(style);
 }
-// Parse REF / REFERENCE / ID filters from a PQL string (e.g., "? REF: US-1234, K-0456")
-function parseRefsFromPql(raw){
-    try{
-        if (!raw || typeof raw !== 'string') return null;
-        const s = raw.trim();
-        if (!s.startsWith('?')) return null;
 
-        // Collect all occurrences like REF: X, REFERENCE:"Y", ID:Z
-        const refs = [];
-        // allow multiple keys and comma/space separated values, quoted or unquoted
-        const re = /\b(?:REF|REFERENCE|ID)\s*:\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9\-_,.]+))/gi;
-        let m;
-        while ((m = re.exec(s)) !== null){
-            const val = (m[1] || m[2] || m[3] || '').trim();
-            if (!val) continue;
-            // split on commas if present
-            val.split(',').forEach(r => {
-                const rr = r.trim();
-                if (rr) refs.push(rr.toUpperCase());
-            });
-        }
-        if (refs.length === 0) return null;
-        return new Set(refs);
-    }catch(_){ return null; }
-}
 // Build an in-memory cache of review URLs from IndexedDB so redraws can highlight immediately
 async function ensureReviewCacheFromIndexedDB() {
     try {
@@ -795,8 +771,8 @@ function decorateReviewHalo(marker, park) {
 }
 
 // Lightweight refresh: clear and redraw current view using existing flow
-/* === Direct redraw path that respects potaFilters (Ada v7, patched for PN&R rings) === */
 
+/* === Direct redraw path that respects potaFilters (Ada v7, patched for PN&R rings) === */
 async function redrawMarkersWithFilters(){
     try{
         if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
@@ -812,27 +788,6 @@ async function redrawMarkersWithFilters(){
             for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
         }
 
-        // If PQL includes REF/REFERENCE/ID, constrain rendering to those references
-        let allowedRefs = null;
-        try{
-            const searchEl = document.getElementById('searchBox');
-            if (searchEl && typeof searchEl.value === 'string'){
-                allowedRefs = parseRefsFromPql(searchEl.value);
-            }
-            // Also support a programmatic hook if something upstream sets window.__PQL?.refs
-            if (!allowedRefs && window.__PQL && window.__PQL.refs instanceof Set){
-                allowedRefs = window.__PQL.refs;
-            }
-        }catch(_){}
-
-        // If we're constraining by specific references, force a clean layer so old markers don't linger
-        if (allowedRefs && map.activationsLayer) {
-            try { map.activationsLayer.clearLayers(); } catch(_) {}
-        }
-
-        // When constraining by references, collect lat/lngs to center/fit at the end
-        const __refLatLngs = [];
-
         // Ensure a pane for review halos so the rings sit behind markers
         if (!map.getPane('reviewHalos')) {
             map.createPane('reviewHalos');
@@ -842,20 +797,9 @@ async function redrawMarkersWithFilters(){
 
         parks.forEach((park) => {
             const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
-
-            // Enforce REF/REFERENCE/ID filter if present
-            if (allowedRefs && reference && !allowedRefs.has(String(reference).toUpperCase())) return;
-
             if (!(latitude && longitude)) return;
             const latLng = L.latLng(latitude, longitude);
-
-            // Only enforce current bounds when NOT using a REF filter
-            if (!allowedRefs && !bounds.contains(latLng)) return;
-
-            // Track coordinates for centering as soon as a REF match with valid coords is seen
-            if (allowedRefs) {
-                __refLatLngs.push([latitude, longitude]);
-            }
+            if (!bounds.contains(latLng)) return;
 
             const isUserActivated = userActivatedReferences.includes(reference);
             let createdTime = null;
@@ -876,7 +820,6 @@ async function redrawMarkersWithFilters(){
                 const urlFromCache = window.__REVIEW_URLS.get(reference);
                 if (urlFromCache) { park.reviewURL = urlFromCache; hasReview = true; }
             }
-
             // Determine marker class for animated divIcon
             const markerClasses = [];
             if (isNew) markerClasses.push('pulse-marker');
@@ -909,6 +852,7 @@ async function redrawMarkersWithFilters(){
                     opacity: 1,
                     fillOpacity: 0.9,
                 });
+
                 if (hasReview) { decorateReviewHalo(marker, park); }
             }
 
@@ -924,8 +868,6 @@ async function redrawMarkersWithFilters(){
                 .bindPopup("<b>Loading park info...</b>", { keepInView: true, autoPan: true, autoPanPadding: [40,40] })
                 .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
                 .on('click', function(){ this.closeTooltip(); });
-
-            // (refLatLngs tracking now handled earlier in loop)
 
             marker.on('popupopen', async function () {
                 try {
@@ -954,47 +896,11 @@ async function redrawMarkersWithFilters(){
                 }
             });
         });
-
-        // If filtering by REF/REFERENCE/ID, center on the single park or fit multiple parks.
-        try {
-            if (allowedRefs && Array.isArray(__refLatLngs) && __refLatLngs.length > 0) {
-                if (__refLatLngs.length === 1) {
-                    const [lat, lng] = __refLatLngs[0];
-                    const curZ = Number.isFinite(map.getZoom()) ? map.getZoom() : 10;
-                    const mz = (typeof map.getMaxZoom === 'function')
-                        ? map.getMaxZoom()
-                        : (Number.isFinite(map.getMaxZoom)
-                            ? map.getMaxZoom
-                            : (Number.isFinite(map.options?.maxZoom) ? map.options.maxZoom : 18));
-                    const targetZoom = Math.min(curZ + 2, mz || 18);
-                    try {
-                        if (typeof map.flyTo === 'function') {
-                            map.flyTo([lat, lng], targetZoom, { animate: true, duration: 1.0 });
-                        } else {
-                            map.setView([lat, lng], targetZoom, { animate: true });
-                        }
-                    } catch (e) {
-                        map.setView([lat, lng], targetZoom, { animate: true });
-                    }
-                } else {
-                    const b = L.latLngBounds(__refLatLngs);
-                    const padded = b.pad(0.1);
-                    try {
-                        // Leaflet's fitBounds supports animate, but duration is layer-dependent; keep it simple
-                        map.fitBounds(padded, { animate: true });
-                    } catch (e) {
-                        // Last resort: setView to the center
-                        const c = padded.getCenter();
-                        map.setView([c.lat, c.lng], map.getZoom() || 10, { animate: true });
-                    }
-                }
-            }
-        } catch (_) { /* non-fatal centering */ }
-
     }catch(e){
         console.error("redrawMarkersWithFilters failed:", e);
     }
 }
+
 
 function refreshMarkers(options = {}) {
     if (!map) return;
@@ -2999,8 +2905,7 @@ function parseStructuredQuery(raw) {
         maxDist: null,
         nferWithRefs: [],
         hasNfer: null,         // ← NEW: boolean or null (no filter)
-        hasReview: null,       // ← NEW: boolean or null (no filter)
-        refs: [],              // ← NEW: explicit reference set
+        hasReview: null        // ← NEW: boolean or null (no filter)
     };
     if (!q) return result;
 
@@ -3056,20 +2961,6 @@ function parseStructuredQuery(raw) {
 
         } else if (key === 'STATE') {
             const st = value.toUpperCase().match(/([A-Z]{2})$/); if (st && st[1]) result.state = st[1];
-
-        } else if (key === 'REF' || key === 'REFERENCE' || key === 'ID') {
-            // Accept comma-separated, quoted or unquoted values; normalize to uppercase
-            const rawList = (value || '').split(',');
-            for (let r of rawList) {
-                r = String(r).trim();
-                if (!r) continue;
-                // strip surrounding quotes if present
-                if ((r.startsWith('"') && r.endsWith('"')) || (r.startsWith("'") && r.endsWith("'"))) {
-                    r = r.slice(1, -1);
-                }
-                const up = r.toUpperCase();
-                if (up && !result.refs.includes(up)) result.refs.push(up);
-            }
 
         } else if (key === 'CALL' || key === 'CALLSIGN') {
             result.callsign = value.trim().toUpperCase();
@@ -3162,11 +3053,6 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!bounds || !bounds.contains(latLng)) return false;
     }
 
-    // 1.5) Explicit reference set (REF/REFERENCE/ID)
-    if (Array.isArray(parsed.refs) && parsed.refs.length > 0) {
-        const refU = String(park.reference || '').toUpperCase();
-        if (!parsed.refs.includes(refU)) return false;
-    }
     // 2) Free-text
     if (parsed.text) {
         const hay = [
@@ -3275,8 +3161,8 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         // Normalize mode key: phone -> ssb, ft8/ft4 -> data
         const lowerRaw = mode ? String(mode).toLowerCase() : null;
         const key = (lowerRaw === 'phone' ? 'ssb'
-                   : (lowerRaw === 'ft8' || lowerRaw === 'ft4') ? 'data'
-                   : lowerRaw);
+            : (lowerRaw === 'ft8' || lowerRaw === 'ft4') ? 'data'
+                : lowerRaw);
 
         let qsoCount = park.qsos || 0;
 
