@@ -564,6 +564,7 @@ function queryHasExplicitScope(parsed){
     if (parsed.callsign) return true;
     const s = (parsed.state || parsed.STATE || parsed.region || parsed.country || parsed.COUNTRY || parsed.ref || parsed.reference || parsed.id);
     if (s) return true;
+    if (Array.isArray(parsed.refs) && parsed.refs.length > 0) return true;
     // Some parsers return a list of filters; look for STATE:/COUNTRY:/REF:
     const filters = parsed.filters || parsed.terms || [];
     if (Array.isArray(filters)) {
@@ -2901,6 +2902,7 @@ function parseStructuredQuery(raw) {
         mine: null,
         state: null,
         callsign: null,
+        refs: [],
         minDist: null,
         maxDist: null,
         nferWithRefs: [],
@@ -2968,6 +2970,13 @@ function parseStructuredQuery(raw) {
 
         } else if (key === 'REVIEW') {
             const v = value.toLowerCase(); result.hasReview = (v === '1' || v === 'true');
+
+        } else if (key === 'REF' || key === 'REFERENCE' || key === 'ID') {
+            const arr = String(value).split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+            if (arr.length > 0) {
+                result.refs = arr;
+                result.ref = arr[0];
+            }
 
         } else if (key === 'MINDIST') {
             const { miles } = parseDistanceValue(value); if (!Number.isNaN(miles)) result.minDist = miles;
@@ -3061,6 +3070,12 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
             park.country
         ].filter(Boolean).join(' ');
         if (!normalizeString(hay).includes(parsed.text)) return false;
+    }
+
+    // 2.5) REFERENCE (REF/REFERENCE/ID)
+    if (hasRefConstraint) {
+        const ref = String(park.reference || '').toUpperCase();
+        if (!parsed.refs.includes(ref)) return false;
     }
 
     // 3) STATE
@@ -3203,6 +3218,18 @@ function fitToMatchesIfGlobalScope(parsed, matched) {
     if (parsed.callsign && matched.length === 1 && map) {
         const park = matched[0];
         map.flyTo([park.latitude, park.longitude], map.getZoom());
+        return;
+    }
+
+    // When filtering by explicit reference(s), center without changing zoom
+    if (Array.isArray(parsed.refs) && parsed.refs.length > 0 && map) {
+        if (matched.length === 1) {
+            const park = matched[0];
+            map.flyTo([park.latitude, park.longitude], map.getZoom());
+        } else {
+            const b = L.latLngBounds(matched.map(p => [p.latitude, p.longitude]));
+            map.flyTo(b.getCenter(), map.getZoom());
+        }
         return;
     }
 
