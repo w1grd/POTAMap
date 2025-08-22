@@ -3212,30 +3212,12 @@ function fitToMatchesIfGlobalScope(parsed, matched) {
         (parsed.minDist !== null) || (parsed.maxDist !== null) ||
         (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
 
-    if (!usedGlobalScope || !matched || !matched.length) return;
+    if (!usedGlobalScope || !map || !matched || !matched.length) return;
 
-    // When filtering by callsign, keep the current zoom level and center on the park
-    if (parsed.callsign && matched.length === 1 && map) {
-        const park = matched[0];
-        map.flyTo([park.latitude, park.longitude], map.getZoom());
-        return;
-    }
-
-    // When filtering by explicit reference(s), center without changing zoom
-    if (Array.isArray(parsed.refs) && parsed.refs.length > 0 && map) {
-        if (matched.length === 1) {
-            const park = matched[0];
-            map.flyTo([park.latitude, park.longitude], map.getZoom());
-        } else {
-            const b = L.latLngBounds(matched.map(p => [p.latitude, p.longitude]));
-            map.flyTo(b.getCenter(), map.getZoom());
-        }
-        return;
-    }
-
+    // Fly to the center of the results without changing the current zoom level
     const latlngs = matched.map(p => [p.latitude, p.longitude]);
-    const b = L.latLngBounds(latlngs);
-    map.fitBounds(b.pad(0.1)); // slight padding so edge markers are visible
+    const bounds = L.latLngBounds(latlngs);
+    map.flyTo(bounds.getCenter(), map.getZoom());
 }
 
 /**
