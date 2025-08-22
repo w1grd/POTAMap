@@ -852,6 +852,11 @@ async function redrawMarkersWithFilters(){
             // Only enforce current bounds when NOT using a REF filter
             if (!allowedRefs && !bounds.contains(latLng)) return;
 
+            // Track coordinates for centering as soon as a REF match with valid coords is seen
+            if (allowedRefs) {
+                __refLatLngs.push([latitude, longitude]);
+            }
+
             const isUserActivated = userActivatedReferences.includes(reference);
             let createdTime = null;
             if (created) {
@@ -920,10 +925,7 @@ async function redrawMarkersWithFilters(){
                 .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
                 .on('click', function(){ this.closeTooltip(); });
 
-            // Track coordinates for centering when using REF/REFERENCE/ID
-            if (allowedRefs) {
-                __refLatLngs.push([latitude, longitude]);
-            }
+            // (refLatLngs tracking now handled earlier in loop)
 
             marker.on('popupopen', async function () {
                 try {
