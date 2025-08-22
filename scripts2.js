@@ -967,6 +967,7 @@ function initializeMenu() {
                     <input type="text" id="searchBox" placeholder="Search name, ID, location..." />
                     <br/>
                     <button id="clearSearch" title="Clear Search" aria-label="Clear Search">Clear Search</button>
+                    <button id="savePqlSearch" title="Save PQL Search" aria-label="Save PQL Search" disabled>Save PQL Search</button>
                 </li>
                 <li>
                     <button id="centerOnGeolocation" title="Center the map based on your current location.">Center on My Location</button>
@@ -3470,6 +3471,73 @@ function clearSearchInput() {
             applyActivationToggleState();
         }
     }
+
+    // 7) Update PQL save button state
+    try { updateSavePqlButtonState(); } catch (e) {}
+}
+
+/**
+ * Constructs a full URL for a given PQL query.
+ * Allows reuse if we ever want to persist searches internally.
+ * @param {string} raw - The raw value from the search box.
+ * @returns {string} - Bookmarkable URL representing the PQL query.
+ */
+function getPqlSearchUrl(raw) {
+    const q = (raw || '').trim();
+    if (!q.startsWith('?')) return 'https://pota.review/potamap';
+    return `https://pota.review/potamap?${encodeURIComponent(q.slice(1))}`;
+}
+
+/**
+ * Invokes the browser's bookmarking facility for the current PQL query.
+ * Falls back to opening the URL so the user can bookmark manually.
+ */
+function savePqlSearch() {
+    const searchBox = document.getElementById('searchBox');
+    if (!searchBox) return;
+    const url = getPqlSearchUrl(searchBox.value);
+    const title = 'POTA Map PQL Search';
+    try {
+        if (window.sidebar && window.sidebar.addPanel) {
+            window.sidebar.addPanel(title, url, '');
+        } else if (window.external && 'AddFavorite' in window.external) {
+            window.external.AddFavorite(url, title);
+        } else {
+            window.open(url, '_blank');
+            alert('Press Ctrl+D (or Cmd+D) to bookmark this search.');
+        }
+    } catch (e) {
+        window.open(url, '_blank');
+    }
+    return url;
+}
+
+/**
+ * Enables or disables the Save PQL Search button based on input value.
+ */
+function updateSavePqlButtonState() {
+    const searchBox = document.getElementById('searchBox');
+    const saveBtn = document.getElementById('savePqlSearch');
+    if (!searchBox || !saveBtn) return;
+    saveBtn.disabled = !searchBox.value.trim().startsWith('?');
+}
+
+/**
+ * Reads a PQL query from the URL and applies it to the search box.
+ */
+function applyInitialPqlFromUrl() {
+    const searchBox = document.getElementById('searchBox');
+    if (!searchBox) return;
+    const qs = window.location.search;
+    if (qs && qs.length > 1) {
+        const decoded = decodeURIComponent(qs.substring(1).replace(/\+/g, ' '));
+        if (decoded) {
+            searchBox.value = '?' + decoded;
+            searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+            updateSavePqlButtonState();
+            try { handleSearchEnter({ key: 'Enter', preventDefault: () => {} }); } catch (e) {}
+        }
+    }
 }
 
 
@@ -5044,11 +5112,24 @@ function addGoToParkButton() {
         console.log("Clear Search button added.");
     }
 
-    // Append Go To Park button after the Clear Search button
+    // Add Save PQL Search button if not already present
+    let saveButton = document.getElementById('savePqlSearch');
+    if (!saveButton) {
+        saveButton = document.createElement('button');
+        saveButton.id = 'savePqlSearch';
+        saveButton.innerText = 'Save PQL Search';
+        saveButton.title = 'Save current PQL query as bookmark';
+        saveButton.style.marginTop = '10px';
+        saveButton.disabled = true;
+        searchBoxContainer.appendChild(saveButton);
+    }
+    saveButton.addEventListener('click', savePqlSearch);
+
+    // Append Go To Park button after the Save PQL button
     searchBoxContainer.appendChild(goToParkButton);
     console.log("Go To Park button added.");
 
-    // Bind Enter key to Go To Park functionality
+    // Bind Enter key to Go To Park functionality and track PQL input
     const searchBox = document.getElementById('searchBox');
     if (searchBox) {
         searchBox.addEventListener('keydown', (event) => {
@@ -5062,8 +5143,12 @@ function addGoToParkButton() {
                 triggerGoToPark(true);
             }
         });
+        searchBox.addEventListener('input', updateSavePqlButtonState);
         console.log("Enter key bound to Go To Park functionality (non-PQL only).");
     }
+
+    updateSavePqlButtonState();
+    applyInitialPqlFromUrl();
 }
 
 /**

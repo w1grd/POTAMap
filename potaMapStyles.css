@@ -88,6 +88,35 @@
     cy: 11;
     r: 8.6;
 }
+
+/* Save PQL Search button styling */
+#savePqlSearch {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    color: #fff;
+    background-color: #336633;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: center;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    margin-top: 10px;
+}
+#savePqlSearch:hover:not(:disabled) {
+    background-color: #264d26;
+    transform: scale(1.02);
+}
+#savePqlSearch:active:not(:disabled) {
+    transform: scale(0.98);
+}
+#savePqlSearch:disabled {
+    background-color: #cccccc;
+    color: #666666;
+    cursor: not-allowed;
+    transform: none;
+}
 /* ================= General layout ================= */
 
 #menu {
