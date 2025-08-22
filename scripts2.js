@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//28
+//30
 //
 // Yield to the browser for first paint
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
@@ -795,8 +795,8 @@ function decorateReviewHalo(marker, park) {
 }
 
 // Lightweight refresh: clear and redraw current view using existing flow
-
 /* === Direct redraw path that respects potaFilters (Ada v7, patched for PN&R rings) === */
+
 async function redrawMarkersWithFilters(){
     try{
         if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
@@ -830,6 +830,9 @@ async function redrawMarkersWithFilters(){
             try { map.activationsLayer.clearLayers(); } catch(_) {}
         }
 
+        // When constraining by references, collect lat/lngs to center/fit at the end
+        const __refLatLngs = [];
+
         // Ensure a pane for review halos so the rings sit behind markers
         if (!map.getPane('reviewHalos')) {
             map.createPane('reviewHalos');
@@ -839,11 +842,15 @@ async function redrawMarkersWithFilters(){
 
         parks.forEach((park) => {
             const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+
             // Enforce REF/REFERENCE/ID filter if present
             if (allowedRefs && reference && !allowedRefs.has(String(reference).toUpperCase())) return;
+
             if (!(latitude && longitude)) return;
             const latLng = L.latLng(latitude, longitude);
-            if (!bounds.contains(latLng)) return;
+
+            // Only enforce current bounds when NOT using a REF filter
+            if (!allowedRefs && !bounds.contains(latLng)) return;
 
             const isUserActivated = userActivatedReferences.includes(reference);
             let createdTime = null;
@@ -864,6 +871,7 @@ async function redrawMarkersWithFilters(){
                 const urlFromCache = window.__REVIEW_URLS.get(reference);
                 if (urlFromCache) { park.reviewURL = urlFromCache; hasReview = true; }
             }
+
             // Determine marker class for animated divIcon
             const markerClasses = [];
             if (isNew) markerClasses.push('pulse-marker');
@@ -896,7 +904,6 @@ async function redrawMarkersWithFilters(){
                     opacity: 1,
                     fillOpacity: 0.9,
                 });
-
                 if (hasReview) { decorateReviewHalo(marker, park); }
             }
 
@@ -912,6 +919,11 @@ async function redrawMarkersWithFilters(){
                 .bindPopup("<b>Loading park info...</b>", { keepInView: true, autoPan: true, autoPanPadding: [40,40] })
                 .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
                 .on('click', function(){ this.closeTooltip(); });
+
+            // Track coordinates for centering when using REF/REFERENCE/ID
+            if (allowedRefs) {
+                __refLatLngs.push([latitude, longitude]);
+            }
 
             marker.on('popupopen', async function () {
                 try {
@@ -940,11 +952,25 @@ async function redrawMarkersWithFilters(){
                 }
             });
         });
+
+        // If filtering by REF/REFERENCE/ID, center on the single park or fit multiple parks.
+        try {
+            if (allowedRefs && Array.isArray(__refLatLngs) && __refLatLngs.length > 0) {
+                if (__refLatLngs.length === 1) {
+                    const [lat, lng] = __refLatLngs[0];
+                    const targetZoom = Math.min((map.getZoom() || 10) + 2, map.getMaxZoom ? map.getMaxZoom() : 18);
+                    map.flyTo([lat, lng], targetZoom, { animate: true, duration: 1.2 });
+                } else {
+                    const b = L.latLngBounds(__refLatLngs);
+                    map.fitBounds(b.pad(0.1), { animate: true, duration: 1.2 });
+                }
+            }
+        } catch (_) { /* non-fatal centering */ }
+
     }catch(e){
         console.error("redrawMarkersWithFilters failed:", e);
     }
 }
-
 
 function refreshMarkers(options = {}) {
     if (!map) return;
