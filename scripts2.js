@@ -3214,10 +3214,16 @@ function fitToMatchesIfGlobalScope(parsed, matched) {
 
     if (!usedGlobalScope || !map || !matched || !matched.length) return;
 
-    // Fly to the center of the results without changing the current zoom level
     const latlngs = matched.map(p => [p.latitude, p.longitude]);
     const bounds = L.latLngBounds(latlngs);
-    map.flyTo(bounds.getCenter(), map.getZoom());
+
+    if (matched.length === 1) {
+        // Single park: keep current zoom and fly to it
+        map.flyTo(bounds.getCenter(), map.getZoom());
+    } else {
+        // Multiple parks: fit them all in view (may adjust zoom)
+        map.fitBounds(bounds, { padding: [50, 50], animate: true });
+    }
 }
 
 /**
