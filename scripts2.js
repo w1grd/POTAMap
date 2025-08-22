@@ -2949,7 +2949,8 @@ function parseStructuredQuery(raw) {
         maxDist: null,
         nferWithRefs: [],
         hasNfer: null,         // ← NEW: boolean or null (no filter)
-        hasReview: null        // ← NEW: boolean or null (no filter)
+        hasReview: null,       // ← NEW: boolean or null (no filter)
+        refs: [],              // ← NEW: explicit reference set
     };
     if (!q) return result;
 
@@ -3005,6 +3006,20 @@ function parseStructuredQuery(raw) {
 
         } else if (key === 'STATE') {
             const st = value.toUpperCase().match(/([A-Z]{2})$/); if (st && st[1]) result.state = st[1];
+
+        } else if (key === 'REF' || key === 'REFERENCE' || key === 'ID') {
+            // Accept comma-separated, quoted or unquoted values; normalize to uppercase
+            const rawList = (value || '').split(',');
+            for (let r of rawList) {
+                r = String(r).trim();
+                if (!r) continue;
+                // strip surrounding quotes if present
+                if ((r.startsWith('"') && r.endsWith('"')) || (r.startsWith("'") && r.endsWith("'"))) {
+                    r = r.slice(1, -1);
+                }
+                const up = r.toUpperCase();
+                if (up && !result.refs.includes(up)) result.refs.push(up);
+            }
 
         } else if (key === 'CALL' || key === 'CALLSIGN') {
             result.callsign = value.trim().toUpperCase();
@@ -3097,6 +3112,11 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (!bounds || !bounds.contains(latLng)) return false;
     }
 
+    // 1.5) Explicit reference set (REF/REFERENCE/ID)
+    if (Array.isArray(parsed.refs) && parsed.refs.length > 0) {
+        const refU = String(park.reference || '').toUpperCase();
+        if (!parsed.refs.includes(refU)) return false;
+    }
     // 2) Free-text
     if (parsed.text) {
         const hay = [
