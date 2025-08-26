@@ -290,6 +290,46 @@ async function ensureRecentAddsFromChangesJSON() {
     }
 }
 
+// Ensure parks are present in memory and IndexedDB; if DB is empty, force-load allparks.json
+async function ensureParksLoadedFromNetworkIfEmpty(){
+    try {
+        const db = await getDatabase();
+        // Count existing records in IDB.parks
+        const count = await new Promise((resolve, reject) => {
+            const tx = db.transaction('parks', 'readonly');
+            const store = tx.objectStore('parks');
+            const req = store.count();
+            req.onsuccess = () => resolve(req.result || 0);
+            req.onerror  = (e) => reject(e.target.error);
+        });
+
+        const haveMem = Array.isArray(window.parks) && window.parks.length > 0;
+        if (count > 0 && haveMem) return; // everything is fine
+
+        // Fetch fresh allparks.json regardless of any localStorage timestamp
+        const res = await fetch('/potamap/data/allparks.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load allparks.json');
+        const rows = await res.json();
+        if (!Array.isArray(rows) || rows.length === 0) throw new Error('allparks.json is empty');
+
+        // Write to IDB.parks (bulk upsert)
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction('parks', 'readwrite');
+            const store = tx.objectStore('parks');
+            for (const p of rows) store.put(p);
+            tx.oncomplete = () => resolve();
+            tx.onerror    = (e) => reject(e.target.error);
+        });
+
+        // Update in-memory copy and mark fetch timestamp
+        window.parks = rows;
+        try { localStorage.setItem('fetchTimestamp::allparks.json', Date.now().toString()); } catch(_) {}
+        console.log(`[bootstrap] Loaded ${rows.length} parks from network and repopulated IndexedDB.`);
+        if (typeof refreshMarkers === 'function') refreshMarkers({ full: true });
+    } catch (e) {
+        console.warn('ensureParksLoadedFromNetworkIfEmpty failed:', e);
+    }
+}
 
 function _addPqlHighlightMarker(layer, park) {
     if (!(park.latitude && park.longitude)) return;
@@ -535,6 +575,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         await ensureReviewCacheFromIndexedDB();
         // Load true new-park refs from changes.json to avoid mass purple due to drifting 'created'
         try { await ensureRecentAddsFromChangesJSON(); } catch (e) { console.warn(e); }
+
+        // If IndexedDB.parks is empty (e.g., after a manual reset), force-load allparks.json now
+        await ensureParksLoadedFromNetworkIfEmpty();
 
         // === Off-main-thread per-mode QSO counting (performance patch) ===
         let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
@@ -1045,7 +1088,24 @@ async function redrawMarkersWithFilters(){
                             if (park.reviewURL) decorateReviewHalo(this, park);
                         } catch (e) { /* non-fatal */ }
                     }
-                    let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                    // Build a display-safe copy so we don't show stale or unintended change banners
+                    const displayPark = Object.assign({}, park);
+                    try {
+                        const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
+                        const isTrulyNew = RECENT.has(park.reference);
+                        // Only keep the `change`/`created` fields if the park is truly new per backend delta window
+                        if (!isTrulyNew) {
+                            delete displayPark.change;
+                            delete displayPark.created;
+                        } else {
+                            // Normalize the message for UI consistency
+                            if (typeof displayPark.change === 'string' && displayPark.change.toLowerCase().includes('park added')) {
+                                displayPark.change = 'Park added';
+                            }
+                        }
+                    } catch (_) {}
+
+                    let popupContent = await fetchFullPopupContent(displayPark, currentActivation, parkActivations);
                     this.setPopupContent(popupContent);
                 } catch (err) {
                     this.setPopupContent("<b>Error loading park info.</b>");
