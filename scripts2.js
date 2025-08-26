@@ -275,7 +275,7 @@ async function fetchAndApplyReviewUrls() {
     const candidates = Array.isArray(window.REVIEWS_URLS) && window.REVIEWS_URLS.length
         ? window.REVIEWS_URLS
         : [
-            '/potamap/data/reviews.json',       // preferred JSON
+            '/potamap/data/park-review-urls.json',       // preferred JSON
             '/potamap/data/review_urls.json',   // alternate name
             '/potamap/data/reviews.ndjson',     // NDJSON fallback
         ];
