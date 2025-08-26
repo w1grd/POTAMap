@@ -1052,6 +1052,8 @@ async function redrawMarkersWithFilters(){
             // Use recent-adds set instead of created timestamp
             const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
             const isNew = RECENT.has(reference);
+            // Gate the purple highlighting behind the New filter chip
+            const showNewColor = !!potaFilters?.newParks && isNew;
             const currentActivation = spotByRef[reference];
             const isActive = !!currentActivation;
             const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
@@ -1067,7 +1069,7 @@ async function redrawMarkersWithFilters(){
             }
             // Determine marker class for animated divIcon
             const markerClasses = [];
-            if (isNew) markerClasses.push('pulse-marker');
+            if (showNewColor) markerClasses.push('pulse-marker');
             if (isActive) {
                 markerClasses.push('active-pulse-marker');
                 if (mode === 'CW') markerClasses.push('mode-cw');
@@ -1090,7 +1092,7 @@ async function redrawMarkersWithFilters(){
                 if (hasReview) decorateReviewHalo(marker, park);
             } else {
                 const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
-                const fillColor = isNew ? "#800080" : baseColor; // purple only for true new parks
+                const fillColor = showNewColor ? "#800080" : baseColor; // purple only when New filter ON and truly new
                 marker = L.circleMarker([latitude, longitude], {
                     radius: 6,
                     fillColor,
