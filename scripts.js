@@ -54,6 +54,10 @@ let previousMapState = {
     displayedParks: []
 };
 
+// Fast rendering path
+let __canvasRenderer = null; // initialized after map setup
+let __panInProgress = false; // suppress redraws while panning
+
 // --- Lightweight Toast UI -------------------------------------------------
 function ensureToastCss() {
     if (document.getElementById('pql-toast-css')) return;
@@ -834,17 +838,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Initialize the map, then kick off the mode check and worker if needed
         await nextFrame();
         await setupPOTAMap();
+
+        // Use a shared Canvas renderer for circle markers (significantly faster than default SVG)
+        try { __canvasRenderer = L.canvas({ padding: 0.5 }); } catch (_) {}
+
+        // Debounce redraws on pan/zoom; redraw only when interaction settles
+        if (map && typeof map.on === 'function') {
+            map.on('movestart', () => { __panInProgress = true; });
+            map.on('zoomstart', () => { __panInProgress = true; });
+            const debouncedMoveEnd = (function(){
+                let t = null;
+                return () => { clearTimeout(t); t = setTimeout(() => { __panInProgress = false; refreshMarkers(); }, 120); };
+            })();
+            map.on('moveend', debouncedMoveEnd);
+            map.on('zoomend', debouncedMoveEnd);
+        }
+
         if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
 
-        await initializeActivationsDisplay();
-        // Load PN&R review URLs (incremental) and refresh markers/popups if updated
+        // Load PN&R review URLs **before** first draw so halos & links are present
         try {
-            const changed = await fetchAndApplyReviewUrls();
-            if (changed && typeof refreshMarkers === 'function') {
-                refreshMarkers(); // light redraw
-            }
-        } catch (_) {
-        }
+            await fetchAndApplyReviewUrls();
+        } catch (_) {}
+
+        await initializeActivationsDisplay();
     } catch (e) {
         console.error(e);
     }
@@ -1084,7 +1101,8 @@ function decorateReviewHalo(marker, park) {
     if (!map.getPane('reviewHalos')) {
         map.createPane('reviewHalos');
         const pane = map.getPane('reviewHalos');
-        if (pane) pane.style.zIndex = 399; // just under default marker pane
+        // Above Canvas overlay (~400), below DOM marker pane (~600)
+        if (pane) pane.style.zIndex = 450;
     }
 
     const latLng = marker.getLatLng && marker.getLatLng();
@@ -1142,6 +1160,8 @@ async function redrawMarkersWithFilters() {
             console.warn("redrawMarkersWithFilters: map not ready");
             return;
         }
+        // Skip mid-pan redraws; we'll repaint once on moveend/zoomend
+        if (__panInProgress) return;
 //        if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
 //        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         if (!map.activationsLayer) {
@@ -1158,11 +1178,12 @@ async function redrawMarkersWithFilters() {
             for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
         }
 
-        // Ensure a pane for review halos so the rings sit behind markers
+        // Ensure a pane for review halos so the rings render above Canvas overlay but below DOM markers
         if (!map.getPane('reviewHalos')) {
             map.createPane('reviewHalos');
             const pane = map.getPane('reviewHalos');
-            if (pane) pane.style.zIndex = 399; // just under default marker pane (~400)
+            // Ensure halos sit above Canvas overlay (≈400) but below DOM markers (≈600)
+            if (pane) pane.style.zIndex = 450;
         }
 
         parks.forEach((park) => {
@@ -1215,11 +1236,17 @@ async function redrawMarkersWithFilters() {
                         iconSize: [20, 20],
                     })
                 });
-                if (hasReview) decorateReviewHalo(marker, park);
+                if (hasReview) {
+                    decorateReviewHalo(marker, park);
+                } else if (window.__REVIEW_URLS instanceof Map) {
+                    const u = window.__REVIEW_URLS.get(reference);
+                    if (u) { park.reviewURL = u; decorateReviewHalo(marker, park); }
+                }
             } else {
                 const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
                 const fillColor = showNewColor ? "#800080" : baseColor; // purple only when New filter ON and truly new
                 marker = L.circleMarker([latitude, longitude], {
+                    renderer: __canvasRenderer || undefined,
                     radius: 6,
                     fillColor,
                     color: "#000",
@@ -1230,6 +1257,9 @@ async function redrawMarkersWithFilters() {
 
                 if (hasReview) {
                     decorateReviewHalo(marker, park);
+                } else if (window.__REVIEW_URLS instanceof Map) {
+                    const u = window.__REVIEW_URLS.get(reference);
+                    if (u) { park.reviewURL = u; decorateReviewHalo(marker, park); }
                 }
             }
 
@@ -1268,8 +1298,17 @@ async function redrawMarkersWithFilters() {
                         } catch (e) { /* non-fatal */
                         }
                     }
+                    // Ensure we have a review URL from memory cache if IndexedDB didn't have it yet
+                    if (!park.reviewURL && window.__REVIEW_URLS instanceof Map) {
+                        const u = window.__REVIEW_URLS.get(park.reference);
+                        if (u) park.reviewURL = u;
+                    }
                     // Build a display-safe copy so we don't show stale or unintended change banners
                     const displayPark = Object.assign({}, park);
+                    // Back-compat: some popup templates may look for different keys
+                    if (park.reviewURL && !displayPark.reviewURL) displayPark.reviewURL = park.reviewURL;
+                    if (park.reviewURL && !displayPark.reviewUrl) displayPark.reviewUrl = park.reviewURL; // camelCase alt
+                    if (park.reviewURL && !displayPark.pnrUrl)    displayPark.pnrUrl    = park.reviewURL; // legacy key
                     try {
                         const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
                         const isTrulyNew = RECENT.has(park.reference);
@@ -1305,7 +1344,11 @@ function refreshMarkers() {
         updateVisibleModeCounts();
     }
     if (typeof redrawMarkersWithFilters === 'function') {
-        redrawMarkersWithFilters();
+        if (window.requestAnimationFrame) {
+            requestAnimationFrame(() => redrawMarkersWithFilters());
+        } else {
+            redrawMarkersWithFilters();
+        }
     }
 }
 
@@ -2335,65 +2378,156 @@ async function upsertParkReviewURL(reference, reviewURL) {
     return upsertParkFieldsInIndexedDB(reference, {reviewURL});
 }
 
-/** Fetch and apply PN&R review URLs to parks (incremental). */
+// Incrementally fetch PN&R review URLs and persist into IndexedDB + memory cache
 async function fetchAndApplyReviewUrls() {
-    const URL = '/potamap/data/park-urls.json';
-    const KEY = 'parkUrlsLastModified';
+    // Allow override via window.REVIEWS_URLS; otherwise try sensible defaults
+    const candidates = Array.isArray(window.REVIEWS_URLS) && window.REVIEWS_URLS.length
+        ? window.REVIEWS_URLS
+        : [
+            '/potamap/data/park-review-urls.json',       // preferred JSON
+            '/potamap/data/review_urls.json',   // alternate name
+            '/potamap/data/reviews.ndjson',     // NDJSON fallback
+        ];
 
-    try {
-        // HEAD to see if changed
-        const head = await fetch(URL, {method: 'HEAD', cache: 'no-store'});
-        const lastMod = head.ok ? head.headers.get('last-modified') : null;
-        const prev = localStorage.getItem(KEY);
-        if (lastMod && prev && lastMod === prev) {
-            // JSON unchanged — ensure cache from IndexedDB so highlights still work,
-            // and ask caller to do a light refresh if we populated anything.
-            await ensureReviewCacheFromIndexedDB();
-            return (window.__REVIEW_URLS instanceof Map && window.__REVIEW_URLS.size > 0);
+    const SIG_KEY = (u) => `reviewsSig::${u}`; // localStorage signature per URL
+
+    // Parse helpers: accept array of objects, object map, or NDJSON text
+    const normalizeMap = (payload) => {
+        const out = new Map(); // reference -> reviewURL
+        const push = (ref, url) => {
+            if (!ref || !url) return;
+            const r = String(ref).trim().toUpperCase();
+            const u = String(url).trim();
+            if (!/^https?:\/\//i.test(u)) return; // only http(s)
+            out.set(r, u);
+        };
+        if (!payload) return out;
+        if (Array.isArray(payload)) {
+            for (const row of payload) {
+                if (!row || typeof row !== 'object') continue;
+                push(row.reference || row.ref || row.id, row.reviewURL || row.url);
+            }
+            return out;
         }
-        // GET the JSON
-        const res = await fetch(URL, {cache: 'no-store'});
-        if (!res.ok) throw new Error('Failed to load park-urls.json');
-        const rows = await res.json();
-        // Build a quick reference map { reference -> reviewURL } for use during redraws
-        const reviewMap = new Map();
-        for (const r of rows) {
-            if (r && r.reference && r.reviewURL) reviewMap.set(r.reference, r.reviewURL);
+        if (typeof payload === 'object') {
+            // Mapping object: { "US-0001": "https://...", ... } or { items:[...] }
+            if (Array.isArray(payload.items)) {
+                for (const row of payload.items) {
+                    if (!row || typeof row !== 'object') continue;
+                    push(row.reference || row.ref || row.id, row.reviewURL || row.url);
+                }
+                return out;
+            }
+            for (const [k, v] of Object.entries(payload)) {
+                if (v && typeof v === 'string') push(k, v);
+                else if (v && typeof v === 'object') push(v.reference || k, v.reviewURL || v.url);
+            }
+            return out;
         }
+        return out;
+    };
+
+    const tryFetch = async (baseUrl) => {
+        let etag = null, lastMod = null, signature = null, prevSig = null;
         try {
-            window.__REVIEW_URLS = reviewMap;
-        } catch (_) {
+            const head = await fetch(baseUrl, { method: 'HEAD', cache: 'no-store' });
+            if (head.ok) {
+                etag = head.headers.get('etag');
+                lastMod = head.headers.get('last-modified');
+                signature = etag || lastMod || 'no-sig';
+                try { prevSig = localStorage.getItem(SIG_KEY(baseUrl)); } catch { /* ignore */ }
+                // If unchanged and we already have a cache in memory or IDB, skip
+                if (prevSig && signature && prevSig === signature && (window.__REVIEW_URLS instanceof Map) && window.__REVIEW_URLS.size > 0) {
+                    return { changed: false, map: window.__REVIEW_URLS };
+                }
+            }
+        } catch { /* some CDNs block HEAD; proceed to GET */ }
+
+        // Cache-bust GET
+        const v = encodeURIComponent((etag || lastMod || Date.now()).toString());
+        const url = baseUrl + (baseUrl.includes('?') ? `&v=${v}` : `?v=${v}`);
+
+        // Try JSON first
+        try {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) return null;
+            const contentType = (res.headers.get('content-type') || '').toLowerCase();
+            let data = null;
+            if (contentType.includes('application/json') || contentType.includes('+json')) {
+                data = await res.json();
+            } else {
+                // Maybe NDJSON or text mapping
+                const txt = await res.text();
+                try {
+                    // Try parse as JSON anyway
+                    data = JSON.parse(txt);
+                } catch {
+                    // Parse NDJSON lines: each line is a JSON object
+                    const m = new Map();
+                    txt.split(/\r?\n/).forEach(line => {
+                        if (!line.trim()) return;
+                        try {
+                            const obj = JSON.parse(line);
+                            const ref = obj.reference || obj.ref || obj.id;
+                            const url = obj.reviewURL || obj.url;
+                            if (ref && url) m.set(String(ref).toUpperCase(), String(url));
+                        } catch { /* ignore bad line */ }
+                    });
+                    data = { items: Array.from(m, ([reference, url]) => ({ reference, reviewURL: url })) };
+                }
+            }
+            const map = normalizeMap(data);
+            if (map.size === 0) return null; // useless
+
+            // Persist into IndexedDB.parks and memory
+            const db = await getDatabase();
+            // Load all existing parks once
+            const parksAll = await new Promise((resolve, reject) => {
+                const tx = db.transaction('parks', 'readonly');
+                const store = tx.objectStore('parks');
+                const req = store.getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror  = (e) => reject(e.target.error);
+            });
+
+            let updates = 0;
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction('parks', 'readwrite');
+                const store = tx.objectStore('parks');
+                for (const p of parksAll) {
+                    if (!p || !p.reference) continue;
+                    const url = map.get(p.reference.toUpperCase());
+                    if (!url) continue;
+                    if (p.reviewURL === url) continue;
+                    p.reviewURL = url;
+                    store.put(p);
+                    updates++;
+                }
+                tx.oncomplete = () => resolve();
+                tx.onerror    = (e) => reject(e.target.error);
+            });
+
+            // Also update in-memory fast cache for immediate rendering
+            window.__REVIEW_URLS = map;
+            try { localStorage.setItem(SIG_KEY(baseUrl), (signature || v)); } catch { /* ignore */ }
+
+            if (updates > 0) console.log(`[reviews] Applied ${updates} review URL updates from ${baseUrl}.`);
+            return { changed: updates > 0, map };
+        } catch (e) {
+            console.warn('[reviews] fetch failed for', baseUrl, e);
+            return null;
         }
-        if (!Array.isArray(rows)) return false;
+    };
 
-        // Index current in-memory parks by ref for quick patch
-        const byRef = new Map();
-        if (Array.isArray(parks)) {
-            for (const p of parks) if (p && p.reference) byRef.set(p.reference, p);
-        }
-
-        const tasks = [];
-        for (const r of rows) {
-            const ref = r && r.reference;
-            const url = r && r.reviewURL;
-            if (!ref || !url) continue;
-
-            // IDB upsert
-            tasks.push(upsertParkReviewURL(ref, url));
-
-            // memory upsert (so popups can see it immediately)
-            const mem = byRef.get(ref);
-            if (mem) mem.reviewURL = url;
-        }
-        await Promise.allSettled(tasks);
-
-        if (lastMod) localStorage.setItem(KEY, lastMod);
-        return true;
-    } catch (e) {
-        console.warn('fetchAndApplyReviewUrls failed:', e);
-        return false;
+    for (const baseUrl of candidates) {
+        const res = await tryFetch(baseUrl);
+        if (res) return res.changed; // true/false depending on updates
     }
+    return false; // nothing fetched
 }
+
+
+
 
 /**
  * Retrieves all activations from IndexedDB.
