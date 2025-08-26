@@ -151,6 +151,11 @@ def fetch_mode_totals_for_ref(ref: str) -> dict:
     """
     Call the POTA activations endpoint for a reference and return
     modeTotals as a dict: {'cw': int, 'data': int, 'ssb': int}
+
+    Supports multiple payload shapes:
+      1) {"modeTotals": {"cw":int,"data":int,"ssb":int}}
+      2) [ { "qsosCW":int|str, "qsosDATA":int|str, "qsosPHONE":int|str, ... }, ... ]  # daily aggregates
+      3) [ { "mode":"CW"|"SSB"|..., "qsos":int|str | "qsoCount":int|str | "contacts":[...] }, ... ]  # per-activation
     """
     url = ACTIVATIONS_API.format(ref=ref)
     resp = requests.get(url, timeout=30)
@@ -159,23 +164,46 @@ def fetch_mode_totals_for_ref(ref: str) -> dict:
 
     totals = {'cw': 0, 'data': 0, 'ssb': 0}
 
-    # If API already returns an aggregate structure
-    if isinstance(payload, dict) and 'modeTotals' in payload and isinstance(payload['modeTotals'], dict):
-        for k in totals.keys():
-            v = payload['modeTotals'].get(k)
-            if isinstance(v, int):
-                totals[k] = v
-            elif isinstance(v, str) and v.isdigit():
-                totals[k] = int(v)
+    # Helper to coerce possibly-string counts
+    def as_int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
+    # Case 1: API already returns an aggregate structure
+    if isinstance(payload, dict) and isinstance(payload.get('modeTotals'), dict):
+        mt = payload['modeTotals']
+        totals['cw'] = as_int(mt.get('cw'))
+        totals['data'] = as_int(mt.get('data'))
+        totals['ssb'] = as_int(mt.get('ssb'))
         return totals
 
-    # Otherwise compute from a list of activation records
+    # Case 2: Daily aggregates with explicit per-mode columns (matches sample.json)
+    if isinstance(payload, list) and payload and (
+        'qsosCW' in payload[0] or 'qsosDATA' in payload[0] or 'qsosPHONE' in payload[0]
+    ):
+        for rec in payload:
+            totals['cw'] += as_int(rec.get('qsosCW'))
+            totals['data'] += as_int(rec.get('qsosDATA'))
+            totals['ssb'] += as_int(rec.get('qsosPHONE'))
+        return totals
+
+    # Case 3: Per-activation records, infer bucket from a mode field
     records = payload if isinstance(payload, list) else []
     for rec in records:
-        # Some payloads use 'mode' or 'modeName'
         mode = rec.get('mode') or rec.get('modeName')
         bucket = classify_mode_to_bucket(mode)
-        totals[bucket] += extract_qso_count(rec)
+        # Try common count fields, fallback to contact list length
+        count = None
+        for key in ('qsos', 'qsoCount', 'qso', 'count'):
+            if key in rec:
+                count = as_int(rec.get(key))
+                break
+        if count is None and isinstance(rec.get('contacts'), list):
+            count = len(rec['contacts'])
+        totals[bucket] += (count or 0)
+
     return totals
 
 
