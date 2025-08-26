@@ -4230,8 +4230,8 @@ async function fetchAndApplyUserActivations(callsign = null) {
 
 const MODES_URL = '/potamap/backend/modes.json';
 const MODES_CHANGES_URLS = [
-    '/potamap/backend/modes-changes.json',     // your preferred name
-    '/potamap/backend/modes-changes.json'       // fallback if you used the earlier name
+    '/potamap/backend/mode-changes.json',     // your preferred name
+    '/potamap/backend/mode-changes.json'       // fallback if you used the earlier name
 ];
 
 const MODES_KEYS = {
