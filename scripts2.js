@@ -240,6 +240,54 @@ async function ensureReviewCacheFromIndexedDB() {
     } catch (e) { console.warn('ensureReviewCacheFromIndexedDB failed:', e); }
 }
 
+// Build a set of truly new parks (from changes.json) to avoid relying on drifting 'created' timestamps
+async function ensureRecentAddsFromChangesJSON() {
+    const URL = '/potamap/data/changes.json';
+    const SIG_KEY = 'recentAddsSig::changes.json';
+    const isWithinDays = (iso, days) => {
+        try { return (Date.now() - new Date(iso).getTime()) <= days * 86400000; } catch { return false; }
+    };
+    try {
+        // Check if changed via HEAD
+        let sig = null, prev = null;
+        try {
+            const head = await fetch(URL, { method: 'HEAD', cache: 'no-store' });
+            if (head.ok) sig = head.headers.get('etag') || head.headers.get('last-modified') || 'no-sig';
+        } catch {}
+        try { prev = localStorage.getItem(SIG_KEY); } catch {}
+        if (sig && prev && sig === prev && window.__RECENT_ADDS instanceof Set) {
+            return window.__RECENT_ADDS; // up-to-date
+        }
+
+        // Fetch full file
+        const res = await fetch(URL, { cache: 'no-store' });
+        if (!res.ok) throw new Error('changes.json fetch failed');
+        const rows = await res.json();
+        const set = new Set();
+        if (Array.isArray(rows)) {
+            for (const r of rows) {
+                if (!r || typeof r !== 'object') continue;
+                const ref = r.reference || r.ref || r.id;
+                const change = (r.change || '').toString().toLowerCase();
+                const ts = r.timestamp || r.time || r.ts;
+                if (!ref) continue;
+                if (change.includes('park added')) {
+                    // Keep for 30 days only
+                    if (!ts || isWithinDays(ts, 30)) set.add(String(ref).toUpperCase());
+                }
+            }
+        }
+        window.__RECENT_ADDS = set;
+        if (sig) try { localStorage.setItem(SIG_KEY, sig); } catch {}
+        return set;
+    } catch (e) {
+        console.warn('ensureRecentAddsFromChangesJSON failed:', e);
+        // Fallback: empty set (no purple storm)
+        window.__RECENT_ADDS = new Set();
+        return window.__RECENT_ADDS;
+    }
+}
+
 
 function _addPqlHighlightMarker(layer, park) {
     if (!(park.latitude && park.longitude)) return;
@@ -483,6 +531,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         ensureReviewHaloCss();
 
         await ensureReviewCacheFromIndexedDB();
+        // Load true new-park refs from changes.json to avoid mass purple due to drifting 'created'
+        try { await ensureRecentAddsFromChangesJSON(); } catch (e) { console.warn(e); }
 
         // === Off-main-thread per-mode QSO counting (performance patch) ===
         let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
@@ -914,11 +964,9 @@ async function redrawMarkersWithFilters(){
             if (!bounds.contains(latLng)) return;
 
             const isUserActivated = userActivatedReferences.includes(reference);
-            let createdTime = null;
-            if (created) {
-                createdTime = typeof created === 'number' ? created : new Date(created).getTime();
-            }
-            const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
+            // Use recent-adds set instead of created timestamp
+            const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
+            const isNew = RECENT.has(reference);
             const currentActivation = spotByRef[reference];
             const isActive = !!currentActivation;
             const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
@@ -956,9 +1004,11 @@ async function redrawMarkersWithFilters(){
                 });
                 if (hasReview) decorateReviewHalo(marker, park);
             } else {
+                const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated, null);
+                const fillColor = isNew ? "#800080" : baseColor; // purple only for true new parks
                 marker = L.circleMarker([latitude, longitude], {
                     radius: 6,
-                    fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
+                    fillColor,
                     color: "#000",
                     weight: 1,
                     opacity: 1,
