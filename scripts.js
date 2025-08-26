@@ -281,7 +281,7 @@ function clearPqlFilterDisplay() {
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
 const appVersion = "20250412a"; // manually update as needed
-const cacheDuration = (24 * 60 * 60 * 1000) * 2; // 8 days in milliseconds
+const cacheDuration = (24 * 60 * 60 * 1000) * 6; // 8 days in milliseconds
 
 // See if we are in desktop mode
 const urlParams = new URLSearchParams(window.location.search);
