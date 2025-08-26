@@ -739,22 +739,15 @@ function queryHasExplicitScope(parsed){
     return false;
 }
 
-function getMarkerColorConfigured(activations, isUserActivated, created) {
+function getMarkerColorConfigured(activations, isUserActivated) {
     try {
-        const createdDate = new Date(created);
-        const ts = createdDate.getTime();
-        const ageInDays = Number.isFinite(ts) ? (Date.now() - ts) / 86400000 : Infinity;
-
-        // 1) New parks
-        if (ageInDays <= 30) return "#800080"; // purple
-
-        // 2) 'My' parks
+        // 1) 'My' parks
         if (isUserActivated) return "#1e8c27"; // light green
 
-        // 3) Parks with zero activations
+        // 2) Parks with zero activations
         if (activations === 0) return "#00008b"; // dark blue
 
-        // 4) Default
+        // 3) Default
         return "#ff6666"; // red
     } catch (_) {
         return "#ff6666"; // fallback to red
@@ -1004,7 +997,7 @@ async function redrawMarkersWithFilters(){
                 });
                 if (hasReview) decorateReviewHalo(marker, park);
             } else {
-                const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated, null);
+                const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
                 const fillColor = isNew ? "#800080" : baseColor; // purple only for true new parks
                 marker = L.circleMarker([latitude, longitude], {
                     radius: 6,
