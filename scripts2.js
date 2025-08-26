@@ -272,8 +272,10 @@ async function ensureRecentAddsFromChangesJSON() {
                 const ts = r.timestamp || r.time || r.ts;
                 if (!ref) continue;
                 if (change.includes('park added')) {
-                    // Keep for 30 days only
-                    if (!ts || isWithinDays(ts, 30)) set.add(String(ref).toUpperCase());
+                    // Only consider truly recent adds. If no timestamp, treat as NOT new.
+                    if (ts && isWithinDays(ts, 30)) {
+                        set.add(String(ref).toUpperCase());
+                    }
                 }
             }
         }
