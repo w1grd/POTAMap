@@ -546,6 +546,51 @@ function initQsoWorkerIfNeeded(){
     }
 }
 
+// One-time healer: strip stale 'change'/'created' fields from parks not truly new, to avoid bad banners/colors
+async function healParksIfCorrupted(){
+    try {
+        const HEAL_KEY = `parksHealed::${appVersion}`; // run once per app build
+        if (localStorage.getItem(HEAL_KEY)) return; // already healed for this version
+
+        const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
+        const db = await getDatabase();
+
+        // Read all parks
+        const all = await new Promise((resolve, reject) => {
+            const tx = db.transaction('parks', 'readonly');
+            const store = tx.objectStore('parks');
+            const req = store.getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror  = (e) => reject(e.target.error);
+        });
+        if (!Array.isArray(all) || all.length === 0) { localStorage.setItem(HEAL_KEY, '1'); return; }
+
+        // Scan and patch as needed
+        let fixes = 0;
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction('parks', 'readwrite');
+            const store = tx.objectStore('parks');
+            for (const p of all) {
+                if (!p || !p.reference) continue;
+                let changed = false;
+                // If a park isn't in the vetted recent-adds set, remove any stale created/change fields
+                if (!RECENT.has(p.reference)) {
+                    if (Object.prototype.hasOwnProperty.call(p, 'change')) { delete p.change; changed = true; }
+                    if (Object.prototype.hasOwnProperty.call(p, 'created')) { delete p.created; changed = true; }
+                }
+                // (Optional future hook) sanity for modeTotals if you want
+                if (changed) { store.put(p); fixes++; }
+            }
+            tx.oncomplete = () => resolve();
+            tx.onerror    = (e) => reject(e.target.error);
+        });
+
+        localStorage.setItem(HEAL_KEY, '1');
+        if (fixes > 0) console.log(`[heal] Cleaned ${fixes} park records in IndexedDB.`);
+    } catch (e) {
+        console.warn('healParksIfCorrupted failed:', e);
+    }
+}
 
 function updateVisibleModeCounts() {
     if (!map || !parks || parks.length === 0) return;
@@ -578,6 +623,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // If IndexedDB.parks is empty (e.g., after a manual reset), force-load allparks.json now
         await ensureParksLoadedFromNetworkIfEmpty();
+        // Remove stale created/change fields from existing users' stores
+        await healParksIfCorrupted();
 
         // === Off-main-thread per-mode QSO counting (performance patch) ===
         let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
