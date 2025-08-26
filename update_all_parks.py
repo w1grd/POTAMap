@@ -323,9 +323,16 @@ def main():
     # ---- Nightly full flow ----
     print("Loading local data...")
     local_parks = load_local_data(LOCAL_FILE)
+    first_run = len(local_parks) == 0
 
     print("Fetching remote park data...")
     new_parks = fetch_remote_data()
+
+    if first_run:
+        # Baseline snapshot: write master and exit without producing changes
+        write_json(LOCAL_FILE, list(new_parks.values()))
+        print(f"No prior snapshot detected; wrote baseline to {LOCAL_FILE} and skipped change detection.")
+        return
 
     print("Comparing park data...")
     changes, qsos_changed_refs = compare_parks(local_parks, new_parks)
@@ -354,7 +361,6 @@ def main():
             update_qso_counts_for_refs(LOCAL_FILE, qso_update_file)
         except Exception as e:
             print(f"ModeTotals update encountered an error: {e}")
-
 
 if __name__ == '__main__':
     main()
