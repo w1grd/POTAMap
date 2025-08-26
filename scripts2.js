@@ -54,6 +54,10 @@ let previousMapState = {
     displayedParks: []
 };
 
+// Fast rendering path
+let __canvasRenderer = null; // initialized after map setup
+let __panInProgress = false; // suppress redraws while panning
+
 // --- Lightweight Toast UI -------------------------------------------------
 function ensureToastCss() {
     if (document.getElementById('pql-toast-css')) return;
@@ -834,6 +838,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Initialize the map, then kick off the mode check and worker if needed
         await nextFrame();
         await setupPOTAMap();
+
+        // Use a shared Canvas renderer for circle markers (significantly faster than default SVG)
+        try { __canvasRenderer = L.canvas({ padding: 0.5 }); } catch (_) {}
+
+        // Debounce redraws on pan/zoom; redraw only when interaction settles
+        if (map && typeof map.on === 'function') {
+            map.on('movestart', () => { __panInProgress = true; });
+            map.on('zoomstart', () => { __panInProgress = true; });
+            const debouncedMoveEnd = (function(){
+                let t = null;
+                return () => { clearTimeout(t); t = setTimeout(() => { __panInProgress = false; refreshMarkers(); }, 120); };
+            })();
+            map.on('moveend', debouncedMoveEnd);
+            map.on('zoomend', debouncedMoveEnd);
+        }
+
         if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
 
         await initializeActivationsDisplay();
@@ -1084,7 +1104,8 @@ function decorateReviewHalo(marker, park) {
     if (!map.getPane('reviewHalos')) {
         map.createPane('reviewHalos');
         const pane = map.getPane('reviewHalos');
-        if (pane) pane.style.zIndex = 399; // just under default marker pane
+        // Above Canvas overlay (~400), below DOM marker pane (~600)
+        if (pane) pane.style.zIndex = 450;
     }
 
     const latLng = marker.getLatLng && marker.getLatLng();
@@ -1142,6 +1163,8 @@ async function redrawMarkersWithFilters() {
             console.warn("redrawMarkersWithFilters: map not ready");
             return;
         }
+        // Skip mid-pan redraws; we'll repaint once on moveend/zoomend
+        if (__panInProgress) return;
 //        if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
 //        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
         if (!map.activationsLayer) {
@@ -1158,11 +1181,12 @@ async function redrawMarkersWithFilters() {
             for (const s of spots) if (s && s.reference) spotByRef[s.reference] = s;
         }
 
-        // Ensure a pane for review halos so the rings sit behind markers
+        // Ensure a pane for review halos so the rings render above Canvas overlay but below DOM markers
         if (!map.getPane('reviewHalos')) {
             map.createPane('reviewHalos');
             const pane = map.getPane('reviewHalos');
-            if (pane) pane.style.zIndex = 399; // just under default marker pane (~400)
+            // Ensure halos sit above Canvas overlay (≈400) but below DOM markers (≈600)
+            if (pane) pane.style.zIndex = 450;
         }
 
         parks.forEach((park) => {
@@ -1220,6 +1244,7 @@ async function redrawMarkersWithFilters() {
                 const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
                 const fillColor = showNewColor ? "#800080" : baseColor; // purple only when New filter ON and truly new
                 marker = L.circleMarker([latitude, longitude], {
+                    renderer: __canvasRenderer || undefined,
                     radius: 6,
                     fillColor,
                     color: "#000",
@@ -1305,7 +1330,11 @@ function refreshMarkers() {
         updateVisibleModeCounts();
     }
     if (typeof redrawMarkersWithFilters === 'function') {
-        redrawMarkersWithFilters();
+        if (window.requestAnimationFrame) {
+            requestAnimationFrame(() => redrawMarkersWithFilters());
+        } else {
+            redrawMarkersWithFilters();
+        }
     }
 }
 
