@@ -300,42 +300,153 @@ let MODE_CHANGES_AVAILABLE = false;
 let MODE_CHANGE_REFS = new Set();
 
 async function detectModeChanges() {
-    const candidates = [
-        '/potamap/data/mode-changes.json',
-        '/potamap/data/mode_changes.json',
-    ];
-    for (const url of candidates) {
+    // Candidate URLs for mode-change feeds
+    const candidates = Array.isArray(window.MODES_CHANGES_URLS) && window.MODES_CHANGES_URLS.length
+        ? window.MODES_CHANGES_URLS
+        : [
+            '/potamap/data/mode-changes.json',
+            '/potamap/data/mode_changes.json',
+        ];
+
+    // Helpers
+    const SIG_KEY = (u) => `modeChangesSig::${u}`; // localStorage key per URL
+    const normRef = (s) => (s ? String(s).trim().toUpperCase() : null);
+    const extractRefsAndPatches = (body) => {
+        const refs = new Set();
+        const patches = [];
+        const pushObj = (obj) => {
+            if (!obj) return;
+            const ref = normRef(obj.reference || obj.ref || obj.id);
+            if (!ref) return;
+            refs.add(ref);
+            const p = {};
+            if (obj.modeTotals && typeof obj.modeTotals === 'object') p.modeTotals = obj.modeTotals;
+            if (typeof obj.qsos === 'number') p.qsos = obj.qsos;
+            if (typeof obj.attempts === 'number') p.attempts = obj.attempts;
+            if (typeof obj.activations === 'number') p.activations = obj.activations;
+            if (Object.keys(p).length > 0) patches.push({ reference: ref, patch: p });
+        };
+
+        if (Array.isArray(body)) {
+            for (const row of body) {
+                if (typeof row === 'string') {
+                    const r = normRef(row);
+                    if (r) { refs.add(r); patches.push({ reference: r, patch: {} }); }
+                } else if (row && typeof row === 'object') {
+                    pushObj(row);
+                }
+            }
+            return { refs: Array.from(refs), patches };
+        }
+        if (body && typeof body === 'object') {
+            if (Array.isArray(body.changes)) {
+                for (const it of body.changes) pushObj(it);
+                return { refs: Array.from(refs), patches };
+            }
+            if (Array.isArray(body.batches)) {
+                for (const b of body.batches) if (Array.isArray(b.changes)) for (const it of b.changes) pushObj(it);
+                return { refs: Array.from(refs), patches };
+            }
+        }
+        return { refs: [], patches: [] };
+    };
+
+    // For each candidate, HEAD to see if content changed (ETag/Last-Modified)
+    for (const baseUrl of candidates) {
+        let etag = null, lastMod = null, signature = null, prevSig = null;
+        try {
+            const head = await fetch(baseUrl, { method: 'HEAD', cache: 'no-store' });
+            if (!head.ok) {
+                // if HEAD is blocked, fall back to GET without signature check
+                throw new Error('HEAD not ok');
+            }
+            etag = head.headers.get('etag');
+            lastMod = head.headers.get('last-modified');
+            signature = etag || lastMod || 'no-sig';
+            try { prevSig = localStorage.getItem(SIG_KEY(baseUrl)); } catch (_) { prevSig = null; }
+            if (prevSig && signature && prevSig === signature) {
+                // unchanged — try next candidate URL
+                continue;
+            }
+        } catch (_) {
+            // Ignore HEAD errors; we will try a GET below with cache busting using Date.now()
+        }
+
+        // Build a versioned URL to defeat CDN caches when changed
+        const v = encodeURIComponent((etag || lastMod || Date.now()).toString());
+        const url = baseUrl + (baseUrl.includes('?') ? `&v=${v}` : `?v=${v}`);
+
         try {
             const res = await fetch(url, { cache: 'no-store' });
             if (!res.ok) continue;
-            const json = await res.json()
-            try { if (typeof window !== 'undefined') { window.__MODE_CHANGES_BODY = json; } } catch (_) {}
-            if (!json) continue;
-            const refs = Array.isArray(json)
-                ? json
-                : Array.isArray(json.references)
-                    ? json.references
-                    : Array.isArray(json.refs)
-                        ? json.refs
-                        : [];
-            if (refs.length > 0) {
-                MODE_CHANGES_AVAILABLE = true;
-                MODE_CHANGE_REFS = new Set(refs);
-                console.log(`[modes] mode-changes found: ${refs.length} references`);
-                return true;
+            const body = await res.json();
+            try { window.__MODE_CHANGES_BODY = body; } catch (_) {}
+            const { refs, patches } = extractRefsAndPatches(body);
+            if (refs.length === 0 && patches.length === 0) {
+                // No useful data; try next candidate
+                continue;
             }
-            console.log('[modes] mode-changes present but empty; skipping computations.');
-            MODE_CHANGES_AVAILABLE = false;
-            MODE_CHANGE_REFS = new Set();
-            return false;
-        } catch (_) {
+            MODE_CHANGES_AVAILABLE = true;
+            MODE_CHANGE_REFS = new Set(refs);
+            try { window.__MODE_CHANGES_PATCHES = patches; } catch (_) {}
+
+            // Persist new signature so we can skip identical feeds next load
+            try { localStorage.setItem(SIG_KEY(baseUrl), (signature || v)); } catch (_) {}
+
+            console.log(`[modes] mode-changes loaded from ${baseUrl} (refs=${refs.length}, patches=${patches.length})`);
+            return true;
+        } catch (e) {
             // try next candidate
+            console.warn('[modes] fetch failed for', baseUrl, e);
         }
     }
+
+    // Nothing found/changed
     MODE_CHANGES_AVAILABLE = false;
     MODE_CHANGE_REFS = new Set();
-    console.log('[modes] no mode-changes.json; skipping per-mode computations.');
+    console.log('[modes] no new mode-changes; skipping per-mode computations.');
     return false;
+}
+
+async function applyModeChangesToIndexedDB() {
+    const body = (typeof window !== 'undefined') ? window.__MODE_CHANGES_BODY : null;
+    const patches = (typeof window !== 'undefined' && Array.isArray(window.__MODE_CHANGES_PATCHES)) ? window.__MODE_CHANGES_PATCHES : [];
+    if (!body && patches.length === 0) return { applied: 0 };
+
+    let applied = 0;
+    // Use existing helper to upsert into IDB, and also update in-memory parks
+    for (const entry of patches) {
+        const { reference, patch } = entry || {};
+        if (!reference || !patch || typeof patch !== 'object') continue;
+        try {
+            await upsertParkFieldsInIndexedDB(reference, patch);
+            // Update in-memory `parks` so UI can reflect changes immediately
+            if (Array.isArray(parks)) {
+                const idx = parks.findIndex(p => p && p.reference === reference);
+                if (idx >= 0) {
+                    parks[idx] = Object.assign({}, parks[idx], patch);
+                }
+            }
+            applied++;
+        } catch (e) {
+            console.warn('[modes] upsert failed for', reference, e);
+        }
+    }
+
+    // Trigger a light redraw
+    try { if (typeof refreshMarkers === 'function') refreshMarkers(); } catch (_) {}
+    return { applied };
+}
+
+async function checkAndUpdateModesAtStartup() {
+    try {
+        const res = await applyModeChangesToIndexedDB();
+        if (res && res.applied > 0) {
+            console.log(`[modes] Applied ${res.applied} mode/qsos patches to IndexedDB + memory.`);
+        }
+    } catch (e) {
+        console.warn('[modes] checkAndUpdateModesAtStartup failed:', e);
+    }
 }
 
 // === Worker helper wrappers (global) ===
@@ -4226,230 +4337,119 @@ async function fetchAndApplyUserActivations(callsign = null) {
         console.error("Error fetching or processing user activations:", error);
     }
 }
+
 // === Modes ingestion (initial + rolling updates) =============================
 
 const MODES_URL = '/potamap/backend/modes.json';
 const MODES_CHANGES_URLS = [
-    '/potamap/backend/mode-changes.json',     // your preferred name
-    '/potamap/backend/mode-changes.json'       // fallback if you used the earlier name
+    '/potamap/backend/mode-changes.json',
+    '/potamap/backend/mode-changes.json'
 ];
 
 const MODES_KEYS = {
-    initialized:      'modes.initialized',             // "1" after initial modes.json load
+    initialized:      'modes.initialized',
     baseETag:         'modes.base.etag',
     baseLM:           'modes.base.lastModified',
     baseUpdatedAt:    'modes.base.updatedAt',
     changesETag:      'modes.changes.etag',
     changesLM:        'modes.changes.lastModified',
     changesUpdatedAt: 'modes.changes.updatedAt',
-    changesLastDate:  'modes.changes.lastDate'         // last applied batch date (when using "batches")
+    changesLastDate:  'modes.changes.lastDate'
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function headProbe(url, etagKey, lmKey) {
-    const prevETag = localStorage.getItem(etagKey) || null;
-    const prevLM   = localStorage.getItem(lmKey) || null;
-    try {
-        const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-        if (!r.ok) return { ok: false };
-        const etag = r.headers.get('ETag');
-        const lm   = r.headers.get('Last-Modified');
-        if (etag && prevETag && etag === prevETag) return { ok: true, isNew: false, etag, lm };
-        if (!etag && lm && prevLM && lm === prevLM) return { ok: true, isNew: false, etag, lm };
-        return { ok: true, isNew: true, etag, lm };
-    } catch {
-        // HEAD not supported or network hiccup — treat as potentially new
-        return { ok: true, isNew: true, etag: null, lm: null, noHead: true };
-    }
-}
-
-function rowsToPatches(rows) {
-    const patches = [];
-    for (const row of rows || []) {
-        const reference = row.reference || row.ref || row.id;
-        if (!reference) continue;
-        patches.push({
-            reference,
-            modeTotals: {
-                cw:   Number(row.cw)   || 0,
-                ssb:  Number(row.ssb)  || 0,
-                data: Number(row.data) || 0
-            }
-        });
-    }
-    return patches;
-}
-
-async function applyPatchesToIDBAndMemory(patches, { chunkSize = 1000, yieldEvery = 1 } = {}) {
-    if (!patches.length) return 0;
-    if (typeof upsertParksToIndexedDB !== 'function') {
-        console.warn('[modes] upsertParksToIndexedDB not found; cannot persist modeTotals.');
-        return 0;
-    }
-    for (let i = 0, batch = 0; i < patches.length; i += chunkSize, batch++) {
-        const slice = patches.slice(i, i + chunkSize);
-        await upsertParksToIndexedDB(slice);
-        // keep in-memory parks[] synced immediately
-        if (Array.isArray(parks) && parks.length) {
-            const m = new Map(slice.map(p => [p.reference, p.modeTotals]));
-            for (const park of parks) {
-                const mt = m.get(park.reference);
-                if (mt) park.modeTotals = mt;
-            }
-        }
-        if (yieldEvery && batch % yieldEvery === 0) await sleep(0);
-    }
-    return patches.length;
-}
-
 /**
- * Fetch-and-cache modes:
- * - First run: GET modes.json and upsert once, set initialized flag.
- * - Later runs: check for modes-changes.json; if new, upsert only changed rows.
- * Supports two formats for modes-changes.json:
- *   1) Flat array: [{reference,cw,ssb,data}, ...]
- *   2) {batches:[{date:"YYYY-MM-DD", changes:[{reference,cw,ssb,data}]}]}
+ * Robustly detects which parks have mode/QSO changes.
+ * Returns an array of park references (uppercase) that have mode/QSO updates.
+ * Supports multiple input shapes from MODES_CHANGES_URLS:
+ *   1) ["US-0001", ...]
+ *   2) [{ reference: "US-0001", ... }, ...]
+ *   3) [{ reference: "US-0001", cw: 10, ssb: 20, data: 5 }, ...]
+ *   4) { changes: [...] } or { batches: [{date, changes: [...]}, ...] }
  */
-async function fetchAndCacheModes({ chunkSize = 1000 } = {}) {
-    const initialized = localStorage.getItem(MODES_KEYS.initialized) === '1';
+async function detectModeChanges() {
+    // Returns an array of park references (uppercase) that have mode/QSO updates.
+    // Supports multiple input shapes:
+    //  1) ["US-0001", "US-6363", ...]
+    //  2) [{ reference: "US-0001", ...full park... }, ...]
+    //  3) [{ reference: "US-0001", cw: 10, ssb: 20, data: 5 }, ...]
+    //  4) { changes: [...] } or { batches: [{date, changes: [...]}, ...] }
 
-    if (!initialized) {
-        // --- Initial bootstrap from modes.json ---
-        const head = await headProbe(MODES_URL, MODES_KEYS.baseETag, MODES_KEYS.baseLM);
-        const resp = await fetch(MODES_URL, { cache: 'no-store' });
-        if (!resp.ok) throw new Error(`Failed to fetch ${MODES_URL}: ${resp.status}`);
-        const rows = await resp.json();
-        if (!Array.isArray(rows)) throw new Error('modes.json must be an array');
+    const urls = Array.isArray(MODES_CHANGES_URLS) ? MODES_CHANGES_URLS : [];
 
-        const applied = await applyPatchesToIDBAndMemory(rowsToPatches(rows), { chunkSize });
-        const etag = resp.headers.get('ETag') || head.etag || null;
-        const lm   = resp.headers.get('Last-Modified') || head.lm || null;
-        if (etag) localStorage.setItem(MODES_KEYS.baseETag, etag);
-        if (lm)   localStorage.setItem(MODES_KEYS.baseLM, lm);
-        localStorage.setItem(MODES_KEYS.baseUpdatedAt, String(Date.now()));
-        localStorage.setItem(MODES_KEYS.initialized, '1');
-        console.log(`[modes] initial load applied ${applied} rows from modes.json`);
-        return { applied, phase: 'initial' };
-    }
-
-    // --- Incremental: modes-changes.json ---
-    let chosenUrl = null, head = null;
-    for (const u of MODES_CHANGES_URLS) {
-        head = await headProbe(u, MODES_KEYS.changesETag, MODES_KEYS.changesLM);
-        // if HEAD returned ok=false (e.g., 404), try next candidate
-        if (!head.ok) continue;
-        chosenUrl = u;
-        break;
-    }
-    if (!chosenUrl) {
-        console.log('[modes] no modes-changes file found; skipping.');
-        return { applied: 0, phase: 'changes', skipped: true };
-    }
-    if (head && head.isNew === false) {
-        console.log('[modes] modes-changes unchanged; skipping.');
-        return { applied: 0, phase: 'changes', skipped: true };
-    }
-
-    const resp = await fetch(chosenUrl, { cache: 'no-store' });
-    if (!resp.ok) {
-        console.warn(`[modes] failed to fetch ${chosenUrl}: ${resp.status}`);
-        return { applied: 0, phase: 'changes', skipped: true };
-    }
-    const body = await resp.json();
-
-    let changeRows = [];
-    if (Array.isArray(body)) {
-        // flat list
-        changeRows = body;
-    } else if (body && Array.isArray(body.batches)) {
-        // rolling window of dated batches
-        const lastDate = localStorage.getItem(MODES_KEYS.changesLastDate) || '';
-        const batches = [...body.batches].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-        let maxDate = lastDate;
-        for (const b of batches) {
-            const d = String(b.date || '');
-            if (lastDate && d <= lastDate) continue;   // already applied
-            if (Array.isArray(b.changes)) changeRows.push(...b.changes);
-            if (!maxDate || d > maxDate) maxDate = d;
+    // Helper: normalize a single row to a reference string
+    const toRef = (row) => {
+        if (!row) return null;
+        if (typeof row === 'string') return String(row).trim().toUpperCase();
+        if (typeof row === 'object') {
+            const r = row.reference || row.ref || row.id;
+            if (!r) return null;
+            return String(r).trim().toUpperCase();
         }
-        if (maxDate) localStorage.setItem(MODES_KEYS.changesLastDate, maxDate);
-    } else {
-        console.warn('[modes] unexpected modes-changes format; skipping.');
-        return { applied: 0, phase: 'changes', skipped: true };
+        return null;
+    };
+
+    // Helper: extract refs from a parsed JSON payload
+    const extractRefs = (body) => {
+        const out = [];
+        if (!body) return out;
+
+        if (Array.isArray(body)) {
+            for (const item of body) {
+                const ref = toRef(item);
+                if (ref) out.push(ref);
+            }
+            return out;
+        }
+
+        // Object wrapper forms
+        if (Array.isArray(body.changes)) {
+            for (const item of body.changes) {
+                const ref = toRef(item);
+                if (ref) out.push(ref);
+            }
+            return out;
+        }
+
+        if (Array.isArray(body.batches)) {
+            for (const batch of body.batches) {
+                if (!Array.isArray(batch.changes)) continue;
+                for (const item of batch.changes) {
+                    const ref = toRef(item);
+                    if (ref) out.push(ref);
+                }
+            }
+            return out;
+        }
+
+        return out;
+    };
+
+    // Try candidates in order until one succeeds
+    for (const url of urls) {
+        try {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) {
+                // Try the next candidate on 404/403/etc.
+                continue;
+            }
+            const body = await res.json();
+            const refs = extractRefs(body);
+            if (!refs.length) continue;
+
+            // Deduplicate & normalize
+            const unique = [...new Set(refs.filter(Boolean))];
+            return unique;
+        } catch (e) {
+            // Network or parse error — try next candidate
+            continue;
+        }
     }
 
-    // Dedup by reference; last one wins
-    const byRef = new Map();
-    for (const r of changeRows) {
-        const ref = r.reference || r.ref || r.id;
-        if (!ref) continue;
-        byRef.set(ref, { reference: ref, cw: Number(r.cw) || 0, ssb: Number(r.ssb) || 0, data: Number(r.data) || 0 });
-    }
-    const patches = [...byRef.values()].map(r => ({ reference: r.reference, modeTotals: { cw: r.cw, ssb: r.ssb, data: r.data }}));
-    const applied = await applyPatchesToIDBAndMemory(patches, { chunkSize });
-
-    const etag = resp.headers.get('ETag') || (head && head.etag) || null;
-    const lm   = resp.headers.get('Last-Modified') || (head && head.lm) || null;
-    if (etag) localStorage.setItem(MODES_KEYS.changesETag, etag);
-    if (lm)   localStorage.setItem(MODES_KEYS.changesLM, lm);
-    localStorage.setItem(MODES_KEYS.changesUpdatedAt, String(Date.now()));
-
-    console.log(`[modes] applied ${applied} mode changes from ${chosenUrl}`);
-    return { applied, phase: 'changes', skipped: applied === 0 };
+    // Nothing found
+    return [];
 }
-
-// Keep this simple wrapper if you like having a single call site:
-async function checkAndUpdateModesAtStartup() {
-    const key = (typeof MODES_KEYS === 'object' && MODES_KEYS && MODES_KEYS.initialized) || 'modes.initialized';
-    const firstRun = !(localStorage.getItem(key) === '1');
-
-    const toast = showToast(
-        firstRun
-            ? 'Loading mode totals for all parks… this may take a bit on first run.'
-            : 'Checking for mode total updates…',
-        { sticky: true, showSpinner: true }
-    );
-
-    try {
-        const res = await fetchAndCacheModes({ chunkSize: 1000 });
-
-        if (!res) {
-            toast.update('Mode totals up to date.', 'success');
-            toast.close(1200);
-            return;
-        }
-        if (res.phase === 'initial') {
-            toast.update(`Mode totals loaded for ${res.applied} parks.`, 'success');
-            toast.close(1500);
-            return;
-        }
-        if (res.skipped) {
-            toast.update('Mode totals are up to date.', 'success');
-            toast.close(1200);
-            return;
-        }
-        toast.update(`Mode totals updated (${res.applied} changes).`, 'success');
-        toast.close(1500);
-    } catch (err) {
-        console.warn('[modes] update failed:', err);
-        toast.update('Failed to load mode totals. Will retry later.', 'error');
-        toast.close(3500);
-    }
-}
-
-
-/**
- * One-shot check+apply at startup. Call this after parks have been loaded/cached.
- */
-// async function checkAndUpdateModesAtStartup() {
-//     try {
-//         // If you keep modes at a different URL/path, change it here:
-//         await fetchAndCacheModes({ url: MODES_URL, chunkSize: 1000 });
-//     } catch (err) {
-//         console.warn('[modes] update failed:', err);
-//     }
-// }
 
 function getFromStore(store, key) {
     return new Promise((resolve, reject) => {
