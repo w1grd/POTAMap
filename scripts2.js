@@ -267,8 +267,15 @@ async function ensureReviewCacheFromIndexedDB() {
 
 // Build a set of truly new parks (from changes.json) to avoid relying on drifting 'created' timestamps
 async function ensureRecentAddsFromChangesJSON() {
+    const MAX_RECENT_ADDS = 400; // safety valve: if more than this, treat as corrupted feed
     const URL = '/potamap/data/changes.json';
     const SIG_KEY = 'recentAddsSig::changes.json';
+    const qp = new URLSearchParams(location.search);
+    if (qp.get('nonew') === '1') {
+        window.__RECENT_ADDS = new Set();
+        try { localStorage.removeItem('recentAddsSig::changes.json'); } catch {}
+        return window.__RECENT_ADDS;
+    }
     const isWithinDays = (iso, days) => {
         try {
             return (Date.now() - new Date(iso).getTime()) <= days * 86400000;
@@ -289,7 +296,13 @@ async function ensureRecentAddsFromChangesJSON() {
         } catch {
         }
         if (sig && prev && sig === prev && window.__RECENT_ADDS instanceof Set) {
-            return window.__RECENT_ADDS; // up-to-date
+            if (window.__RECENT_ADDS.size > MAX_RECENT_ADDS) {
+                console.warn(`[new-parks] Cached recent-adds set is too large (${window.__RECENT_ADDS.size}); clearing.`);
+                window.__RECENT_ADDS = new Set();
+                try { localStorage.removeItem(SIG_KEY); } catch {}
+            } else {
+                return window.__RECENT_ADDS; // up-to-date and sane
+            }
         }
 
         // Fetch full file
@@ -311,6 +324,14 @@ async function ensureRecentAddsFromChangesJSON() {
                     }
                 }
             }
+        }
+        // Safety valve: if an anomalously large number of parks are marked new, assume a bad baseline and ignore
+        if (set.size > MAX_RECENT_ADDS) {
+            console.warn(`[new-parks] Ignoring changes.json because it marks ${set.size} parks as new (> ${MAX_RECENT_ADDS}).`);
+            // Clear signature so we re-check next load
+            try { localStorage.removeItem(SIG_KEY); } catch {}
+            window.__RECENT_ADDS = new Set();
+            return window.__RECENT_ADDS;
         }
         window.__RECENT_ADDS = set;
         if (sig) try {
