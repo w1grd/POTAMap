@@ -1004,15 +1004,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (typeof attachVisibleListenersOnce === 'function') attachVisibleListenersOnce();
 
-        await initializeActivationsDisplay();
-        // Load PN&R review URLs (incremental) and refresh markers/popups if updated
+        // Load PN&R review URLs **before** first draw so halos & links are present
         try {
-            const changed = await fetchAndApplyReviewUrls();
-            if (changed && typeof refreshMarkers === 'function') {
-                refreshMarkers(); // light redraw
-            }
-        } catch (_) {
-        }
+            await fetchAndApplyReviewUrls();
+        } catch (_) {}
+
+        await initializeActivationsDisplay();
     } catch (e) {
         console.error(e);
     }
@@ -1387,7 +1384,12 @@ async function redrawMarkersWithFilters() {
                         iconSize: [20, 20],
                     })
                 });
-                if (hasReview) decorateReviewHalo(marker, park);
+                if (hasReview) {
+                    decorateReviewHalo(marker, park);
+                } else if (window.__REVIEW_URLS instanceof Map) {
+                    const u = window.__REVIEW_URLS.get(reference);
+                    if (u) { park.reviewURL = u; decorateReviewHalo(marker, park); }
+                }
             } else {
                 const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
                 const fillColor = showNewColor ? "#800080" : baseColor; // purple only when New filter ON and truly new
@@ -1403,6 +1405,9 @@ async function redrawMarkersWithFilters() {
 
                 if (hasReview) {
                     decorateReviewHalo(marker, park);
+                } else if (window.__REVIEW_URLS instanceof Map) {
+                    const u = window.__REVIEW_URLS.get(reference);
+                    if (u) { park.reviewURL = u; decorateReviewHalo(marker, park); }
                 }
             }
 
@@ -1441,8 +1446,17 @@ async function redrawMarkersWithFilters() {
                         } catch (e) { /* non-fatal */
                         }
                     }
+                    // Ensure we have a review URL from memory cache if IndexedDB didn't have it yet
+                    if (!park.reviewURL && window.__REVIEW_URLS instanceof Map) {
+                        const u = window.__REVIEW_URLS.get(park.reference);
+                        if (u) park.reviewURL = u;
+                    }
                     // Build a display-safe copy so we don't show stale or unintended change banners
                     const displayPark = Object.assign({}, park);
+                    // Back-compat: some popup templates may look for different keys
+                    if (park.reviewURL && !displayPark.reviewURL) displayPark.reviewURL = park.reviewURL;
+                    if (park.reviewURL && !displayPark.reviewUrl) displayPark.reviewUrl = park.reviewURL; // camelCase alt
+                    if (park.reviewURL && !displayPark.pnrUrl)    displayPark.pnrUrl    = park.reviewURL; // legacy key
                     try {
                         const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
                         const isTrulyNew = RECENT.has(park.reference);
