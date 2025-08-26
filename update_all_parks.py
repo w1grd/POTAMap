@@ -2,6 +2,7 @@
 
 import json
 import time
+import argparse
 import requests
 from datetime import datetime
 from pathlib import Path
@@ -267,7 +268,29 @@ def update_qso_counts_for_refs(master_file: Path, refs_file: Path):
     print(f"Updated modeTotals for {updated} parks. Wrote master to {master_file}.")
 
 
+def run_refs_only_mode(refs_path: Path):
+    """Update modeTotals/qsos in the existing LOCAL_FILE using a provided refs list file."""
+    if not LOCAL_FILE.exists():
+        raise FileNotFoundError(f"Master file not found: {LOCAL_FILE}. Run the nightly snapshot first or switch LOCAL_FILE.")
+    refs_file = Path(refs_path)
+    if not refs_file.exists():
+        raise FileNotFoundError(f"Refs list file not found: {refs_file}")
+    update_qso_counts_for_refs(LOCAL_FILE, refs_file)
+
+
 def main():
+    parser = argparse.ArgumentParser(description="Update POTA parks and per-mode QSO totals.")
+    parser.add_argument("--refs", "-r", type=str, default=None,
+                        help="Path to a file containing park references (one per line) to update QSO counts for. When provided, the script only updates modeTotals/qsos in the existing master file and skips the nightly fetch/compare/snapshot.")
+    args = parser.parse_args()
+
+    # If a refs list is provided, run in refs-only mode
+    if args.refs:
+        print(f"Running refs-only mode using list: {args.refs}")
+        run_refs_only_mode(Path(args.refs))
+        return
+
+    # ---- Nightly full flow ----
     print("Loading local data...")
     local_parks = load_local_data(LOCAL_FILE)
 
