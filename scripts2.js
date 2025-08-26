@@ -269,6 +269,154 @@ async function ensureReviewCacheFromIndexedDB() {
     }
 }
 
+// Incrementally fetch PN&R review URLs and persist into IndexedDB + memory cache
+async function fetchAndApplyReviewUrls() {
+    // Allow override via window.REVIEWS_URLS; otherwise try sensible defaults
+    const candidates = Array.isArray(window.REVIEWS_URLS) && window.REVIEWS_URLS.length
+        ? window.REVIEWS_URLS
+        : [
+            '/potamap/data/reviews.json',       // preferred JSON
+            '/potamap/data/review_urls.json',   // alternate name
+            '/potamap/data/reviews.ndjson',     // NDJSON fallback
+        ];
+
+    const SIG_KEY = (u) => `reviewsSig::${u}`; // localStorage signature per URL
+
+    // Parse helpers: accept array of objects, object map, or NDJSON text
+    const normalizeMap = (payload) => {
+        const out = new Map(); // reference -> reviewURL
+        const push = (ref, url) => {
+            if (!ref || !url) return;
+            const r = String(ref).trim().toUpperCase();
+            const u = String(url).trim();
+            if (!/^https?:\/\//i.test(u)) return; // only http(s)
+            out.set(r, u);
+        };
+        if (!payload) return out;
+        if (Array.isArray(payload)) {
+            for (const row of payload) {
+                if (!row || typeof row !== 'object') continue;
+                push(row.reference || row.ref || row.id, row.reviewURL || row.url);
+            }
+            return out;
+        }
+        if (typeof payload === 'object') {
+            // Mapping object: { "US-0001": "https://...", ... } or { items:[...] }
+            if (Array.isArray(payload.items)) {
+                for (const row of payload.items) {
+                    if (!row || typeof row !== 'object') continue;
+                    push(row.reference || row.ref || row.id, row.reviewURL || row.url);
+                }
+                return out;
+            }
+            for (const [k, v] of Object.entries(payload)) {
+                if (v && typeof v === 'string') push(k, v);
+                else if (v && typeof v === 'object') push(v.reference || k, v.reviewURL || v.url);
+            }
+            return out;
+        }
+        return out;
+    };
+
+    const tryFetch = async (baseUrl) => {
+        let etag = null, lastMod = null, signature = null, prevSig = null;
+        try {
+            const head = await fetch(baseUrl, { method: 'HEAD', cache: 'no-store' });
+            if (head.ok) {
+                etag = head.headers.get('etag');
+                lastMod = head.headers.get('last-modified');
+                signature = etag || lastMod || 'no-sig';
+                try { prevSig = localStorage.getItem(SIG_KEY(baseUrl)); } catch { /* ignore */ }
+                // If unchanged and we already have a cache in memory or IDB, skip
+                if (prevSig && signature && prevSig === signature && (window.__REVIEW_URLS instanceof Map) && window.__REVIEW_URLS.size > 0) {
+                    return { changed: false, map: window.__REVIEW_URLS };
+                }
+            }
+        } catch { /* some CDNs block HEAD; proceed to GET */ }
+
+        // Cache-bust GET
+        const v = encodeURIComponent((etag || lastMod || Date.now()).toString());
+        const url = baseUrl + (baseUrl.includes('?') ? `&v=${v}` : `?v=${v}`);
+
+        // Try JSON first
+        try {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) return null;
+            const contentType = (res.headers.get('content-type') || '').toLowerCase();
+            let data = null;
+            if (contentType.includes('application/json') || contentType.includes('+json')) {
+                data = await res.json();
+            } else {
+                // Maybe NDJSON or text mapping
+                const txt = await res.text();
+                try {
+                    // Try parse as JSON anyway
+                    data = JSON.parse(txt);
+                } catch {
+                    // Parse NDJSON lines: each line is a JSON object
+                    const m = new Map();
+                    txt.split(/\r?\n/).forEach(line => {
+                        if (!line.trim()) return;
+                        try {
+                            const obj = JSON.parse(line);
+                            const ref = obj.reference || obj.ref || obj.id;
+                            const url = obj.reviewURL || obj.url;
+                            if (ref && url) m.set(String(ref).toUpperCase(), String(url));
+                        } catch { /* ignore bad line */ }
+                    });
+                    data = { items: Array.from(m, ([reference, url]) => ({ reference, reviewURL: url })) };
+                }
+            }
+            const map = normalizeMap(data);
+            if (map.size === 0) return null; // useless
+
+            // Persist into IndexedDB.parks and memory
+            const db = await getDatabase();
+            // Load all existing parks once
+            const parksAll = await new Promise((resolve, reject) => {
+                const tx = db.transaction('parks', 'readonly');
+                const store = tx.objectStore('parks');
+                const req = store.getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror  = (e) => reject(e.target.error);
+            });
+
+            let updates = 0;
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction('parks', 'readwrite');
+                const store = tx.objectStore('parks');
+                for (const p of parksAll) {
+                    if (!p || !p.reference) continue;
+                    const url = map.get(p.reference.toUpperCase());
+                    if (!url) continue;
+                    if (p.reviewURL === url) continue;
+                    p.reviewURL = url;
+                    store.put(p);
+                    updates++;
+                }
+                tx.oncomplete = () => resolve();
+                tx.onerror    = (e) => reject(e.target.error);
+            });
+
+            // Also update in-memory fast cache for immediate rendering
+            window.__REVIEW_URLS = map;
+            try { localStorage.setItem(SIG_KEY(baseUrl), (signature || v)); } catch { /* ignore */ }
+
+            if (updates > 0) console.log(`[reviews] Applied ${updates} review URL updates from ${baseUrl}.`);
+            return { changed: updates > 0, map };
+        } catch (e) {
+            console.warn('[reviews] fetch failed for', baseUrl, e);
+            return null;
+        }
+    };
+
+    for (const baseUrl of candidates) {
+        const res = await tryFetch(baseUrl);
+        if (res) return res.changed; // true/false depending on updates
+    }
+    return false; // nothing fetched
+}
+
 // Build a set of truly new parks (from changes.json) to avoid relying on drifting 'created' timestamps
 async function ensureRecentAddsFromChangesJSON() {
     const MAX_RECENT_ADDS = 400; // safety valve: if more than this, treat as corrupted feed
