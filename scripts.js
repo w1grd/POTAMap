@@ -1,5 +1,5 @@
 //POTAmap (c) POTA News & Reviews https://pota.review
-//28
+//261
 //
 // Yield to the browser for first paint
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
@@ -7,18 +7,31 @@ const nextFrame = () => new Promise(r => requestAnimationFrame(r));
 
 // --- Single-run guard for modes init ---
 let __modesInitStarted = false;
+
 async function ensureModesInitOnce() {
     if (__modesInitStarted) return;
     __modesInitStarted = true;
     try {
         const haveChanges = await detectModeChanges();
         if (haveChanges) {
-            try { await checkAndUpdateModesAtStartup(); } catch (e) { console.warn(e); }
+            try {
+                await checkAndUpdateModesAtStartup();
+            } catch (e) {
+                console.warn(e);
+            }
             if (typeof initQsoWorkerIfNeeded === 'function') {
-                try { initQsoWorkerIfNeeded(); } catch (e) { console.warn(e); }
+                try {
+                    initQsoWorkerIfNeeded();
+                } catch (e) {
+                    console.warn(e);
+                }
             }
             if (typeof updateVisibleModeCounts === 'function') {
-                try { updateVisibleModeCounts(); } catch (e) { console.warn(e); }
+                try {
+                    updateVisibleModeCounts();
+                } catch (e) {
+                    console.warn(e);
+                }
             }
         }
     } catch (e) {
@@ -59,9 +72,10 @@ function ensureToastCss() {
     style.textContent = css;
     document.head.appendChild(style);
 }
+
 function showToast(message, opts = {}) {
     ensureToastCss();
-    const { sticky = true, kind = '', showSpinner = true } = opts;
+    const {sticky = true, kind = '', showSpinner = true} = opts;
     let cont = document.querySelector('.toast-container');
     if (!cont) {
         cont = document.createElement('div');
@@ -76,7 +90,8 @@ function showToast(message, opts = {}) {
     const msg = document.createElement('div');
     msg.className = 'msg';
     msg.textContent = message;
-    el.appendChild(icon); el.appendChild(msg);
+    el.appendChild(icon);
+    el.appendChild(msg);
     cont.appendChild(el);
     el.style.pointerEvents = 'auto';
 
@@ -85,14 +100,17 @@ function showToast(message, opts = {}) {
         update(m, k) {
             if (m != null) msg.textContent = m;
             if (k != null) {
-                el.classList.remove('success','error');
+                el.classList.remove('success', 'error');
                 if (k) el.classList.add(k);
             }
         },
         close(delay = 0) {
             if (closed) return;
             closed = true;
-            setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 220); }, delay);
+            setTimeout(() => {
+                el.style.opacity = '0';
+                setTimeout(() => el.remove(), 220);
+            }, delay);
         }
     };
     if (!sticky) api.close(3000);
@@ -126,8 +144,9 @@ function centerMapOnGeolocation() {
         if (saved) {
             try {
                 const [lat, lng] = JSON.parse(saved);
-                map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
-            } catch {}
+                map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.0});
+            } catch {
+            }
         } else if (typeof fallbackToDefaultLocation === 'function') {
             fallbackToDefaultLocation();
         }
@@ -140,7 +159,7 @@ function centerMapOnGeolocation() {
             userLng = position.coords.longitude;
             setUserLocationMarker(userLat, userLng);
             if (map) {
-                map.setView([userLat, userLng], map.getZoom(), { animate: true, duration: 1.0 });
+                map.setView([userLat, userLng], map.getZoom(), {animate: true, duration: 1.0});
             }
         },
         (error) => {
@@ -149,13 +168,14 @@ function centerMapOnGeolocation() {
             if (saved) {
                 try {
                     const [lat, lng] = JSON.parse(saved);
-                    map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
-                } catch {}
+                    map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.0});
+                } catch {
+                }
             } else if (typeof fallbackToDefaultLocation === 'function') {
                 fallbackToDefaultLocation();
             }
         },
-        { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 }
+        {enableHighAccuracy: true, maximumAge: 30000, timeout: 15000}
     );
 }
 
@@ -171,7 +191,10 @@ function wireCenterOnMyLocationButton() {
     let btn = null;
     for (const id of candidates) {
         const el = document.getElementById(id);
-        if (el) { btn = el; break; }
+        if (el) {
+            btn = el;
+            break;
+        }
     }
     if (!btn) return;
     btn.addEventListener('click', (e) => {
@@ -237,9 +260,136 @@ async function ensureReviewCacheFromIndexedDB() {
         }
         window.__REVIEW_URLS = map;
         if (map.size) console.log(`[reviews] Loaded ${map.size} review URLs from IndexedDB.`);
-    } catch (e) { console.warn('ensureReviewCacheFromIndexedDB failed:', e); }
+    } catch (e) {
+        console.warn('ensureReviewCacheFromIndexedDB failed:', e);
+    }
 }
 
+// Build a set of truly new parks (from changes.json) to avoid relying on drifting 'created' timestamps
+async function ensureRecentAddsFromChangesJSON() {
+    const MAX_RECENT_ADDS = 400; // safety valve: if more than this, treat as corrupted feed
+    const URL = '/potamap/data/changes.json';
+    const SIG_KEY = 'recentAddsSig::changes.json';
+    const qp = new URLSearchParams(location.search);
+    if (qp.get('nonew') === '1') {
+        window.__RECENT_ADDS = new Set();
+        try { localStorage.removeItem('recentAddsSig::changes.json'); } catch {}
+        return window.__RECENT_ADDS;
+    }
+    const isWithinDays = (iso, days) => {
+        try {
+            return (Date.now() - new Date(iso).getTime()) <= days * 86400000;
+        } catch {
+            return false;
+        }
+    };
+    try {
+        // Check if changed via HEAD
+        let sig = null, prev = null;
+        try {
+            const head = await fetch(URL, {method: 'HEAD', cache: 'no-store'});
+            if (head.ok) sig = head.headers.get('etag') || head.headers.get('last-modified') || 'no-sig';
+        } catch {
+        }
+        try {
+            prev = localStorage.getItem(SIG_KEY);
+        } catch {
+        }
+        if (sig && prev && sig === prev && window.__RECENT_ADDS instanceof Set) {
+            if (window.__RECENT_ADDS.size > MAX_RECENT_ADDS) {
+                console.warn(`[new-parks] Cached recent-adds set is too large (${window.__RECENT_ADDS.size}); clearing.`);
+                window.__RECENT_ADDS = new Set();
+                try { localStorage.removeItem(SIG_KEY); } catch {}
+            } else {
+                return window.__RECENT_ADDS; // up-to-date and sane
+            }
+        }
+
+        // Fetch full file
+        const res = await fetch(URL, {cache: 'no-store'});
+        if (!res.ok) throw new Error('changes.json fetch failed');
+        const rows = await res.json();
+        const set = new Set();
+        if (Array.isArray(rows)) {
+            for (const r of rows) {
+                if (!r || typeof r !== 'object') continue;
+                const ref = r.reference || r.ref || r.id;
+                const change = (r.change || '').toString().toLowerCase();
+                const ts = r.timestamp || r.time || r.ts;
+                if (!ref) continue;
+                if (change.includes('park added')) {
+                    // Only consider truly recent adds. If no timestamp, treat as NOT new.
+                    if (ts && isWithinDays(ts, 30)) {
+                        set.add(String(ref).toUpperCase());
+                    }
+                }
+            }
+        }
+        // Safety valve: if an anomalously large number of parks are marked new, assume a bad baseline and ignore
+        if (set.size > MAX_RECENT_ADDS) {
+            console.warn(`[new-parks] Ignoring changes.json because it marks ${set.size} parks as new (> ${MAX_RECENT_ADDS}).`);
+            // Clear signature so we re-check next load
+            try { localStorage.removeItem(SIG_KEY); } catch {}
+            window.__RECENT_ADDS = new Set();
+            return window.__RECENT_ADDS;
+        }
+        window.__RECENT_ADDS = set;
+        if (sig) try {
+            localStorage.setItem(SIG_KEY, sig);
+        } catch {
+        }
+        return set;
+    } catch (e) {
+        console.warn('ensureRecentAddsFromChangesJSON failed:', e);
+        // Fallback: empty set (no purple storm)
+        window.__RECENT_ADDS = new Set();
+        return window.__RECENT_ADDS;
+    }
+}
+
+// Ensure parks are present in memory and IndexedDB; if DB is empty, force-load allparks.json
+async function ensureParksLoadedFromNetworkIfEmpty() {
+    try {
+        const db = await getDatabase();
+        // Count existing records in IDB.parks
+        const count = await new Promise((resolve, reject) => {
+            const tx = db.transaction('parks', 'readonly');
+            const store = tx.objectStore('parks');
+            const req = store.count();
+            req.onsuccess = () => resolve(req.result || 0);
+            req.onerror = (e) => reject(e.target.error);
+        });
+
+        const haveMem = Array.isArray(window.parks) && window.parks.length > 0;
+        if (count > 0 && haveMem) return; // everything is fine
+
+        // Fetch fresh allparks.json regardless of any localStorage timestamp
+        const res = await fetch('/potamap/data/allparks.json', {cache: 'no-store'});
+        if (!res.ok) throw new Error('Failed to load allparks.json');
+        const rows = await res.json();
+        if (!Array.isArray(rows) || rows.length === 0) throw new Error('allparks.json is empty');
+
+        // Write to IDB.parks (bulk upsert)
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction('parks', 'readwrite');
+            const store = tx.objectStore('parks');
+            for (const p of rows) store.put(p);
+            tx.oncomplete = () => resolve();
+            tx.onerror = (e) => reject(e.target.error);
+        });
+
+        // Update in-memory copy and mark fetch timestamp
+        window.parks = rows;
+        try {
+            localStorage.setItem('fetchTimestamp::allparks.json', Date.now().toString());
+        } catch (_) {
+        }
+        console.log(`[bootstrap] Loaded ${rows.length} parks from network and repopulated IndexedDB.`);
+        if (typeof refreshMarkers === 'function') refreshMarkers({full: true});
+    } catch (e) {
+        console.warn('ensureParksLoadedFromNetworkIfEmpty failed:', e);
+    }
+}
 
 function _addPqlHighlightMarker(layer, park) {
     if (!(park.latitude && park.longitude)) return;
@@ -247,8 +397,8 @@ function _addPqlHighlightMarker(layer, park) {
     const icon = L.divIcon({
         className: 'pql-pulse-icon',
         html: '<div class="pql-pulse"></div>',
-        iconSize: [36,36],
-        iconAnchor: [18,18]
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
     });
     L.marker([park.latitude, park.longitude], {
         icon,
@@ -278,10 +428,11 @@ function clearPqlFilterDisplay() {
     }
     map._pql = {};
 }
+
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
 const appVersion = "20250412a"; // manually update as needed
-const cacheDuration = (24 * 60 * 60 * 1000) * 6; // 8 days in milliseconds
+const cacheDuration = (24 * 60 * 60 * 1000) * 2; // 8 days in milliseconds
 
 // See if we are in desktop mode
 const urlParams = new URLSearchParams(window.location.search);
@@ -300,51 +451,238 @@ let MODE_CHANGES_AVAILABLE = false;
 let MODE_CHANGE_REFS = new Set();
 
 async function detectModeChanges() {
-    const candidates = [
-        '/potamap/data/mode-changes.json',
-        '/potamap/data/mode_changes.json',
-    ];
-    for (const url of candidates) {
-        try {
-            const res = await fetch(url, { cache: 'no-store' });
-            if (!res.ok) continue;
-            const json = await res.json()
-            try { if (typeof window !== 'undefined') { window.__MODE_CHANGES_BODY = json; } } catch (_) {}
-            if (!json) continue;
-            const refs = Array.isArray(json)
-                ? json
-                : Array.isArray(json.references)
-                    ? json.references
-                    : Array.isArray(json.refs)
-                        ? json.refs
-                        : [];
-            if (refs.length > 0) {
-                MODE_CHANGES_AVAILABLE = true;
-                MODE_CHANGE_REFS = new Set(refs);
-                console.log(`[modes] mode-changes found: ${refs.length} references`);
-                return true;
+    // Candidate URLs for mode-change feeds
+    const candidates = Array.isArray(window.MODES_CHANGES_URLS) && window.MODES_CHANGES_URLS.length
+        ? window.MODES_CHANGES_URLS
+        : [
+            '/potamap/data/mode-changes.json',
+            '/potamap/data/mode_changes.json',
+        ];
+
+    // Helpers
+    const SIG_KEY = (u) => `modeChangesSig::${u}`; // localStorage key per URL
+    const normRef = (s) => (s ? String(s).trim().toUpperCase() : null);
+    const extractRefsAndPatches = (body) => {
+        const refs = new Set();
+        const patches = [];
+        const pushObj = (obj) => {
+            if (!obj) return;
+            const ref = normRef(obj.reference || obj.ref || obj.id);
+            if (!ref) return;
+            refs.add(ref);
+            const p = {};
+            if (obj.modeTotals && typeof obj.modeTotals === 'object') p.modeTotals = obj.modeTotals;
+            if (typeof obj.qsos === 'number') p.qsos = obj.qsos;
+            if (typeof obj.attempts === 'number') p.attempts = obj.attempts;
+            if (typeof obj.activations === 'number') p.activations = obj.activations;
+            if (Object.keys(p).length > 0) patches.push({reference: ref, patch: p});
+        };
+
+        if (Array.isArray(body)) {
+            for (const row of body) {
+                if (typeof row === 'string') {
+                    const r = normRef(row);
+                    if (r) {
+                        refs.add(r);
+                        patches.push({reference: r, patch: {}});
+                    }
+                } else if (row && typeof row === 'object') {
+                    pushObj(row);
+                }
             }
-            console.log('[modes] mode-changes present but empty; skipping computations.');
-            MODE_CHANGES_AVAILABLE = false;
-            MODE_CHANGE_REFS = new Set();
-            return false;
+            return {refs: Array.from(refs), patches};
+        }
+        if (body && typeof body === 'object') {
+            if (Array.isArray(body.changes)) {
+                for (const it of body.changes) pushObj(it);
+                return {refs: Array.from(refs), patches};
+            }
+            if (Array.isArray(body.batches)) {
+                for (const b of body.batches) if (Array.isArray(b.changes)) for (const it of b.changes) pushObj(it);
+                return {refs: Array.from(refs), patches};
+            }
+        }
+        return {refs: [], patches: []};
+    };
+
+    // For each candidate, HEAD to see if content changed (ETag/Last-Modified)
+    for (const baseUrl of candidates) {
+        let etag = null, lastMod = null, signature = null, prevSig = null;
+        try {
+            const head = await fetch(baseUrl, {method: 'HEAD', cache: 'no-store'});
+            if (!head.ok) {
+                // if HEAD is blocked, fall back to GET without signature check
+                throw new Error('HEAD not ok');
+            }
+            etag = head.headers.get('etag');
+            lastMod = head.headers.get('last-modified');
+            signature = etag || lastMod || 'no-sig';
+            try {
+                prevSig = localStorage.getItem(SIG_KEY(baseUrl));
+            } catch (_) {
+                prevSig = null;
+            }
+            if (prevSig && signature && prevSig === signature) {
+                // unchanged — try next candidate URL
+                continue;
+            }
         } catch (_) {
+            // Ignore HEAD errors; we will try a GET below with cache busting using Date.now()
+        }
+
+        // Build a versioned URL to defeat CDN caches when changed
+        const v = encodeURIComponent((etag || lastMod || Date.now()).toString());
+        const url = baseUrl + (baseUrl.includes('?') ? `&v=${v}` : `?v=${v}`);
+
+        try {
+            const res = await fetch(url, {cache: 'no-store'});
+            if (!res.ok) continue;
+            const body = await res.json();
+            try {
+                window.__MODE_CHANGES_BODY = body;
+            } catch (_) {
+            }
+            const {refs, patches} = extractRefsAndPatches(body);
+            if (refs.length === 0 && patches.length === 0) {
+                // No useful data; try next candidate
+                continue;
+            }
+            MODE_CHANGES_AVAILABLE = true;
+            MODE_CHANGE_REFS = new Set(refs);
+            try {
+                window.__MODE_CHANGES_PATCHES = patches;
+            } catch (_) {
+            }
+
+            // Persist new signature so we can skip identical feeds next load
+            try {
+                localStorage.setItem(SIG_KEY(baseUrl), (signature || v));
+            } catch (_) {
+            }
+
+            console.log(`[modes] mode-changes loaded from ${baseUrl} (refs=${refs.length}, patches=${patches.length})`);
+            return true;
+        } catch (e) {
             // try next candidate
+            console.warn('[modes] fetch failed for', baseUrl, e);
         }
     }
+
+    // Nothing found/changed
     MODE_CHANGES_AVAILABLE = false;
     MODE_CHANGE_REFS = new Set();
-    console.log('[modes] no mode-changes.json; skipping per-mode computations.');
+    console.log('[modes] no new mode-changes; skipping per-mode computations.');
     return false;
 }
 
+async function applyModeChangesToIndexedDB() {
+    const body = (typeof window !== 'undefined') ? window.__MODE_CHANGES_BODY : null;
+    const patches = (typeof window !== 'undefined' && Array.isArray(window.__MODE_CHANGES_PATCHES)) ? window.__MODE_CHANGES_PATCHES : [];
+    if (!body && patches.length === 0) return {applied: 0};
+
+    let applied = 0;
+    // Use existing helper to upsert into IDB, and also update in-memory parks
+    for (const entry of patches) {
+        const {reference, patch} = entry || {};
+        if (!reference || !patch || typeof patch !== 'object') continue;
+        try {
+            await upsertParkFieldsInIndexedDB(reference, patch);
+            // Update in-memory `parks` so UI can reflect changes immediately
+            if (Array.isArray(parks)) {
+                const idx = parks.findIndex(p => p && p.reference === reference);
+                if (idx >= 0) {
+                    parks[idx] = Object.assign({}, parks[idx], patch);
+                }
+            }
+            applied++;
+        } catch (e) {
+            console.warn('[modes] upsert failed for', reference, e);
+        }
+    }
+
+    // Trigger a light redraw
+    try {
+        if (typeof refreshMarkers === 'function') refreshMarkers();
+    } catch (_) {
+    }
+    return {applied};
+}
+
+async function checkAndUpdateModesAtStartup() {
+    try {
+        const res = await applyModeChangesToIndexedDB();
+        if (res && res.applied > 0) {
+            console.log(`[modes] Applied ${res.applied} mode/qsos patches to IndexedDB + memory.`);
+        }
+    } catch (e) {
+        console.warn('[modes] checkAndUpdateModesAtStartup failed:', e);
+    }
+}
+
 // === Worker helper wrappers (global) ===
-function initQsoWorkerIfNeeded(){
+function initQsoWorkerIfNeeded() {
     if (typeof window.initQsoWorkerIfNeededInner === 'function') {
         return window.initQsoWorkerIfNeededInner();
     }
 }
 
+// One-time healer: strip stale 'change'/'created' fields from parks not truly new, to avoid bad banners/colors
+async function healParksIfCorrupted() {
+    try {
+        const HEAL_KEY = `parksHealed::${appVersion}`; // run once per app build
+        if (localStorage.getItem(HEAL_KEY)) return; // already healed for this version
+
+        const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
+        const db = await getDatabase();
+
+        // Read all parks
+        const all = await new Promise((resolve, reject) => {
+            const tx = db.transaction('parks', 'readonly');
+            const store = tx.objectStore('parks');
+            const req = store.getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = (e) => reject(e.target.error);
+        });
+        if (!Array.isArray(all) || all.length === 0) {
+            localStorage.setItem(HEAL_KEY, '1');
+            return;
+        }
+
+        // Scan and patch as needed
+        let fixes = 0;
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction('parks', 'readwrite');
+            const store = tx.objectStore('parks');
+            for (const p of all) {
+                if (!p || !p.reference) continue;
+                let changed = false;
+                // If a park isn't in the vetted recent-adds set, remove any stale created/change fields
+                if (!RECENT.has(p.reference)) {
+                    if (Object.prototype.hasOwnProperty.call(p, 'change')) {
+                        delete p.change;
+                        changed = true;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(p, 'created')) {
+                        delete p.created;
+                        changed = true;
+                    }
+                }
+                // (Optional future hook) sanity for modeTotals if you want
+                if (changed) {
+                    store.put(p);
+                    fixes++;
+                }
+            }
+            tx.oncomplete = () => resolve();
+            tx.onerror = (e) => reject(e.target.error);
+        });
+
+        localStorage.setItem(HEAL_KEY, '1');
+        if (fixes > 0) console.log(`[heal] Cleaned ${fixes} park records in IndexedDB.`);
+    } catch (e) {
+        console.warn('healParksIfCorrupted failed:', e);
+    }
+}
 
 function updateVisibleModeCounts() {
     if (!map || !parks || parks.length === 0) return;
@@ -352,18 +690,19 @@ function updateVisibleModeCounts() {
     const b = map.getBounds();
     const refs = [];
     for (const park of parks) {
-        const { latitude, longitude, reference } = park || {};
+        const {latitude, longitude, reference} = park || {};
         if (latitude == null || longitude == null || !reference) continue;
         if (!MODE_CHANGE_REFS.has(reference)) continue; // Only compute where changes exist
         if (b.contains([latitude, longitude])) refs.push(reference);
     }
     enqueueVisibleReferences(refs);
 }
-function modeCountsForParkRef(reference){
+
+function modeCountsForParkRef(reference) {
     if (typeof window.modeCountsForParkRefInner === 'function') {
         return window.modeCountsForParkRefInner(reference);
     }
-    return { cw:0, data:0, ssb:0, unk:0 };
+    return {cw: 0, data: 0, ssb: 0, unk: 0};
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -372,6 +711,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         ensureReviewHaloCss();
 
         await ensureReviewCacheFromIndexedDB();
+        // Load true new-park refs from changes.json to avoid mass purple due to drifting 'created'
+        try {
+            await ensureRecentAddsFromChangesJSON();
+        } catch (e) {
+            console.warn(e);
+        }
+
+        // If IndexedDB.parks is empty (e.g., after a manual reset), force-load allparks.json now
+        await ensureParksLoadedFromNetworkIfEmpty();
+        // Remove stale created/change fields from existing users' stores
+        await healParksIfCorrupted();
 
         // === Off-main-thread per-mode QSO counting (performance patch) ===
         let modeCountCache = new Map(); // reference -> {cw,data,ssb,unk}
@@ -386,7 +736,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             try {
                 qsoWorker = new Worker('qsoWorker.js');
                 qsoWorker.onmessage = (e) => {
-                    const { type, payload } = e.data || {};
+                    const {type, payload} = e.data || {};
                     if (type === 'INIT_OK') {
                         workerReady = true;
                         scheduleVisibleCompute();
@@ -399,7 +749,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             updateMarkersForReferences(Object.keys(res));
                         } else if (typeof refreshMarkers === 'function') {
                             if (window.requestIdleCallback) {
-                                requestIdleCallback(() => refreshMarkers(), { timeout: 200 });
+                                requestIdleCallback(() => refreshMarkers(), {timeout: 200});
                             } else {
                                 setTimeout(() => refreshMarkers(), 50);
                             }
@@ -409,8 +759,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // Defer INIT until after initial map render so paint happens ASAP
                 setTimeout(() => {
                     try {
-                        qsoWorker.postMessage({ type: 'INIT', payload: { parks, activations } });
-                    } catch (_) {}
+                        qsoWorker.postMessage({type: 'INIT', payload: {parks, activations}});
+                    } catch (_) {
+                    }
                 }, 0);
             } catch (e) {
                 console.warn('QSO worker failed to initialize, falling back to main thread.', e);
@@ -418,7 +769,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         function getModeCounts(ref) {
-            return modeCountCache.get(ref) || { cw: 0, data: 0, ssb: 0, unk: 0 };
+            return modeCountCache.get(ref) || {cw: 0, data: 0, ssb: 0, unk: 0};
         }
 
         // Batch compute for visible parks only (and only missing entries)
@@ -437,18 +788,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (!qsoWorker || !workerReady || pendingVisibleBatch.length === 0) return;
                 const batch = pendingVisibleBatch.splice(0, 250); // small chunks
                 try {
-                    qsoWorker.postMessage({ type: 'COMPUTE', payload: { references: batch } });
-                } catch (_) {}
+                    qsoWorker.postMessage({type: 'COMPUTE', payload: {references: batch}});
+                } catch (_) {
+                }
                 if (pendingVisibleBatch.length > 0) {
                     if (window.requestIdleCallback) {
-                        requestIdleCallback(scheduleVisibleCompute, { timeout: 200 });
+                        requestIdleCallback(scheduleVisibleCompute, {timeout: 200});
                     } else {
                         setTimeout(scheduleVisibleCompute, 30);
                     }
                 }
             };
             if (window.requestIdleCallback) {
-                requestIdleCallback(run, { timeout: 200 });
+                requestIdleCallback(run, {timeout: 200});
             } else {
                 setTimeout(run, 30);
             }
@@ -461,7 +813,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const b = map.getBounds();
             const refs = [];
             for (const park of parks) {
-                const { latitude, longitude, reference } = park || {};
+                const {latitude, longitude, reference} = park || {};
                 if (latitude == null || longitude == null || !reference) continue;
                 if (!MODE_CHANGE_REFS.has(reference)) continue;
                 if (b.contains([latitude, longitude])) refs.push(reference);
@@ -491,7 +843,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (changed && typeof refreshMarkers === 'function') {
                 refreshMarkers(); // light redraw
             }
-        } catch (_) {}
+        } catch (_) {
+        }
     } catch (e) {
         console.error(e);
     }
@@ -500,34 +853,50 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Configurable filters (OR semantics). Defaults: All parks on.
 window.potaFilters = JSON.parse(localStorage.getItem('potaFilters') || '{}');
 if (!('allParks' in potaFilters)) {
-    potaFilters = { myActivations: true, currentlyActivating: true, newParks: true, allParks: true };
+    potaFilters = {myActivations: true, currentlyActivating: true, newParks: true, allParks: true};
 }
 
 // Configurable color thresholds. 'greenMax' means 1..greenMax is green; >greenMax is red; 0 is blue.
 window.potaThresholds = JSON.parse(localStorage.getItem('potaThresholds') || '{}');
 if (!('greenMax' in potaThresholds)) {
-    potaThresholds = { greenMax: 5 }; // default per Perry's example
+    potaThresholds = {greenMax: 5}; // default per Perry's example
 }
 
 // Helpers
-function savePotaFilters(){ localStorage.setItem('potaFilters', JSON.stringify(potaFilters)); try{ refreshMarkers({full:true}); }catch(e){} }
-function savePotaThresholds() { localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds)); }
+function savePotaFilters() {
+    localStorage.setItem('potaFilters', JSON.stringify(potaFilters));
+    try {
+        refreshMarkers({full: true});
+    } catch (e) {
+    }
+}
+
+function savePotaThresholds() {
+    localStorage.setItem('potaThresholds', JSON.stringify(potaThresholds));
+}
 
 // Mode filters for active spots
 window.modeFilters = JSON.parse(localStorage.getItem('modeFilters') || '{}');
 if (!('new' in modeFilters)) {
-    modeFilters = { new: true, data: true, cw: true, ssb: true, unk: true };
+    modeFilters = {new: true, data: true, cw: true, ssb: true, unk: true};
 }
-function saveModeFilters(){ localStorage.setItem('modeFilters', JSON.stringify(modeFilters)); try{ refreshMarkers({full:true}); }catch(e){} }
+
+function saveModeFilters() {
+    localStorage.setItem('modeFilters', JSON.stringify(modeFilters));
+    try {
+        refreshMarkers({full: true});
+    } catch (e) {
+    }
+}
 
 
-function shouldDisplayParkFlags(flags){
+function shouldDisplayParkFlags(flags) {
     const isUserActivated = !!(flags && flags.isUserActivated);
     const isActive = !!(flags && flags.isActive);
     const isNew = !!(flags && flags.isNew);
 
     // When "All spots" is ON: show everything EXCEPT any categories that are toggled OFF.
-    if (potaFilters.allParks){
+    if (potaFilters.allParks) {
         if (potaFilters.myActivations === false && isUserActivated) return false;
         if (potaFilters.currentlyActivating === false && isActive) return false;
         if (potaFilters.newParks === false && isNew) return false;
@@ -547,7 +916,7 @@ function shouldDisplayParkFlags(flags){
         || (potaFilters.newParks && isNew);
 }
 
-function shouldDisplayByMode(isActive, isNew, mode){
+function shouldDisplayByMode(isActive, isNew, mode) {
     if (!isActive) return true;
     if (isNew && !modeFilters.new) return false;
     let key = 'unk';
@@ -559,7 +928,7 @@ function shouldDisplayByMode(isActive, isNew, mode){
 }
 
 // Returns true if the parsed PQL specifies an explicit geographic scope
-function queryHasExplicitScope(parsed){
+function queryHasExplicitScope(parsed) {
     if (!parsed || typeof parsed !== 'object') return false;
     if (parsed.callsign) return true;
     const s = (parsed.state || parsed.STATE || parsed.region || parsed.country || parsed.COUNTRY || parsed.ref || parsed.reference || parsed.id);
@@ -578,22 +947,15 @@ function queryHasExplicitScope(parsed){
     return false;
 }
 
-function getMarkerColorConfigured(activations, isUserActivated, created) {
+function getMarkerColorConfigured(activations, isUserActivated) {
     try {
-        const createdDate = new Date(created);
-        const ts = createdDate.getTime();
-        const ageInDays = Number.isFinite(ts) ? (Date.now() - ts) / 86400000 : Infinity;
-
-        // 1) New parks
-        if (ageInDays <= 30) return "#800080"; // purple
-
-        // 2) 'My' parks
+        // 1) 'My' parks
         if (isUserActivated) return "#1e8c27"; // light green
 
-        // 3) Parks with zero activations
+        // 2) Parks with zero activations
         if (activations === 0) return "#00008b"; // dark blue
 
-        // 4) Default
+        // 3) Default
         return "#ff6666"; // red
     } catch (_) {
         return "#ff6666"; // fallback to red
@@ -636,7 +998,7 @@ function buildFiltersPanel() {
 }
 
 
-function buildModeFilterPanel(){
+function buildModeFilterPanel() {
     const menu = document.getElementById('menu');
     if (!menu) return;
 
@@ -774,12 +1136,19 @@ function decorateReviewHalo(marker, park) {
 // Lightweight refresh: clear and redraw current view using existing flow
 
 /* === Direct redraw path that respects potaFilters (Ada v7, patched for PN&R rings) === */
-async function redrawMarkersWithFilters(){
-    try{
-        if (!map) { console.warn("redrawMarkersWithFilters: map not ready"); return; }
-        if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
-
+async function redrawMarkersWithFilters() {
+    try {
+        if (!map) {
+            console.warn("redrawMarkersWithFilters: map not ready");
+            return;
+        }
+//        if (!map.activationsLayer) { map.activationsLayer = L.layerGroup().addTo(map); }
+//        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!map.activationsLayer) {
+            map.activationsLayer = L.layerGroup().addTo(map);
+        }
+        // Always clear before redraw to avoid stale styling/classes across filter toggles
+        map.activationsLayer.clearLayers();
         const bounds = getCurrentMapBounds();
         const userActivatedReferences = (activations || []).map(a => a.reference);
 
@@ -797,33 +1166,36 @@ async function redrawMarkersWithFilters(){
         }
 
         parks.forEach((park) => {
-            const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+            const {reference, name, latitude, longitude, activations: parkActivationCount, created} = park;
             if (!(latitude && longitude)) return;
             const latLng = L.latLng(latitude, longitude);
             if (!bounds.contains(latLng)) return;
 
             const isUserActivated = userActivatedReferences.includes(reference);
-            let createdTime = null;
-            if (created) {
-                createdTime = typeof created === 'number' ? created : new Date(created).getTime();
-            }
-            const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
+            // Use recent-adds set instead of created timestamp
+            const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
+            const isNew = RECENT.has(reference);
+            // Gate the purple highlighting behind the New filter chip
+            const showNewColor = !!potaFilters?.newParks && isNew;
             const currentActivation = spotByRef[reference];
             const isActive = !!currentActivation;
             const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
-            if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+            if (!shouldDisplayParkFlags({isUserActivated, isActive, isNew})) return;
             if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
             // Does this park have a PN&R review URL?
             let hasReview = !!park.reviewURL;
             if (!hasReview && window.__REVIEW_URLS instanceof Map) {
                 const urlFromCache = window.__REVIEW_URLS.get(reference);
-                if (urlFromCache) { park.reviewURL = urlFromCache; hasReview = true; }
+                if (urlFromCache) {
+                    park.reviewURL = urlFromCache;
+                    hasReview = true;
+                }
             }
             // Determine marker class for animated divIcon
             const markerClasses = [];
-            if (isNew) markerClasses.push('pulse-marker');
+            if (showNewColor) markerClasses.push('pulse-marker');
             if (isActive) {
                 markerClasses.push('active-pulse-marker');
                 if (mode === 'CW') markerClasses.push('mode-cw');
@@ -845,16 +1217,20 @@ async function redrawMarkersWithFilters(){
                 });
                 if (hasReview) decorateReviewHalo(marker, park);
             } else {
+                const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
+                const fillColor = showNewColor ? "#800080" : baseColor; // purple only when New filter ON and truly new
                 marker = L.circleMarker([latitude, longitude], {
                     radius: 6,
-                    fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created),
+                    fillColor,
                     color: "#000",
                     weight: 1,
                     opacity: 1,
                     fillOpacity: 0.9,
                 });
 
-                if (hasReview) { decorateReviewHalo(marker, park); }
+                if (hasReview) {
+                    decorateReviewHalo(marker, park);
+                }
             }
 
             const tooltipText = currentActivation
@@ -866,9 +1242,11 @@ async function redrawMarkersWithFilters(){
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", { keepInView: true, autoPan: true, autoPanPadding: [40,40] })
-                .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
-                .on('click', function(){ this.closeTooltip(); });
+                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [40, 40]})
+                .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
+                .on('click', function () {
+                    this.closeTooltip();
+                });
 
             marker.on('popupopen', async function () {
                 try {
@@ -887,9 +1265,28 @@ async function redrawMarkersWithFilters(){
                             });
                             if (rec && rec.reviewURL) park.reviewURL = rec.reviewURL;
                             if (park.reviewURL) decorateReviewHalo(this, park);
-                        } catch (e) { /* non-fatal */ }
+                        } catch (e) { /* non-fatal */
+                        }
                     }
-                    let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                    // Build a display-safe copy so we don't show stale or unintended change banners
+                    const displayPark = Object.assign({}, park);
+                    try {
+                        const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
+                        const isTrulyNew = RECENT.has(park.reference);
+                        // Only keep the `change`/`created` fields if the park is truly new per backend delta window
+                        if (!isTrulyNew) {
+                            delete displayPark.change;
+                            delete displayPark.created;
+                        } else {
+                            // Normalize the message for UI consistency
+                            if (typeof displayPark.change === 'string' && displayPark.change.toLowerCase().includes('park added')) {
+                                displayPark.change = 'Park added';
+                            }
+                        }
+                    } catch (_) {
+                    }
+
+                    let popupContent = await fetchFullPopupContent(displayPark, currentActivation, parkActivations);
                     this.setPopupContent(popupContent);
                 } catch (err) {
                     this.setPopupContent("<b>Error loading park info.</b>");
@@ -897,45 +1294,18 @@ async function redrawMarkersWithFilters(){
                 }
             });
         });
-    }catch(e){
+    } catch (e) {
         console.error("redrawMarkersWithFilters failed:", e);
     }
 }
 
-
-function refreshMarkers(options = {}) {
+function refreshMarkers() {
     if (!map) return;
-    const fullRedraw = !!options.full;
-
-    // Prefer incremental updates unless a full redraw is requested
     if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
         updateVisibleModeCounts();
     }
-
-    if (fullRedraw) {
-        // Full redraw path (clears layers)
-        if (typeof redrawMarkersWithFilters === 'function') {
-            try { window.__nonDestructiveRedraw = false; } catch (e) {}
-            redrawMarkersWithFilters();
-        }
-        return;
-    }
-
-    // Non-destructive redraw to avoid white-screen
-    if (window.requestAnimationFrame) {
-        window.requestAnimationFrame(() => {
-            if (typeof redrawMarkersWithFilters === 'function') {
-                try { window.__nonDestructiveRedraw = true; } catch (e) {}
-                redrawMarkersWithFilters();
-                try { window.__nonDestructiveRedraw = false; } catch (e) {}
-            }
-        });
-    } else {
-        setTimeout(() => {
-            if (typeof redrawMarkersWithFilters === 'function') {
-                redrawMarkersWithFilters();
-            }
-        }, 0);
+    if (typeof redrawMarkersWithFilters === 'function') {
+        redrawMarkersWithFilters();
     }
 }
 
@@ -1037,7 +1407,10 @@ function initializeMenu() {
     // });
     //Listener for Activations button
     document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
-    try{ refreshMarkers({full:true}); }catch(e){}
+    try {
+        refreshMarkers({full: true});
+    } catch (e) {
+    }
 
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
@@ -1060,7 +1433,7 @@ async function displayVersionInfo() {
 
     // Get last-modified date of scripts.js
     try {
-        const response = await fetch("/potamap/scripts.js", { method: 'HEAD' });
+        const response = await fetch("/potamap/scripts.js", {method: 'HEAD'});
         const header = response.headers.get("last-modified");
         if (header) {
             appDate = formatAsYYYYMMDD(new Date(header));
@@ -1081,7 +1454,7 @@ async function displayVersionInfo() {
 
     // Get last-modified header for changes.json
     try {
-        const changesResponse = await fetch("/potamap/data/changes.json", { method: 'HEAD' });
+        const changesResponse = await fetch("/potamap/data/changes.json", {method: 'HEAD'});
         const changesHeader = changesResponse.headers.get("last-modified");
         if (changesHeader) {
             changesDate = formatAsYYYYMMDD(new Date(changesHeader));
@@ -1908,30 +2281,30 @@ async function getDatabase() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open('potaDatabase', 3); // Incremented version to add 'parkActivations' store
 
-        request.onupgradeneeded = function(event) {
+        request.onupgradeneeded = function (event) {
             const db = event.target.result;
 
             // Create object store for activations if it doesn't exist
             if (!db.objectStoreNames.contains('activations')) {
-                db.createObjectStore('activations', { keyPath: 'reference' });
+                db.createObjectStore('activations', {keyPath: 'reference'});
             }
 
             // Create object store for parks if it doesn't exist
             if (!db.objectStoreNames.contains('parks')) {
-                db.createObjectStore('parks', { keyPath: 'reference' });
+                db.createObjectStore('parks', {keyPath: 'reference'});
             }
 
             // Create object store for park activations if it doesn't exist
             if (!db.objectStoreNames.contains('parkActivations')) {
-                db.createObjectStore('parkActivations', { keyPath: 'reference' });
+                db.createObjectStore('parkActivations', {keyPath: 'reference'});
             }
         };
 
-        request.onsuccess = function(event) {
+        request.onsuccess = function (event) {
             resolve(event.target.result);
         };
 
-        request.onerror = function(event) {
+        request.onerror = function (event) {
             console.error('Error opening IndexedDB:', event.target.error);
             reject(event.target.error);
         };
@@ -1946,7 +2319,7 @@ async function upsertParkFieldsInIndexedDB(reference, patch) {
     return new Promise((resolve, reject) => {
         const getReq = store.get(reference);
         getReq.onsuccess = () => {
-            const current = getReq.result || { reference };
+            const current = getReq.result || {reference};
             const updated = Object.assign({}, current, patch);
             const putReq = store.put(updated);
             putReq.onsuccess = () => resolve(updated);
@@ -1959,7 +2332,7 @@ async function upsertParkFieldsInIndexedDB(reference, patch) {
 /** Convenience: upsert just the review URL for a park. */
 async function upsertParkReviewURL(reference, reviewURL) {
     if (!reference || !reviewURL) return null;
-    return upsertParkFieldsInIndexedDB(reference, { reviewURL });
+    return upsertParkFieldsInIndexedDB(reference, {reviewURL});
 }
 
 /** Fetch and apply PN&R review URLs to parks (incremental). */
@@ -1969,7 +2342,7 @@ async function fetchAndApplyReviewUrls() {
 
     try {
         // HEAD to see if changed
-        const head = await fetch(URL, { method: 'HEAD', cache: 'no-store' });
+        const head = await fetch(URL, {method: 'HEAD', cache: 'no-store'});
         const lastMod = head.ok ? head.headers.get('last-modified') : null;
         const prev = localStorage.getItem(KEY);
         if (lastMod && prev && lastMod === prev) {
@@ -1979,7 +2352,7 @@ async function fetchAndApplyReviewUrls() {
             return (window.__REVIEW_URLS instanceof Map && window.__REVIEW_URLS.size > 0);
         }
         // GET the JSON
-        const res = await fetch(URL, { cache: 'no-store' });
+        const res = await fetch(URL, {cache: 'no-store'});
         if (!res.ok) throw new Error('Failed to load park-urls.json');
         const rows = await res.json();
         // Build a quick reference map { reference -> reviewURL } for use during redraws
@@ -1987,7 +2360,10 @@ async function fetchAndApplyReviewUrls() {
         for (const r of rows) {
             if (r && r.reference && r.reviewURL) reviewMap.set(r.reference, r.reviewURL);
         }
-        try { window.__REVIEW_URLS = reviewMap; } catch (_) {}
+        try {
+            window.__REVIEW_URLS = reviewMap;
+        } catch (_) {
+        }
         if (!Array.isArray(rows)) return false;
 
         // Index current in-memory parks by ref for quick patch
@@ -2129,7 +2505,7 @@ async function saveParkActivationsToIndexedDB(reference, activations) {
     const transaction = db.transaction('parkActivations', 'readwrite');
     const store = transaction.objectStore('parkActivations');
     return new Promise((resolve, reject) => {
-        const data = { reference, activations };
+        const data = {reference, activations};
         const request = store.put(data);
         request.onsuccess = () => {
             console.log(`Park activations for ${reference} saved successfully to IndexedDB.`);
@@ -2275,7 +2651,7 @@ function parseCSV(csvText) {
  */
 function debounce(func, wait) {
     let timeout;
-    return function(...args) {
+    return function (...args) {
         const later = () => {
             clearTimeout(timeout);
             func.apply(this, args);
@@ -2304,7 +2680,9 @@ async function toggleActivations() {
 
     // Clear activationsLayer before updating map
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) {
+            map.activationsLayer.clearLayers();
+        }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -2439,6 +2817,7 @@ async function handleFileUpload(event) {
     };
     reader.readAsText(file);
 }
+
 /**
  * Maps the slider's linear value (0-100) to the desired non-linear scale.
  * @param {number} value - The linear slider value (0-100).
@@ -2573,7 +2952,7 @@ function handleSearchEnter(event) {
             const userActivatedRefs = (activations || []).map(a => a.reference);
             const now = Date.now();
             const nferByRef = buildNferByRef(parks);
-            const ctx = { bounds, spotByRef, spotByCall, userActivatedRefs, now, userLat, userLng, nferByRef };
+            const ctx = {bounds, spotByRef, spotByCall, userActivatedRefs, now, userLat, userLng, nferByRef};
 
             // Default scope: only parks inside current bounds
             const scoped = queryHasExplicitScope(parsed);
@@ -2636,7 +3015,7 @@ async function zoomToPark(park) {
         return;
     }
 
-    const { latitude, longitude } = park;
+    const {latitude, longitude} = park;
     if (!latitude || !longitude) {
         console.warn("Park has no valid coordinates:", park.reference);
         return;
@@ -2718,7 +3097,7 @@ async function zoomToPark(park) {
  * @returns {Promise<string>} The full popup HTML content.
  */
 async function fetchFullPopupContent(park, currentActivation = null, parkActivations = null) {
-    const { reference, name, latitude, longitude } = park;
+    const {reference, name, latitude, longitude} = park;
 
     // Generate POTA.app link
     const potaAppLink =
@@ -2790,7 +3169,7 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
     }
 
     if (currentActivation) {
-        const { activator, frequency, mode, comments } = currentActivation;
+        const {activator, frequency, mode, comments} = currentActivation;
         popupContent += `
             <br><br><b>Current Activation:</b><br>
             <b>Activator:</b> ${activator}<br>
@@ -2840,7 +3219,7 @@ function zoomToParks(parks) {
     console.log(`Zoomed to fit ${parks.length} parks within the view.`); // Debugging
 
     // After fitting bounds, increase the zoom level by one
-    map.once('moveend', function() {
+    map.once('moveend', function () {
         const currentZoom = map.getZoom();
         const maxZoom = map.getMaxZoom();
         const newZoomLevel = Math.min(currentZoom + 1, maxZoom);
@@ -2873,7 +3252,6 @@ function zoomToParks(parks) {
 function normalizeString(str) {
     return typeof str === 'string' ? str.toLowerCase().trim() : '';
 }
-
 
 
 /**
@@ -2913,10 +3291,10 @@ function parseStructuredQuery(raw) {
 
     function parseDistanceValue(rawVal) {
         const m = String(rawVal).trim().match(/^(\d+(?:\.\d+)?)(\s*(km|mi))?$/i);
-        if (!m) return { miles: NaN };
+        if (!m) return {miles: NaN};
         const val = parseFloat(m[1]);
         const unit = (m[3] || 'mi').toLowerCase();
-        return { miles: unit === 'km' ? val * 0.621371 : val };
+        return {miles: unit === 'km' ? val * 0.621371 : val};
     }
 
     // tokenize
@@ -2925,16 +3303,27 @@ function parseStructuredQuery(raw) {
     while (i < q.length) {
         const ch = q[i];
         if (ch === '"') {
-            let j = i + 1; while (j < q.length && q[j] !== '"') j++;
-            tokens.push(`TEXT:${q.slice(i + 1, j)}`); i = (j < q.length) ? j + 1 : q.length;
-        } else if (/\s/.test(ch)) { i++; }
-        else { let j = i + 1; while (j < q.length && !/\s/.test(q[j])) j++; tokens.push(q.slice(i, j)); i = j; }
+            let j = i + 1;
+            while (j < q.length && q[j] !== '"') j++;
+            tokens.push(`TEXT:${q.slice(i + 1, j)}`);
+            i = (j < q.length) ? j + 1 : q.length;
+        } else if (/\s/.test(ch)) {
+            i++;
+        } else {
+            let j = i + 1;
+            while (j < q.length && !/\s/.test(q[j])) j++;
+            tokens.push(q.slice(i, j));
+            i = j;
+        }
     }
 
     // parse
     for (const t of tokens) {
         const kv = t.includes(':') ? t.split(':') : null;
-        if (!kv) { result.text = (result.text ? result.text + ' ' : '') + t; continue; }
+        if (!kv) {
+            result.text = (result.text ? result.text + ' ' : '') + t;
+            continue;
+        }
 
         const key = kv[0].toUpperCase();
         const valueRaw = kv.slice(1).join(':');
@@ -2947,29 +3336,36 @@ function parseStructuredQuery(raw) {
             else if (v === 'DATA' || v === 'FT8' || v === 'FT4') result.mode = 'DATA';
 
         } else if (key === 'MAX') {
-            const n = parseInt(value, 10); if (!Number.isNaN(n)) result.max = n;
+            const n = parseInt(value, 10);
+            if (!Number.isNaN(n)) result.max = n;
 
         } else if (key === 'MIN') {
-            const n = parseInt(value, 10); if (!Number.isNaN(n)) result.min = n;
+            const n = parseInt(value, 10);
+            if (!Number.isNaN(n)) result.min = n;
 
         } else if (key === 'ACTIVE') {
-            const v = value.toLowerCase(); result.active = (v === '1' || v === 'true');
+            const v = value.toLowerCase();
+            result.active = (v === '1' || v === 'true');
 
         } else if (key === 'NEW') {
-            const v = value.toLowerCase(); result.isNew = (v === '1' || v === 'true');
+            const v = value.toLowerCase();
+            result.isNew = (v === '1' || v === 'true');
 
         } else if (key === 'MINE') {
-            const v = value.toLowerCase(); result.mine = (v === '1' || v === 'true');
+            const v = value.toLowerCase();
+            result.mine = (v === '1' || v === 'true');
 
         } else if (key === 'STATE') {
-            const st = value.toUpperCase().match(/([A-Z]{2})$/); if (st && st[1]) result.state = st[1];
+            const st = value.toUpperCase().match(/([A-Z]{2})$/);
+            if (st && st[1]) result.state = st[1];
 
         } else if (key === 'CALL' || key === 'CALLSIGN') {
             result.callsign = value.trim().toUpperCase();
             if (result.active === null) result.active = true; // default to ACTIVE:1 when filtering by callsign
 
         } else if (key === 'REVIEW') {
-            const v = value.toLowerCase(); result.hasReview = (v === '1' || v === 'true');
+            const v = value.toLowerCase();
+            result.hasReview = (v === '1' || v === 'true');
 
         } else if (key === 'REF' || key === 'REFERENCE' || key === 'ID') {
             const arr = String(value).split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
@@ -2979,17 +3375,25 @@ function parseStructuredQuery(raw) {
             }
 
         } else if (key === 'MINDIST') {
-            const { miles } = parseDistanceValue(value); if (!Number.isNaN(miles)) result.minDist = miles;
+            const {miles} = parseDistanceValue(value);
+            if (!Number.isNaN(miles)) result.minDist = miles;
 
         } else if (key === 'MAXDIST') {
-            const { miles } = parseDistanceValue(value); if (!Number.isNaN(miles)) result.maxDist = miles;
+            const {miles} = parseDistanceValue(value);
+            if (!Number.isNaN(miles)) result.maxDist = miles;
 
         } else if (key === 'DIST') {
             const m = value.replace(/\s+/g, '').toLowerCase().match(/^([^-]*?)(?:-([^-]*))?$/);
             if (m) {
-                const left  = m[1], right = m[2] || '';
-                if (left)  { const { miles } = parseDistanceValue(left);  if (!Number.isNaN(miles)) result.minDist = miles; }
-                if (right) { const { miles } = parseDistanceValue(right); if (!Number.isNaN(miles)) result.maxDist = miles; }
+                const left = m[1], right = m[2] || '';
+                if (left) {
+                    const {miles} = parseDistanceValue(left);
+                    if (!Number.isNaN(miles)) result.minDist = miles;
+                }
+                if (right) {
+                    const {miles} = parseDistanceValue(right);
+                    if (!Number.isNaN(miles)) result.maxDist = miles;
+                }
             }
 
         } else if (key === 'NFERWITH') {
@@ -3035,15 +3439,15 @@ function buildNferByRef(parks) {
  * Uses current map state (spots, activations) for ACTIVE/MODE/MINE filters.
  */
 function parkMatchesStructuredQuery(park, parsed, ctx) {
-    const { bounds } = ctx || {};
+    const {bounds} = ctx || {};
 
     // 1) Proximity or in-view constraint
-    const hasDistConstraint    = (parsed.minDist !== null) || (parsed.maxDist !== null);
-    const hasStateConstraint   = !!parsed.state;
-    const hasNferConstraint    = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
+    const hasDistConstraint = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    const hasStateConstraint = !!parsed.state;
+    const hasNferConstraint = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
     const hasCountryConstraint = !!parsed.country;
-    const hasRefConstraint     = Array.isArray(parsed.refs) && parsed.refs.length > 0;
-    const hasCallConstraint    = !!parsed.callsign;
+    const hasRefConstraint = Array.isArray(parsed.refs) && parsed.refs.length > 0;
+    const hasCallConstraint = !!parsed.callsign;
 
     // Default to in-bounds unless one of the *explicit* global-scope keys is present
     const hasGlobalConstraint = hasDistConstraint || hasStateConstraint || hasNferConstraint
@@ -3092,8 +3496,14 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         let ok = false;
         for (const target of parsed.nferWithRefs) {
             const T = String(target).toUpperCase();
-            if (map && map.get(T) && map.get(T).has(ref)) { ok = true; break; } // forward
-            if (Array.isArray(park.nfer) && park.nfer.some(r => String(r).toUpperCase() === T)) { ok = true; break; } // backward
+            if (map && map.get(T) && map.get(T).has(ref)) {
+                ok = true;
+                break;
+            } // forward
+            if (Array.isArray(park.nfer) && park.nfer.some(r => String(r).toUpperCase() === T)) {
+                ok = true;
+                break;
+            } // backward
         }
         if (!ok) return false;
     }
@@ -3112,7 +3522,12 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
             if (inboundSet) {
                 has = inboundSet.has(ref);
             } else {
-                for (const set of ctx.nferByRef.values()) { if (set.has(ref)) { has = true; break; } }
+                for (const set of ctx.nferByRef.values()) {
+                    if (set.has(ref)) {
+                        has = true;
+                        break;
+                    }
+                }
             }
         }
 
@@ -3172,7 +3587,7 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 
     // 10) MODE / MIN / MAX — QSO bucket check
     if (parsed.min !== null || parsed.max !== null || parsed.mode) {
-        const mode  = parsed.mode;
+        const mode = parsed.mode;
         // Normalize mode key: phone -> ssb, ft8/ft4 -> data
         const lowerRaw = mode ? String(mode).toLowerCase() : null;
         const key = (lowerRaw === 'phone' ? 'ssb'
@@ -3222,7 +3637,7 @@ function fitToMatchesIfGlobalScope(parsed, matched) {
         map.flyTo(bounds.getCenter(), map.getZoom());
     } else {
         // Multiple parks: fit them all in view (may adjust zoom)
-        map.fitBounds(bounds, { padding: [50, 50], animate: true });
+        map.fitBounds(bounds, {padding: [50, 50], animate: true});
     }
 }
 
@@ -3254,7 +3669,9 @@ function filterParksByActivations(maxActivations) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) {
+            map.activationsLayer.clearLayers();
+        }
         console.log("Cleared existing markers."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -3273,7 +3690,6 @@ function filterParksByActivations(maxActivations) {
     applyActivationToggleState();
     console.log("Displayed activated parks within filtered view."); // Debugging
 }
-
 
 
 /**
@@ -3311,6 +3727,7 @@ function removeCallsignDisplay() {
 function getCurrentMapBounds() {
     return map.getBounds();
 }
+
 function getParksInBounds(parks) {
     const bounds = getCurrentMapBounds();
     return parks.filter(p =>
@@ -3363,7 +3780,9 @@ async function updateActivationsInView() {
     });
 
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) {
+            map.activationsLayer.clearLayers();
+        }
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
@@ -3411,7 +3830,9 @@ function updateMapWithFilteredParks(filteredParks) {
 
     // Clear existing markers
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) {
+            map.activationsLayer.clearLayers();
+        }
         console.log("Cleared existing markers for filtered search."); // Debugging
     } else {
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -3429,14 +3850,21 @@ function updateMapWithFilteredParks(filteredParks) {
     displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
     console.log("Displayed filtered parks on the map."); // Debugging
 }
+
 // Unified Clear Search
 function clearSearchInput() {
     // 1) Clear pulsing PQL overlay (if any)
-    try { clearPqlFilterDisplay(); } catch (e) {}
+    try {
+        clearPqlFilterDisplay();
+    } catch (e) {
+    }
 
     // 2) Clear legacy highlight layer (non-PQL incremental search)
     if (map && map.highlightLayer) {
-        try { map.highlightLayer.clearLayers(); } catch (e) {}
+        try {
+            map.highlightLayer.clearLayers();
+        } catch (e) {
+        }
     }
 
     // 3) Clear the search box
@@ -3448,7 +3876,10 @@ function clearSearchInput() {
     }
 
     // 4) Drop any cached results from the last search
-    try { currentSearchResults = []; } catch (e) {}
+    try {
+        currentSearchResults = [];
+    } catch (e) {
+    }
 
     // 5) Restore the previous map view (if we saved it before the search)
     if (previousMapState && previousMapState.bounds) {
@@ -3459,7 +3890,7 @@ function clearSearchInput() {
                 applyActivationToggleState();
             }
             // Clear saved state
-            previousMapState = { bounds: null, displayedParks: [] };
+            previousMapState = {bounds: null, displayedParks: []};
             console.log('Map view restored to prior state.');
         } catch (e) {
             console.warn('Failed to restore previous map view:', e);
@@ -3509,7 +3940,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (changed && typeof refreshMarkers === 'function') {
             refreshMarkers();
         }
-    } catch (_) {}
+    } catch (_) {
+    }
 });
 
 /**
@@ -3527,6 +3959,7 @@ function resetParkDisplay() {
     // Update the map with the filtered parks
     filterParksByActivations(minActivations);
 }
+
 /**
  * Initializes and displays activations on startup.
  * If activations exist in the local store, this function attempts to update them
@@ -3750,7 +4183,7 @@ async function updateActivationsFromScrape() {
     try {
         // Replace with the URL of the page you want to scrape.
         const url = 'https://api.pota.app/#/user/activations?all=1';
-        const response = await fetch(url, { credentials: 'include' });
+        const response = await fetch(url, {credentials: 'include'});
 
         if (!response.ok) {
             throw new Error(`Failed to fetch activations page. Status: ${response.status}`);
@@ -3852,13 +4285,21 @@ function initializeMap(lat, lng) {
 
     // Attach dynamic spot fetching to map movement
     let skipNextSpotFetch = false;
-    mapInstance.on("popupopen", () => { skipNextSpotFetch = true; isPopupOpen = true; });
-    mapInstance.on("popupclose", () => { isPopupOpen = false; });
+    mapInstance.on("popupopen", () => {
+        skipNextSpotFetch = true;
+        isPopupOpen = true;
+    });
+    mapInstance.on("popupclose", () => {
+        isPopupOpen = false;
+    });
     if (!isDesktopMode) {
         mapInstance.on(
             "moveend",
             debounce(() => {
-                if (skipNextSpotFetch) { skipNextSpotFetch = false; return; }
+                if (skipNextSpotFetch) {
+                    skipNextSpotFetch = false;
+                    return;
+                }
                 console.log("Map moved or zoomed. Updating spots...");
                 fetchAndDisplaySpotsInCurrentBounds(mapInstance)
                     .then(() => applyActivationToggleState());
@@ -3909,7 +4350,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     layerGroup.clearLayers(); // Clear existing markers before adding new ones
 
     parks.forEach((park) => {
-        const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+        const {reference, name, latitude, longitude, activations: parkActivationCount, created} = park;
         const isUserActivated = userActivatedReferences.includes(reference);
         let createdTime = null;
         if (created) {
@@ -3927,7 +4368,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const useActiveDiv = !!isActive;
 
         // Apply Filters (OR semantics)
-        if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) return;
+        if (!shouldDisplayParkFlags({isUserActivated, isActive, isNew})) return;
         if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
         // Debugging
@@ -3951,7 +4392,10 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         let hasReview = !!park.reviewURL;
         if (!hasReview && window.__REVIEW_URLS instanceof Map) {
             const urlFromCache = window.__REVIEW_URLS.get(reference);
-            if (urlFromCache) { park.reviewURL = urlFromCache; hasReview = true; }
+            if (urlFromCache) {
+                park.reviewURL = urlFromCache;
+                hasReview = true;
+            }
         }
 
         const marker = useActiveDiv
@@ -4027,6 +4471,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
     console.log("All parks displayed with appropriate highlights.");
 }
+
 // ---- helper: extract 2-letter US state/territory codes from locationDesc ----
 // ---- helpers ----
 function extractStates(locationDesc) {
@@ -4044,10 +4489,10 @@ function haversineMiles(lat1, lon1, lat2, lon2) {
     const R = 3958.7613; // Earth radius in miles
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
-    const a = Math.sin(dLat/2)**2 +
+    const a = Math.sin(dLat / 2) ** 2 +
         Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-        Math.sin(dLon/2)**2;
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
 }
 
@@ -4226,230 +4671,121 @@ async function fetchAndApplyUserActivations(callsign = null) {
         console.error("Error fetching or processing user activations:", error);
     }
 }
+
 // === Modes ingestion (initial + rolling updates) =============================
 
 const MODES_URL = '/potamap/backend/modes.json';
 const MODES_CHANGES_URLS = [
-    '/potamap/backend/mode-changes.json',     // your preferred name
-    '/potamap/backend/mode_changes.json'       // fallback if you used the earlier name
+    '/potamap/backend/mode-changes.json',
+    '/potamap/backend/mode-changes.json'
 ];
 
 const MODES_KEYS = {
-    initialized:      'modes.initialized',             // "1" after initial modes.json load
-    baseETag:         'modes.base.etag',
-    baseLM:           'modes.base.lastModified',
-    baseUpdatedAt:    'modes.base.updatedAt',
-    changesETag:      'modes.changes.etag',
-    changesLM:        'modes.changes.lastModified',
+    initialized: 'modes.initialized',
+    baseETag: 'modes.base.etag',
+    baseLM: 'modes.base.lastModified',
+    baseUpdatedAt: 'modes.base.updatedAt',
+    changesETag: 'modes.changes.etag',
+    changesLM: 'modes.changes.lastModified',
     changesUpdatedAt: 'modes.changes.updatedAt',
-    changesLastDate:  'modes.changes.lastDate'         // last applied batch date (when using "batches")
+    changesLastDate: 'modes.changes.lastDate'
 };
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-async function headProbe(url, etagKey, lmKey) {
-    const prevETag = localStorage.getItem(etagKey) || null;
-    const prevLM   = localStorage.getItem(lmKey) || null;
-    try {
-        const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-        if (!r.ok) return { ok: false };
-        const etag = r.headers.get('ETag');
-        const lm   = r.headers.get('Last-Modified');
-        if (etag && prevETag && etag === prevETag) return { ok: true, isNew: false, etag, lm };
-        if (!etag && lm && prevLM && lm === prevLM) return { ok: true, isNew: false, etag, lm };
-        return { ok: true, isNew: true, etag, lm };
-    } catch {
-        // HEAD not supported or network hiccup — treat as potentially new
-        return { ok: true, isNew: true, etag: null, lm: null, noHead: true };
-    }
-}
-
-function rowsToPatches(rows) {
-    const patches = [];
-    for (const row of rows || []) {
-        const reference = row.reference || row.ref || row.id;
-        if (!reference) continue;
-        patches.push({
-            reference,
-            modeTotals: {
-                cw:   Number(row.cw)   || 0,
-                ssb:  Number(row.ssb)  || 0,
-                data: Number(row.data) || 0
-            }
-        });
-    }
-    return patches;
-}
-
-async function applyPatchesToIDBAndMemory(patches, { chunkSize = 1000, yieldEvery = 1 } = {}) {
-    if (!patches.length) return 0;
-    if (typeof upsertParksToIndexedDB !== 'function') {
-        console.warn('[modes] upsertParksToIndexedDB not found; cannot persist modeTotals.');
-        return 0;
-    }
-    for (let i = 0, batch = 0; i < patches.length; i += chunkSize, batch++) {
-        const slice = patches.slice(i, i + chunkSize);
-        await upsertParksToIndexedDB(slice);
-        // keep in-memory parks[] synced immediately
-        if (Array.isArray(parks) && parks.length) {
-            const m = new Map(slice.map(p => [p.reference, p.modeTotals]));
-            for (const park of parks) {
-                const mt = m.get(park.reference);
-                if (mt) park.modeTotals = mt;
-            }
-        }
-        if (yieldEvery && batch % yieldEvery === 0) await sleep(0);
-    }
-    return patches.length;
+function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
 }
 
 /**
- * Fetch-and-cache modes:
- * - First run: GET modes.json and upsert once, set initialized flag.
- * - Later runs: check for modes-changes.json; if new, upsert only changed rows.
- * Supports two formats for modes-changes.json:
- *   1) Flat array: [{reference,cw,ssb,data}, ...]
- *   2) {batches:[{date:"YYYY-MM-DD", changes:[{reference,cw,ssb,data}]}]}
+ * Robustly detects which parks have mode/QSO changes.
+ * Returns an array of park references (uppercase) that have mode/QSO updates.
+ * Supports multiple input shapes from MODES_CHANGES_URLS:
+ *   1) ["US-0001", ...]
+ *   2) [{ reference: "US-0001", ... }, ...]
+ *   3) [{ reference: "US-0001", cw: 10, ssb: 20, data: 5 }, ...]
+ *   4) { changes: [...] } or { batches: [{date, changes: [...]}, ...] }
  */
-async function fetchAndCacheModes({ chunkSize = 1000 } = {}) {
-    const initialized = localStorage.getItem(MODES_KEYS.initialized) === '1';
+async function detectModeChanges() {
+    // Returns an array of park references (uppercase) that have mode/QSO updates.
+    // Supports multiple input shapes:
+    //  1) ["US-0001", "US-6363", ...]
+    //  2) [{ reference: "US-0001", ...full park... }, ...]
+    //  3) [{ reference: "US-0001", cw: 10, ssb: 20, data: 5 }, ...]
+    //  4) { changes: [...] } or { batches: [{date, changes: [...]}, ...] }
 
-    if (!initialized) {
-        // --- Initial bootstrap from modes.json ---
-        const head = await headProbe(MODES_URL, MODES_KEYS.baseETag, MODES_KEYS.baseLM);
-        const resp = await fetch(MODES_URL, { cache: 'no-store' });
-        if (!resp.ok) throw new Error(`Failed to fetch ${MODES_URL}: ${resp.status}`);
-        const rows = await resp.json();
-        if (!Array.isArray(rows)) throw new Error('modes.json must be an array');
+    const urls = Array.isArray(MODES_CHANGES_URLS) ? MODES_CHANGES_URLS : [];
 
-        const applied = await applyPatchesToIDBAndMemory(rowsToPatches(rows), { chunkSize });
-        const etag = resp.headers.get('ETag') || head.etag || null;
-        const lm   = resp.headers.get('Last-Modified') || head.lm || null;
-        if (etag) localStorage.setItem(MODES_KEYS.baseETag, etag);
-        if (lm)   localStorage.setItem(MODES_KEYS.baseLM, lm);
-        localStorage.setItem(MODES_KEYS.baseUpdatedAt, String(Date.now()));
-        localStorage.setItem(MODES_KEYS.initialized, '1');
-        console.log(`[modes] initial load applied ${applied} rows from modes.json`);
-        return { applied, phase: 'initial' };
-    }
-
-    // --- Incremental: modes-changes.json ---
-    let chosenUrl = null, head = null;
-    for (const u of MODES_CHANGES_URLS) {
-        head = await headProbe(u, MODES_KEYS.changesETag, MODES_KEYS.changesLM);
-        // if HEAD returned ok=false (e.g., 404), try next candidate
-        if (!head.ok) continue;
-        chosenUrl = u;
-        break;
-    }
-    if (!chosenUrl) {
-        console.log('[modes] no modes-changes file found; skipping.');
-        return { applied: 0, phase: 'changes', skipped: true };
-    }
-    if (head && head.isNew === false) {
-        console.log('[modes] modes-changes unchanged; skipping.');
-        return { applied: 0, phase: 'changes', skipped: true };
-    }
-
-    const resp = await fetch(chosenUrl, { cache: 'no-store' });
-    if (!resp.ok) {
-        console.warn(`[modes] failed to fetch ${chosenUrl}: ${resp.status}`);
-        return { applied: 0, phase: 'changes', skipped: true };
-    }
-    const body = await resp.json();
-
-    let changeRows = [];
-    if (Array.isArray(body)) {
-        // flat list
-        changeRows = body;
-    } else if (body && Array.isArray(body.batches)) {
-        // rolling window of dated batches
-        const lastDate = localStorage.getItem(MODES_KEYS.changesLastDate) || '';
-        const batches = [...body.batches].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-        let maxDate = lastDate;
-        for (const b of batches) {
-            const d = String(b.date || '');
-            if (lastDate && d <= lastDate) continue;   // already applied
-            if (Array.isArray(b.changes)) changeRows.push(...b.changes);
-            if (!maxDate || d > maxDate) maxDate = d;
+    // Helper: normalize a single row to a reference string
+    const toRef = (row) => {
+        if (!row) return null;
+        if (typeof row === 'string') return String(row).trim().toUpperCase();
+        if (typeof row === 'object') {
+            const r = row.reference || row.ref || row.id;
+            if (!r) return null;
+            return String(r).trim().toUpperCase();
         }
-        if (maxDate) localStorage.setItem(MODES_KEYS.changesLastDate, maxDate);
-    } else {
-        console.warn('[modes] unexpected modes-changes format; skipping.');
-        return { applied: 0, phase: 'changes', skipped: true };
+        return null;
+    };
+
+    // Helper: extract refs from a parsed JSON payload
+    const extractRefs = (body) => {
+        const out = [];
+        if (!body) return out;
+
+        if (Array.isArray(body)) {
+            for (const item of body) {
+                const ref = toRef(item);
+                if (ref) out.push(ref);
+            }
+            return out;
+        }
+
+        // Object wrapper forms
+        if (Array.isArray(body.changes)) {
+            for (const item of body.changes) {
+                const ref = toRef(item);
+                if (ref) out.push(ref);
+            }
+            return out;
+        }
+
+        if (Array.isArray(body.batches)) {
+            for (const batch of body.batches) {
+                if (!Array.isArray(batch.changes)) continue;
+                for (const item of batch.changes) {
+                    const ref = toRef(item);
+                    if (ref) out.push(ref);
+                }
+            }
+            return out;
+        }
+
+        return out;
+    };
+
+    // Try candidates in order until one succeeds
+    for (const url of urls) {
+        try {
+            const res = await fetch(url, {cache: 'no-store'});
+            if (!res.ok) {
+                // Try the next candidate on 404/403/etc.
+                continue;
+            }
+            const body = await res.json();
+            const refs = extractRefs(body);
+            if (!refs.length) continue;
+
+            // Deduplicate & normalize
+            const unique = [...new Set(refs.filter(Boolean))];
+            return unique;
+        } catch (e) {
+            // Network or parse error — try next candidate
+            continue;
+        }
     }
 
-    // Dedup by reference; last one wins
-    const byRef = new Map();
-    for (const r of changeRows) {
-        const ref = r.reference || r.ref || r.id;
-        if (!ref) continue;
-        byRef.set(ref, { reference: ref, cw: Number(r.cw) || 0, ssb: Number(r.ssb) || 0, data: Number(r.data) || 0 });
-    }
-    const patches = [...byRef.values()].map(r => ({ reference: r.reference, modeTotals: { cw: r.cw, ssb: r.ssb, data: r.data }}));
-    const applied = await applyPatchesToIDBAndMemory(patches, { chunkSize });
-
-    const etag = resp.headers.get('ETag') || (head && head.etag) || null;
-    const lm   = resp.headers.get('Last-Modified') || (head && head.lm) || null;
-    if (etag) localStorage.setItem(MODES_KEYS.changesETag, etag);
-    if (lm)   localStorage.setItem(MODES_KEYS.changesLM, lm);
-    localStorage.setItem(MODES_KEYS.changesUpdatedAt, String(Date.now()));
-
-    console.log(`[modes] applied ${applied} mode changes from ${chosenUrl}`);
-    return { applied, phase: 'changes', skipped: applied === 0 };
+    // Nothing found
+    return [];
 }
-
-// Keep this simple wrapper if you like having a single call site:
-async function checkAndUpdateModesAtStartup() {
-    const key = (typeof MODES_KEYS === 'object' && MODES_KEYS && MODES_KEYS.initialized) || 'modes.initialized';
-    const firstRun = !(localStorage.getItem(key) === '1');
-
-    const toast = showToast(
-        firstRun
-            ? 'Loading mode totals for all parks… this may take a bit on first run.'
-            : 'Checking for mode total updates…',
-        { sticky: true, showSpinner: true }
-    );
-
-    try {
-        const res = await fetchAndCacheModes({ chunkSize: 1000 });
-
-        if (!res) {
-            toast.update('Mode totals up to date.', 'success');
-            toast.close(1200);
-            return;
-        }
-        if (res.phase === 'initial') {
-            toast.update(`Mode totals loaded for ${res.applied} parks.`, 'success');
-            toast.close(1500);
-            return;
-        }
-        if (res.skipped) {
-            toast.update('Mode totals are up to date.', 'success');
-            toast.close(1200);
-            return;
-        }
-        toast.update(`Mode totals updated (${res.applied} changes).`, 'success');
-        toast.close(1500);
-    } catch (err) {
-        console.warn('[modes] update failed:', err);
-        toast.update('Failed to load mode totals. Will retry later.', 'error');
-        toast.close(3500);
-    }
-}
-
-
-/**
- * One-shot check+apply at startup. Call this after parks have been loaded/cached.
- */
-// async function checkAndUpdateModesAtStartup() {
-//     try {
-//         // If you keep modes at a different URL/path, change it here:
-//         await fetchAndCacheModes({ url: MODES_URL, chunkSize: 1000 });
-//     } catch (err) {
-//         console.warn('[modes] update failed:', err);
-//     }
-// }
 
 function getFromStore(store, key) {
     return new Promise((resolve, reject) => {
@@ -4524,6 +4860,7 @@ async function getLastFetchTimestamp(key) {
 async function setLastFetchTimestamp(key, timestamp) {
     localStorage.setItem(`lastFetch_${key}`, timestamp.toString());
 }
+
 // Conditional fetch: returns Response if modified, or null if not modified / 404.
 // Persists ETag/Last-Modified in localStorage under the provided `key`.
 async function fetchIfModified(url, key) {
@@ -4539,7 +4876,7 @@ async function fetchIfModified(url, key) {
 
     let res;
     try {
-        res = await fetch(url, { method: 'GET', headers, cache: 'no-store' });
+        res = await fetch(url, {method: 'GET', headers, cache: 'no-store'});
     } catch (e) {
         console.warn('fetchIfModified: network error for', url, e);
         return null;
@@ -4576,7 +4913,10 @@ async function setupPOTAMap() {
     try {
         // 1) Paint FIRST: use saved center or a sensible default; do NOT wait on data.
         let savedCenter = null;
-        try { savedCenter = JSON.parse(localStorage.getItem('mapCenter') || 'null'); } catch {}
+        try {
+            savedCenter = JSON.parse(localStorage.getItem('mapCenter') || 'null');
+        } catch {
+        }
         const [defLat, defLng] = savedCenter || [39.8283, -98.5795]; // CONUS center as fallback
         map = initializeMap(defLat, defLng);
         map.activationsLayer = L.layerGroup().addTo(map);
@@ -4588,14 +4928,29 @@ async function setupPOTAMap() {
                     userLat = position.coords.latitude;
                     userLng = position.coords.longitude;
 // Do not re-center on load; just drop/update the pin
-                    try { setUserLocationMarker(userLat, userLng); } catch {}
-                } catch (e) { console.warn('geo location error', e); }
-                try { await fetchAndDisplaySpots(); applyActivationToggleState(); } catch (e) { console.warn(e); }
+                    try {
+                        setUserLocationMarker(userLat, userLng);
+                    } catch {
+                    }
+                } catch (e) {
+                    console.warn('geo location error', e);
+                }
+                try {
+                    await fetchAndDisplaySpots();
+                    applyActivationToggleState();
+                } catch (e) {
+                    console.warn(e);
+                }
                 displayCallsign();
             },
             async (error) => {
                 console.warn('Geolocation failed:', error && error.message);
-                try { await fetchAndDisplaySpots(); applyActivationToggleState(); } catch (e) { console.warn(e); }
+                try {
+                    await fetchAndDisplaySpots();
+                    applyActivationToggleState();
+                } catch (e) {
+                    console.warn(e);
+                }
                 displayCallsign();
             }
         );
@@ -4610,7 +4965,9 @@ async function setupPOTAMap() {
         const parksP = (async () => {
             await fetchAndCacheParks(csvUrl, cacheDuration);
             parks = await getAllParksFromIndexedDB();
-        })().catch(err => { console.warn('parks load failed', err); });
+        })().catch(err => {
+            console.warn('parks load failed', err);
+        });
 
         const nferP = parksP.then(() => loadAndApplyNferData()).catch(e => console.warn(e));
 
@@ -4627,7 +4984,9 @@ async function setupPOTAMap() {
         try {
             applyActivationToggleState();
             displayCallsign();
-        } catch (e) { console.warn('initial render failed', e); }
+        } catch (e) {
+            console.warn('initial render failed', e);
+        }
 
         // 6) Defer modes check so it never blocks map paint; ensure it runs only once
         if (!window.__modesInitStarted && typeof checkAndUpdateModesAtStartup === 'function') {
@@ -4714,6 +5073,7 @@ function getCurrentUserCallsign() {
     console.warn("No valid callsign found in activations.");
     return null;
 }
+
 async function getOrPromptUserCallsign() {
     let stored = localStorage.getItem("userCallsign");
     if (stored) return stored;
@@ -4803,7 +5163,9 @@ async function fetchAndDisplaySpots() {
         if (!map.activationsLayer) {
             map.activationsLayer = L.layerGroup().addTo(map);
         } else {
-            if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+            if (!window.__nonDestructiveRedraw) {
+                map.activationsLayer.clearLayers();
+            }
         }
 
         const activatedReferences = activations.map(act => act.reference);
@@ -4843,9 +5205,9 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
         const bounds = mapInstance.getBounds();
         console.log("Current map bounds:", bounds);
 
-        const spotsInBounds = spots.filter(({ latitude, longitude }) => {
+        const spotsInBounds = spots.filter(({latitude, longitude}) => {
             if (!latitude || !longitude) {
-                console.warn("Invalid coordinates:", { latitude, longitude });
+                console.warn("Invalid coordinates:", {latitude, longitude});
                 return false;
             }
             return bounds.contains([latitude, longitude]);
@@ -4886,7 +5248,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-
 /**
  * Determines the marker color based on activations and user activation status.
  * @param {number} activations - The number of activations for the park.
@@ -4911,7 +5272,7 @@ function getMarkerColor(activations, userActivated, created) {
     if (!activations || activations === 0) return "#001a66"; // Dark blue (no activations)
 
 //    if (activations > 10) return "#ff6666"; // Light red (highly active)
-    if (activations > 0)  return "#90ee90"; // Light green (some activity)
+    if (activations > 0) return "#90ee90"; // Light green (some activity)
 
     // Fallback
     return "#001a66"; // Dark blue
@@ -4984,7 +5345,9 @@ optimizeLeafletControlsAndPopups();
 function refreshMapActivations() {
     // Clear existing markers or layers if necessary
     if (map.activationsLayer) {
-        if (!window.__nonDestructiveRedraw) { map.activationsLayer.clearLayers(); }
+        if (!window.__nonDestructiveRedraw) {
+            map.activationsLayer.clearLayers();
+        }
         console.log("Cleared existing activation markers."); // Debugging
     }
 
@@ -5120,21 +5483,24 @@ window.addEventListener('resize', debounce(() => {
 }, 300));
 
 
-function initializeFilterChips(){
+function initializeFilterChips() {
     const pairs = [
-        ['chipMyActs','myActivations'],
-        ['chipOnAir','currentlyActivating'],
-        ['chipNewParks','newParks'],
-        ['chipAllParks','allParks']
+        ['chipMyActs', 'myActivations'],
+        ['chipOnAir', 'currentlyActivating'],
+        ['chipNewParks', 'newParks'],
+        ['chipAllParks', 'allParks']
     ];
 
-    function setChip(btn, on){ btn.classList.toggle('active', !!on); btn.setAttribute('aria-pressed', !!on); }
+    function setChip(btn, on) {
+        btn.classList.toggle('active', !!on);
+        btn.setAttribute('aria-pressed', !!on);
+    }
 
-    function updateChipStates(){
+    function updateChipStates() {
         const chipAll = document.getElementById('chipAllParks');
         if (chipAll) setChip(chipAll, !!potaFilters.allParks);
 
-        [['chipMyActs','myActivations'],['chipOnAir','currentlyActivating'],['chipNewParks','newParks']].forEach(([id,key])=>{
+        [['chipMyActs', 'myActivations'], ['chipOnAir', 'currentlyActivating'], ['chipNewParks', 'newParks']].forEach(([id, key]) => {
             const el = document.getElementById(id);
             if (!el) return;
             setChip(el, !!potaFilters[key]);
@@ -5150,28 +5516,28 @@ function initializeFilterChips(){
     const chipNew = document.getElementById('chipNewParks');
     const chipAll = document.getElementById('chipAllParks');
 
-    if (chipMy) chipMy.addEventListener('click', ()=>{
+    if (chipMy) chipMy.addEventListener('click', () => {
         potaFilters.myActivations = !potaFilters.myActivations;
         savePotaFilters();
         updateChipStates();
         refreshMarkers();
     });
-    if (chipOnAir) chipOnAir.addEventListener('click', ()=>{
+    if (chipOnAir) chipOnAir.addEventListener('click', () => {
         potaFilters.currentlyActivating = !potaFilters.currentlyActivating;
         savePotaFilters();
         updateChipStates();
         refreshMarkers();
     });
-    if (chipNew) chipNew.addEventListener('click', ()=>{
+    if (chipNew) chipNew.addEventListener('click', () => {
         potaFilters.newParks = !potaFilters.newParks;
         savePotaFilters();
         updateChipStates();
         refreshMarkers();
     });
-    if (chipAll) chipAll.addEventListener('click', ()=>{
+    if (chipAll) chipAll.addEventListener('click', () => {
         const willBeOn = !potaFilters.allParks;
         potaFilters.allParks = willBeOn;
-        if (willBeOn){
+        if (willBeOn) {
             potaFilters.myActivations = true;
             potaFilters.currentlyActivating = true;
             potaFilters.newParks = true;
