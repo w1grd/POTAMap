@@ -23,7 +23,7 @@ API_ENDPOINTS = [
 # --- QSO counts updater helpers ---
 RATE_LIMIT_PER_SEC = 10  # throttle to 10 requests/sec
 SLEEP_BETWEEN_REQ = 1.0 / RATE_LIMIT_PER_SEC
-ACTIVATIONS_API = 'https://api.pota.app/parks/activations/{ref}?count=all'
+ACTIVATIONS_API = 'https://api.pota.app/park/activations/{ref}?count=all'
 
 
 def load_local_data(filename):
