@@ -10,8 +10,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 
 # TESTING: use allparks2.json as the master file rather than allparks.json
-LOCAL_FILE = BASE_DIR / 'allparks2.json'
+LOCAL_FILE = BASE_DIR / 'allparks.json'
 CHANGES_FILE = BASE_DIR / 'changes.json'
+MODE_CHANGES_FILE = BASE_DIR / 'mode-changes.json'
 
 API_ENDPOINTS = [
     'https://api.pota.app/program/parks/US',
@@ -241,6 +242,17 @@ def update_qso_counts_for_refs(master_file: Path, refs_file: Path):
     # Load master map
     by_ref = load_master_by_ref(master_file)
 
+    # Load existing mode changes if present
+    mode_changes = []
+    if MODE_CHANGES_FILE.exists():
+        try:
+            with open(MODE_CHANGES_FILE, 'r') as f:
+                existing = json.load(f)
+            if isinstance(existing, list):
+                mode_changes.extend(existing)
+        except Exception as e:
+            print(f"Warning: could not read existing {MODE_CHANGES_FILE}: {e}")
+
     updated = 0
     total = len(refs)
     for idx, ref in enumerate(refs, start=1):
@@ -248,9 +260,11 @@ def update_qso_counts_for_refs(master_file: Path, refs_file: Path):
             totals = fetch_mode_totals_for_ref(ref)
             if ref in by_ref:
                 by_ref[ref]['modeTotals'] = totals
-                # Keep overall 'qsos' consistent with the buckets
                 by_ref[ref]['qsos'] = int(totals.get('cw', 0)) + int(totals.get('data', 0)) + int(totals.get('ssb', 0))
                 updated += 1
+                # Stamp with update time
+                by_ref[ref]['timestamp'] = datetime.utcnow().isoformat()
+                mode_changes.append(by_ref[ref])
             else:
                 print(f"Warning: reference {ref} not found in master; skipping.")
         except requests.HTTPError as e:
@@ -258,15 +272,31 @@ def update_qso_counts_for_refs(master_file: Path, refs_file: Path):
         except Exception as e:
             print(f"Error for {ref}: {e}")
         finally:
-            # throttle
             time.sleep(SLEEP_BETWEEN_REQ)
 
         if idx % 100 == 0 or idx == total:
             print(f"  Progress: {idx}/{total} refs processed...")
 
     write_master_from_map(master_file, by_ref)
-    print(f"Updated modeTotals for {updated} parks. Wrote master to {master_file}.")
 
+    # Prune to last 8 days based on timestamp if present
+    cutoff = datetime.utcnow().timestamp() - (8 * 86400)
+    pruned = []
+    for rec in mode_changes:
+        ts = rec.get('timestamp')
+        if ts:
+            try:
+                if datetime.fromisoformat(ts).timestamp() >= cutoff:
+                    pruned.append(rec)
+            except Exception:
+                pruned.append(rec)
+        else:
+            pruned.append(rec)
+    mode_changes = pruned
+
+    write_json(MODE_CHANGES_FILE, mode_changes)
+    print(f"Updated modeTotals for {updated} parks. Wrote master to {master_file}.")
+    print(f"Wrote {len(mode_changes)} total park records (last 8 days) to {MODE_CHANGES_FILE}.")
 
 def run_refs_only_mode(refs_path: Path):
     """Update modeTotals/qsos in the existing LOCAL_FILE using a provided refs list file."""
