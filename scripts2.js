@@ -68,6 +68,63 @@ window.__findMarkerByRef = window.__findMarkerByRef || function(reference){
 };
 
 window.openParkPopupByRef = function(reference, attempts){
+
+    /** Queue opening a park's popup after the map flies/pans to it (handles off‑screen destinations). */
+    function queueOpenPopupAfterPan(reference, lat, lng){
+        if (!window.map || !reference) return;
+        var done = false;
+        var tmpPopup = null;
+
+        function tryOpen(){
+            if (done) return true;
+            var m = (typeof window.__findMarkerByRef === 'function') ? window.__findMarkerByRef(reference) : null;
+            if (m){
+                done = true;
+                try {
+                    if (tmpPopup && map && map.closePopup) map.closePopup(tmpPopup);
+                } catch(e){}
+                try {
+                    if (typeof m.fire === 'function') m.fire('click');
+                    else if (typeof m.openPopup === 'function') m.openPopup();
+                } catch(e){ console.warn("queueOpenPopupAfterPan: open failed", e); }
+                cleanup();
+                return True
+            }
+            return False
+        }
+
+        function onLayerAdd(){ tryOpen(); }
+        function onMoveEnd(){
+            try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
+            setTimeout(tryOpen, 80);
+        }
+        function cleanup(){
+            if (!map) return;
+            try { map.off('moveend', onMoveEnd); } catch(e){}
+            try { map.off('layeradd', onLayerAdd); } catch(e){}
+            try { if (map.activationsLayer && map.activationsLayer.off) map.activationsLayer.off('layeradd', onLayerAdd); } catch(e){}
+        }
+
+        // Listen for both end-of-pan and layers appearing
+        try { map.once('moveend', onMoveEnd); } catch(e){}
+        try { map.on('layeradd', onLayerAdd); } catch(e){}
+        try { if (map.activationsLayer && map.activationsLayer.on) map.activationsLayer.on('layeradd', onLayerAdd); } catch(e){}
+
+        // Show a small "Loading…" popup at the target immediately so the user gets feedback
+        try {
+            if (typeof window.openTempPopupAt === 'function') {
+                tmpPopup = window.openTempPopupAt(lat, lng, "<b>Loading park…</b>");
+            }
+        } catch(e){}
+
+        // Kick a fallback attempt in case moveend/layeradd timing is quirky
+        setTimeout(function(){ if (!done) { onMoveEnd(); } }, 200);
+        setTimeout(function(){ if (!done) { tryOpen(); } }, 380);
+
+        // Hard timeout cleanup
+        setTimeout(function(){ if (!done) { cleanup(); console.warn("queueOpenPopupAfterPan: timed out for", reference); } }, 2000);
+    }
+
     attempts = (typeof attempts === 'number') ? attempts : 14;
     if (!window.map || !reference) return;
     var marker = window.__findMarkerByRef(reference);
@@ -5823,6 +5880,8 @@ function triggerGoToPark() {
         normalizeString(park.name).includes(query) ||
         normalizeString(park.reference).includes(query)
     );
+    const destLatLng = (typeof L !== 'undefined' && L.latLng) ? L.latLng(matchingPark.latitude, matchingPark.longitude) : {lat: matchingPark.latitude, lng: matchingPark.longitude};
+    const inView = (map && map.getBounds && destLatLng && map.getBounds().contains(destLatLng)) ? true : false;
 
     if (matchingPark) {
         zoomToPark(matchingPark);
