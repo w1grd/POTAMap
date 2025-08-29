@@ -75,8 +75,13 @@ function openPopupWithAutoPan(marker) {
         point.y < padding || point.y > mapSize.y - padding;
 
     if (needsPan) {
-        map.once('moveend', () => marker.openPopup());
-        map.panTo(latlng, {animate: true});
+        if (typeof map.panInside === 'function') {
+            map.panInside(latlng, { padding: [padding, padding], animate: true });
+            map.once('moveend', () => marker.openPopup());
+        } else {
+            map.once('moveend', () => marker.openPopup());
+            map.panTo(latlng, { animate: true });
+        }
     } else {
         marker.openPopup();
     }
@@ -3061,7 +3066,8 @@ function handleSearchInput(event) {
             className: 'custom-tooltip'
         });
 
-        const showPopup = async () => {
+        const showPopup = async (e) => {
+            if (e) L.DomEvent.stop(e);
             const popupContent = await fetchFullPopupContent(park);
             marker.bindPopup(popupContent);
             openPopupWithAutoPan(marker);
@@ -4588,13 +4594,10 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         marker
             .addTo(layerGroup)
             .bindPopup("<b>Loading park info...</b>", {
-                // keep the popup fully in view
-                keepInView: true,
-                autoPan: true,
-                // add a little breathing room around the popup
-                autoPanPadding: [40, 40],
                 // cap its width on small screens
-                maxWidth: 280
+                maxWidth: 280,
+                autoPan: false,
+                keepInView: false
             })
 
             .bindTooltip(tooltipText, {
@@ -4604,7 +4607,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 className: "custom-tooltip",
             });
 
-        const handleMarkerTap = () => {
+        const handleMarkerTap = (e) => {
+            if (e) L.DomEvent.stop(e);
             marker.closeTooltip();
             openPopupWithAutoPan(marker);
         };
