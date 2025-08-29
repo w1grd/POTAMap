@@ -3739,6 +3739,25 @@ function updateMapWithFilteredParks(filteredParks) {
 
     console.log("Activated References in Filtered Search:", activatedReferences); // Debugging
 
+    // --- Adjust view based on search results ---
+    try {
+        const pts = filteredParks
+            .filter(p => typeof p.latitude === 'number' && typeof p.longitude === 'number')
+            .map(p => [p.latitude, p.longitude]);
+
+        if (pts.length === 1) {
+            // Single result: fly to it at the current zoom level
+            const z = map.getZoom();
+            map.flyTo(pts[0], z);
+        } else if (pts.length > 1) {
+            // Multiple results: center and fit bounds with padding
+            const b = L.latLngBounds(pts);
+            map.fitBounds(b, { padding: [50, 50], animate: true });
+        }
+    } catch (e) {
+        console.warn('updateMapWithFilteredParks: view adjust failed', e);
+    }
+
     // Display ONLY the filtered parks on the map (PQL result)
     displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
     console.log("Displayed filtered parks on the map."); // Debugging
@@ -5436,14 +5455,14 @@ function initializeFilterChips() {
 
     function buildShareUrl(entry){
         const base = `${location.origin}${location.pathname}`;
-        theParams = new URLSearchParams();
-        theParams.set('pql', entry.pql);
+        const params = new URLSearchParams();
+        params.set('pql', entry.pql);
         if (entry.view){
-            theParams.set('z', String(entry.view.z));
-            theParams.set('lat', String(entry.view.lat));
-            theParams.set('lng', String(entry.view.lng));
+            params.set('z', String(entry.view.z));
+            params.set('lat', String(entry.view.lat));
+            params.set('lng', String(entry.view.lng));
         }
-        return `${base}?${theParams.toString()}`;
+        return `${base}?${params.toString()}`;
     }
 
     async function runSavedEntry(entry){
@@ -5555,11 +5574,13 @@ function initializeFilterChips() {
         <div class="ssp-title">Saved Searches</div>
         <div class="ssp-row">
           <input id="ssp-name" class="ssp-input" placeholder="Name this search…" />
-
+<!--
           <label class="ssp-check">
             <input type="checkbox" id="ssp-include-view" checked />
             Include map view
           </label>
+          -->
+          
           <button id="ssp-save" class="ssp-btn">Save Current</button>
         </div>         
         <ul id="ssp-list" class="ssp-list"></ul>
@@ -5573,7 +5594,8 @@ function initializeFilterChips() {
 
         li.querySelector('#ssp-save')?.addEventListener('click', () => {
             const name = li.querySelector('#ssp-name')?.value || '';
-            const includeView = !!li.querySelector('#ssp-include-view')?.checked;
+            const includeEl = li.querySelector('#ssp-include-view');
+            const includeView = includeEl ? !!includeEl.checked : true; // default to true when control is absent
             const pql = getCurrentPqlFromUI();
             const saved = saveCurrentSearch({ name, pql, includeView });
             if (saved){
