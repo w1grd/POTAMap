@@ -3466,12 +3466,33 @@ async function zoomToPark(park) {
     }
 
     // After the map finishes moving, open the popup for the park.
-    map.once('moveend', () => {
+    map.once('moveend', async () => {
         if (foundMarker && foundMarker._popup) {
             openPopupWithAutoPan(foundMarker);
             console.log(`Opened popup for existing marker of park ${park.reference}.`);
-        } else {
-            openParkPopupByRef(park.reference);
+            return;
+        }
+
+        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
+        map.highlightLayer.clearLayers();
+
+        const highlight = L.circleMarker([latitude, longitude], {
+            className: 'goto-park-highlight',
+            radius: 8,
+            fillColor: '#ffff00',
+            color: '#000',
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 0.8
+        }).addTo(map.highlightLayer);
+
+        try {
+            const popupContent = await fetchFullPopupContent(park);
+            highlight.bindPopup(popupContent, { autoPan: true, autoPanPadding: [20, 20] });
+            openPopupWithAutoPan(highlight);
+            console.log(`Opened popup for ${park.reference} via temporary highlight.`);
+        } catch (e) {
+            console.warn('zoomToPark: failed to fetch popup content', e);
         }
     });
 }
