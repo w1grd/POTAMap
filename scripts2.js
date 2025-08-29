@@ -1,3 +1,24 @@
+
+// === Global popup opener helper ===
+window.openParkPopupByRef = function(reference, attempts){
+    attempts = (typeof attempts === 'number') ? attempts : 14;
+    if (!window.map || !reference) return;
+    var marker = (typeof window.__findMarkerByRef === 'function') ? window.__findMarkerByRef(reference) : null;
+    if (marker){
+        try {
+            if (typeof marker.fire === 'function') { marker.fire('click'); }
+            else if (typeof marker.openPopup === 'function') { marker.openPopup(); }
+        } catch(e){ console.warn("openParkPopupByRef failed", e); }
+        return;
+    }
+    if (attempts > 0){
+        try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
+        setTimeout(function(){ window.openParkPopupByRef(reference, attempts-1); }, 110);
+    } else {
+        console.warn("openParkPopupByRef: marker not found for", reference);
+    }
+};
+
 //POTAmap (c) POTA News & Reviews https://pota.review
 //261
 //
