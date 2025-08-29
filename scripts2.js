@@ -58,6 +58,30 @@ let previousMapState = {
 let __canvasRenderer = null; // initialized after map setup
 let __panInProgress = false; // suppress redraws while panning
 
+/**
+ * Opens a marker's popup, panning the map first if the marker is too close
+ * to the edge of the current viewport.  This keeps popups reachable and
+ * prevents them from immediately closing when near map boundaries.
+ * @param {L.Marker} marker - Leaflet marker with a bound popup
+ */
+function openPopupWithAutoPan(marker) {
+    if (!map || !marker) return;
+    const latlng = marker.getLatLng();
+    const mapSize = map.getSize();
+    const point = map.latLngToContainerPoint(latlng);
+    const padding = 120; // space in px to keep around the popup
+    const needsPan =
+        point.x < padding || point.x > mapSize.x - padding ||
+        point.y < padding || point.y > mapSize.y - padding;
+
+    if (needsPan) {
+        map.once('moveend', () => marker.openPopup());
+        map.panTo(latlng, {animate: true});
+    } else {
+        marker.openPopup();
+    }
+}
+
 // --- Lightweight Toast UI -------------------------------------------------
 function ensureToastCss() {
     if (document.getElementById('pql-toast-css')) return;
@@ -3037,10 +3061,13 @@ function handleSearchInput(event) {
             className: 'custom-tooltip'
         });
 
-        marker.on('click', async () => {
+        const showPopup = async () => {
             const popupContent = await fetchFullPopupContent(park);
-            marker.bindPopup(popupContent).openPopup();
-        });
+            marker.bindPopup(popupContent);
+            openPopupWithAutoPan(marker);
+        };
+        marker.on('click', showPopup);
+        marker.on('touchend', showPopup);
     });
 }
 
@@ -3208,7 +3235,7 @@ async function zoomToPark(park) {
         // Ensure the popup is bound (it should be, from your displayParksOnMap or fetchAndDisplaySpots function)
         if (foundMarker._popup) {
             // This will automatically trigger the 'popupopen' event if you have it set
-            foundMarker.openPopup();
+            openPopupWithAutoPan(foundMarker);
             console.log(`Opened popup for existing marker of park ${park.reference}.`);
         } else {
             console.warn(`Marker has no bound popup for ${park.reference}.`);
@@ -3369,7 +3396,7 @@ function zoomToParks(parks) {
         map.activationsLayer.eachLayer(layer => {
             const layerLatLng = layer.getLatLng();
             if (layerLatLng.lat === park.latitude && layerLatLng.lng === park.longitude) {
-                layer.openPopup();
+                openPopupWithAutoPan(layer);
             }
         });
     });
@@ -4575,10 +4602,14 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 opacity: 0.9,
                 sticky: false,
                 className: "custom-tooltip",
-            })
-            .on('click', function () {
-                this.closeTooltip();
             });
+
+        const handleMarkerTap = () => {
+            marker.closeTooltip();
+            openPopupWithAutoPan(marker);
+        };
+        marker.on('click', handleMarkerTap);
+        marker.on('touchend', handleMarkerTap);
 
         marker.on('popupopen', async function () {
             try {
