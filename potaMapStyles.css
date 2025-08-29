@@ -543,28 +543,22 @@
 .ssp-list{ list-style:none; margin:0; padding:0; }
 
 /* --- Saved Searches: single-row layout with right-aligned icons --- */
+/* Make each saved row one line */
 .ssp-item{
     display:flex;
     align-items:center;
-    flex-wrap:nowrap;                 /* keep everything on one line */
-    gap:8px;
-    padding:6px 0;
-    border-bottom:1px solid #f1f5f9;
+    flex-wrap:nowrap;      /* never wrap */
 }
 .ssp-item:last-child{ border-bottom:none; }
+/* Name on the left, bold */
 .ssp-name{
-    flex:1 1 0;
-    min-width:0;                      /* allow shrink for narrow panels */
+    flex:1 1 auto;
+    min-width:0;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-weight:600;
+    white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
-    white-space:nowrap;
-    border-radius:6px;
-    padding:2px 4px;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-weight:700;                  /* bold, sans-serif */
-    font-size:0.95rem;
-    color:#183a2a;
-    background:transparent;
 }
 .ssp-name:focus{ outline:2px solid #94a3b8; background:#f8fafc; }
 .ssp-name:empty::before {
@@ -572,29 +566,28 @@
     color:#9aa4b2;        /* muted grey */
     font-weight:500;
 }
+/* Actions on the far right */
 .ssp-actions{
-    flex:0 0 auto;
+    margin-left:auto;
     display:flex;
     align-items:center;
-    margin-left:auto;                 /* push icons to the far right */
-    gap:4px;                          /* tight icon group */
+    gap:6px;
+    flex-wrap:nowrap;
 }
 .ssp-actions > * { flex:0 0 auto; }
+/* 🚫 Reset inherited global button styles that make them huge */
 .ssp-iconbtn{
-    appearance:none;
-    border:none;
-    background:transparent;
-    width:20px;                       /* keep the click target compact */
-    height:20px;
-    padding:0;
-    display:flex;                     /* center icon within button */
+    all: unset;             /* nuke width:100%, display:block, padding, etc. */
+    display:inline-flex;    /* sit next to each other */
     align-items:center;
     justify-content:center;
-    border-radius:4px;
+    padding:6px;            /* tap target */
+    border-radius:6px;
     cursor:pointer;
-    color:#1f4d2f;                    /* icon color */
+    color:#1f4d2f;
 }
+.ssp-actions button{ width:auto !important; }  /* belt & suspenders */
 .ssp-iconbtn:hover{ background:rgba(0,0,0,0.06); }
 .ssp-iconbtn:focus-visible{ outline:2px solid #1f4d2f; outline-offset:2px; }
-.ssp-iconbtn svg{ width:16px; height:16px; display:block; }
+.ssp-iconbtn svg{ width:18px; height:18px; display:block; }
 .ssp-empty{ color:#64748b; padding:6px 0; }
