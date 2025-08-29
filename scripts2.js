@@ -1,4 +1,27 @@
 
+/** Run a callback once the Leaflet map exists and is fully ready. */
+function whenMapReady(cb){
+    if (typeof cb !== 'function') return;
+    const go = function(){ try { cb(); } catch(e){} };
+    if (typeof window === 'undefined' || !window.map) {
+        // Poll briefly until map is created
+        let tries = 40;
+        const t = setInterval(function(){
+            if (window.map) { clearInterval(t); whenMapReady(cb); }
+            else if (--tries <= 0) { clearInterval(t); console.warn("whenMapReady: map not initialized"); }
+        }, 50);
+        return;
+    }
+    if (typeof map.whenReady === 'function') {
+        map.whenReady(go);
+    } else if (map._loaded) {
+        go();
+    } else {
+        map.once && map.once('load', go);
+    }
+}
+
+
 // === Marker registry shim: auto-register markers created with options.reference/ref ===
 (function(){
     if (typeof L === 'undefined' || !L.marker) return;
@@ -28,8 +51,9 @@ window.openTempPopupAt = function(lat, lng, html){
     try {
         if (!window.map) return;
         const content = html || "<b>Loading park…</b>";
-        const tmp = L.popup({autoPan: true, keepInView: true, autoPanPadding: [30,40]})
-            .setLatLng([lat, lng]).setContent(content).openOn(map);
+        var tmp = null;
+        whenMapReady(function(){ tmp = L.popup({autoPan: true, keepInView: true, autoPanPadding: [30,40]})
+            .setLatLng([lat, lng]).setContent(content).openOn(map); });
         // Close automatically when a real marker popup opens
         map.once('popupopen', function(ev){
             try{ if (ev && ev.popup !== tmp) map.closePopup(tmp); }catch(e){}
@@ -68,79 +92,24 @@ window.__findMarkerByRef = window.__findMarkerByRef || function(reference){
 };
 
 window.openParkPopupByRef = function(reference, attempts){
-
-    /** Queue opening a park's popup after the map flies/pans to it (handles off‑screen destinations). */
-    function queueOpenPopupAfterPan(reference, lat, lng){
-        if (!window.map || !reference) return;
-        var done = false;
-        var tmpPopup = null;
-
-        function tryOpen(){
-            if (done) return true;
-            var m = (typeof window.__findMarkerByRef === 'function') ? window.__findMarkerByRef(reference) : null;
-            if (m){
-                done = true;
-                try {
-                    if (tmpPopup && map && map.closePopup) map.closePopup(tmpPopup);
-                } catch(e){}
-                try {
-                    if (typeof m.fire === 'function') m.fire('click');
-                    else if (typeof m.openPopup === 'function') m.openPopup();
-                } catch(e){ console.warn("queueOpenPopupAfterPan: open failed", e); }
-                cleanup();
-                return True
-            }
-            return False
-        }
-
-        function onLayerAdd(){ tryOpen(); }
-        function onMoveEnd(){
-            try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
-            setTimeout(tryOpen, 80);
-        }
-        function cleanup(){
-            if (!map) return;
-            try { map.off('moveend', onMoveEnd); } catch(e){}
-            try { map.off('layeradd', onLayerAdd); } catch(e){}
-            try { if (map.activationsLayer && map.activationsLayer.off) map.activationsLayer.off('layeradd', onLayerAdd); } catch(e){}
-        }
-
-        // Listen for both end-of-pan and layers appearing
-        try { map.once('moveend', onMoveEnd); } catch(e){}
-        try { map.on('layeradd', onLayerAdd); } catch(e){}
-        try { if (map.activationsLayer && map.activationsLayer.on) map.activationsLayer.on('layeradd', onLayerAdd); } catch(e){}
-
-        // Show a small "Loading…" popup at the target immediately so the user gets feedback
-        try {
-            if (typeof window.openTempPopupAt === 'function') {
-                tmpPopup = window.openTempPopupAt(lat, lng, "<b>Loading park…</b>");
-            }
-        } catch(e){}
-
-        // Kick a fallback attempt in case moveend/layeradd timing is quirky
-        setTimeout(function(){ if (!done) { onMoveEnd(); } }, 200);
-        setTimeout(function(){ if (!done) { tryOpen(); } }, 380);
-
-        // Hard timeout cleanup
-        setTimeout(function(){ if (!done) { cleanup(); console.warn("queueOpenPopupAfterPan: timed out for", reference); } }, 2000);
-    }
-
     attempts = (typeof attempts === 'number') ? attempts : 14;
-    if (!window.map || !reference) return;
-    var marker = window.__findMarkerByRef(reference);
-    if (marker){
-        try {
-            if (typeof marker.fire === 'function') { marker.fire('click'); }
-            else if (typeof marker.openPopup === 'function') { marker.openPopup(); }
-        } catch(e){ console.warn("openParkPopupByRef failed", e); }
-        return;
-    }
-    if (attempts > 0){
-        try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
-        setTimeout(function(){ window.openParkPopupByRef(reference, attempts-1); }, 120);
-    } else {
-        console.warn("openParkPopupByRef: marker not found for", reference);
-    }
+    whenMapReady(function(){
+        if (!reference) return;
+        var marker = (typeof window.__findMarkerByRef === 'function') ? window.__findMarkerByRef(reference) : null;
+        if (marker){
+            try {
+                if (typeof marker.fire === 'function') { marker.fire('click'); }
+                else if (typeof marker.openPopup === 'function') { marker.openPopup(); }
+            } catch(e){ console.warn("openParkPopupByRef: open failed", e); }
+            return;
+        }
+        if (attempts > 0){
+            try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
+            setTimeout(function(){ window.openParkPopupByRef(reference, attempts-1); }, 140);
+        } else {
+            console.warn("openParkPopupByRef: marker not found for", reference);
+        }
+    });
 };
 
 window.openParkPopupByRef = function(reference, attempts){
@@ -5862,7 +5831,8 @@ function addGoToParkButton() {
 /**
  * Triggers the Go To Park functionality by searching and zooming to a park.
  */
-function triggerGoToPark() {
+function triggerGoToPark() {whenMapReady(function(){
+
     const searchBox = document.getElementById('searchBox');
 
     if (!searchBox || !searchBox.value.trim()) {
@@ -5896,6 +5866,7 @@ function triggerGoToPark() {
     setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 300);
     setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 540);
 
+});
 }
 
 
