@@ -1,4 +1,26 @@
 
+// === Marker registry shim: auto-register markers created with options.reference/ref ===
+(function(){
+    if (typeof L === 'undefined' || !L.marker) return;
+    if (L.__markerShimInstalled) return;
+    L.__markerShimInstalled = true;
+
+    const __origMarker = L.marker;
+    L.marker = function(latlng, options){
+        const m = __origMarker.call(this, latlng, options || {});
+        try {
+            const ref = (options && (options.reference || options.ref)) || m._parkRef;
+            if (ref) {
+                m._parkRef = ref;
+                window.markerByRef = window.markerByRef || {};
+                window.markerByRef[ref] = m;
+            }
+        } catch(e){ /* no-op */ }
+        return m;
+    };
+})();
+
+
 // === Global popup opener helper ===
 window.openParkPopupByRef = function(reference, attempts){
     attempts = (typeof attempts === 'number') ? attempts : 14;
@@ -5730,6 +5752,10 @@ function triggerGoToPark() {
     setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 120);
     setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 260);
     setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 420);
+
+    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 140);
+    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 300);
+    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 540);
 
 }
 
