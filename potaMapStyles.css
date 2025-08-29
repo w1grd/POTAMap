@@ -573,8 +573,9 @@
     margin-left:auto;
     display:flex;
     align-items:center;
-    gap:6px;
+    gap:4px;
     flex-wrap:nowrap;
+    justify-content:flex-end;
 }
 .ssp-actions > * { flex:0 0 auto; }
 /* 🚫 Reset inherited global button styles that make them huge */
@@ -583,7 +584,7 @@
     display:inline-flex;    /* sit next to each other */
     align-items:center;
     justify-content:center;
-    padding:6px;            /* tap target */
+    padding:5px;            /* tap target */
     border-radius:6px;
     cursor:pointer;
     color:#1f4d2f;
