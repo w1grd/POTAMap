@@ -553,3 +553,45 @@
 }
 .ssp-name:focus{ outline:2px solid #94a3b8; background:#f8fafc; }
 .ssp-empty{ color:#64748b; padding:6px 0; }
+
+
+
+/* --- Saved Searches: single-row layout with right-aligned icons --- */
+.ssp-item{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 0;
+    border-bottom:1px solid #f1f5f9;
+}
+.ssp-item:last-child{ border-bottom:none; }
+.ssp-name{
+    flex:1 1 auto;
+    min-width:140px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    border-radius:6px;
+    padding:2px 4px;
+}
+.ssp-actions{
+    display:flex;
+    gap:6px;
+    margin-left:auto;
+}
+.ssp-iconbtn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:34px;
+    height:34px;
+    border-radius:8px;
+    border:1px solid #334155;
+    background:#fff;
+    color:#0f172a;
+    cursor:pointer;
+}
+.ssp-iconbtn:hover{
+    background:#f1f5f9;
+    border-color:#0f172a;
+}
