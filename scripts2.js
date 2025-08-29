@@ -1363,7 +1363,10 @@ async function redrawMarkersWithFilters() {
 
 function refreshMarkers() {
     if (!map) return;
-    // Avoid redraws while a popup is open (prevents immediate close after auto-pan)
+
+    // Skip marker redraws while Leaflet is auto-panning a freshly opened popup (mobile tap stability).
+    if (typeof suppressRedrawUntil !== 'undefined' && Date.now() < suppressRedrawUntil) { return; }
+// Avoid redraws while a popup is open (prevents immediate close after auto-pan)
     if (typeof isPopupOpen !== 'undefined' && isPopupOpen) { return; }
     if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
         updateVisibleModeCounts();
