@@ -544,10 +544,12 @@
 
 /* --- Saved Searches: single-row layout with right-aligned icons --- */
 /* Make each saved row one line */
-.ssp-item{
-    display:flex;
+/* Ensure this li beats the generic #menu li block rule */
+.saved-searches-panel .ssp-item{
+    display:flex !important;
     align-items:center;
     flex-wrap:nowrap;      /* never wrap */
+    width:100%;
 }
 .ssp-item:last-child{ border-bottom:none; }
 /* Name on the left, bold */
