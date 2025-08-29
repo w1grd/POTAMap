@@ -268,8 +268,9 @@ function centerMapOnGeolocation() {
         if (saved) {
             try {
                 const [lat, lng] = JSON.parse(saved);
-                map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.0});
-            } catch {
+                map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+            } catch (e) {
+                // ignore parse error
             }
         } else if (typeof fallbackToDefaultLocation === 'function') {
             fallbackToDefaultLocation();
@@ -279,11 +280,18 @@ function centerMapOnGeolocation() {
 
     navigator.geolocation.getCurrentPosition(
         (position) => {
-            userLat = position.coords.latitude;
-            userLng = position.coords.longitude;
-            setUserLocationMarker(userLat, userLng);
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+
+            // Update globals if you rely on them elsewhere
+            try { window.userLat = lat; window.userLng = lng; } catch (e) {}
+
+            if (typeof setUserLocationMarker === 'function') {
+                setUserLocationMarker(lat, lng);
+            }
+
             if (map) {
-                map.setView([userLat, userLng], map.getZoom(), {animate: true, duration: 1.0});
+                map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
             }
         },
         (error) => {
@@ -292,14 +300,15 @@ function centerMapOnGeolocation() {
             if (saved) {
                 try {
                     const [lat, lng] = JSON.parse(saved);
-                    map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.0});
-                } catch {
+                    map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+                } catch (e) {
+                    // ignore parse error
                 }
             } else if (typeof fallbackToDefaultLocation === 'function') {
                 fallbackToDefaultLocation();
             }
         },
-        {enableHighAccuracy: true, maximumAge: 30000, timeout: 15000}
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 }
     );
 }
 
@@ -3189,12 +3198,19 @@ function mapSliderValue(value) {
 
 function fallbackToDefaultLocation() {
     if (!map) return;
-    userLat = 39.8283;
-    userLng = -98.5795;
-    map.setView([userLat, userLng], map.getZoom(), {
-        animate: true,
-        duration: 1.5,
-    });
+
+    const lat = 39.8283;   // CONUS centroid
+    const lng = -98.5795;
+
+    // If you track these globally elsewhere:
+    try { window.userLat = lat; window.userLng = lng; } catch (e) {}
+
+    // Optionally update the user pin if you have this helper
+    if (typeof setUserLocationMarker === 'function') {
+        setUserLocationMarker(lat, lng);
+    }
+
+    map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.5 });
     console.log("Map centered on default fallback location.");
 }
 
@@ -3378,7 +3394,7 @@ async function zoomToPark(park) {
     const currentZoom = map.getZoom();
     const maxZoom = map.getMaxZoom();
     const newZoomLevel = Math.min(currentZoom + 2, maxZoom); // or pick any desired zoom
-    map.setView([latitude, longitude], newZoomLevel, {
+    map.setView([latitude, longitude], map.getZoom(), {
         animate: true,
         duration: 1.5, // animation in seconds
     });
