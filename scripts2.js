@@ -3766,7 +3766,58 @@ function updateMapWithFilteredParks(filteredParks) {
 }
 
 // Unified Clear Search
+function __pqlWantsGlobalScope(parsed){
+  return !!(parsed && (
+    parsed.state ||
+    parsed.country ||
+    parsed.callsign ||
+    (Array.isArray(parsed.refs) && parsed.refs.length) ||
+    parsed.minDist !== null || parsed.maxDist !== null ||
+    (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length)
+  ));
+}
+
 function clearSearchInput() {
+// --- PQL SEARCH: Main runner ---
+// Exposed as window.runPQL for saved searches and Enter key
+async function runPQL(raw, ctx = {}) {
+    // 1. Parse PQL string
+    const parsed = parsePQL(raw);
+
+    // Helper for global scope check
+    function __pqlWantsGlobalScope(parsed){
+      return !!(parsed && (
+        parsed.state ||
+        parsed.country ||
+        parsed.callsign ||
+        (Array.isArray(parsed.refs) && parsed.refs.length) ||
+        parsed.minDist !== null || parsed.maxDist !== null ||
+        (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length)
+      ));
+    }
+
+    // 2. Select candidate parks (global or in bounds)
+    const candidates = __pqlWantsGlobalScope(parsed) ? parks : getParksInBounds(parks);
+
+    // ... rest of the function logic ...
+
+    // 3. Filter candidates by parsed criteria
+    const matched = candidates.filter(park => parkMatchesParsedPQL(park, parsed, ctx));
+
+    // 4. Center map to results if global scope
+    try { fitToMatchesIfGlobalScope(parsed, matched); } catch(_) {}
+
+    // 5. Show results or handle no match
+    if (matched.length === 0) {
+        const scopeMsg = __pqlWantsGlobalScope(parsed) ? '' : ' in the current view';
+        showNoMatchModal ? showNoMatchModal(`No parks match that query${scopeMsg}.`) : alert(`No parks match that query${scopeMsg}.`);
+        return;
+    }
+
+    // ...draw markers, etc...
+}
+
+window.runPQL = runPQL;
     // 1) Clear pulsing PQL overlay (if any)
     try {
         clearPqlFilterDisplay();
