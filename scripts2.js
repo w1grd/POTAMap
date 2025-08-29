@@ -1295,7 +1295,7 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {keepInView: false, autoPan: true})
+                .bindPopup("<b>Loading park info...</b>", {keepInView: false, autoPan: true, autoPanPadding: [20, 20]})
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
                 .on('click', function () {
                     this.closeTooltip();
@@ -3063,7 +3063,7 @@ function handleSearchInput(event) {
         const showPopup = async (e) => {
             if (e) L.DomEvent.stop(e);
             const popupContent = await fetchFullPopupContent(park);
-            marker.bindPopup(popupContent, { autoPan: true });
+            marker.bindPopup(popupContent, { autoPan: true, autoPanPadding: [20, 20] });
             openPopupWithAutoPan(marker);
         };
         marker.on('click', showPopup);
@@ -4591,6 +4591,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 // cap its width on small screens
                 maxWidth: 280,
                 autoPan: true,
+                autoPanPadding: [20, 20],
                 keepInView: false
             })
 
