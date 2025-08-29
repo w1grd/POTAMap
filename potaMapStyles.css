@@ -563,6 +563,7 @@
     gap:8px;
     padding:6px 0;
     border-bottom:1px solid #f1f5f9;
+    flex-wrap: nowrap;
 }
 .ssp-item:last-child{ border-bottom:none; }
 .ssp-name{
@@ -583,7 +584,9 @@
     align-items:center;
     gap:6px;
     margin-left:auto;                 /* push icons to the right */
+    flex-wrap: nowrap;
 }
+.ssp-actions > * { flex: 0 0 auto; }
 .ssp-iconbtn{
     appearance:none;
     border:none;
