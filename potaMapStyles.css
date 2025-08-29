@@ -3,6 +3,7 @@
 /* ================= Pulsing markers ================= */
 
 .pulse-marker {
+    pointer-events: none;
     width: 20px;
     height: 20px;
     background-color: #800080;
@@ -28,6 +29,7 @@
 }
 
 .active-pulse-marker {
+    pointer-events: none;
     width: 20px;
     height: 20px;
     border-radius: 50%;
@@ -63,6 +65,7 @@
 /* Disable pulsing entirely in desktop-mode */
 .desktop-mode .pulse-marker,
 .desktop-mode .active-pulse-marker {
+    pointer-events: none;
     animation: none !important;
     -webkit-animation: none !important;
 }
@@ -319,6 +322,7 @@
 }
 .mode-filter-btn.off .pulse-marker,
 .mode-filter-btn.off .active-pulse-marker {
+    pointer-events: none;
     filter: grayscale(100%) brightness(40%);
 }
 
