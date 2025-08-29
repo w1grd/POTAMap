@@ -22,6 +22,70 @@
 
 
 // === Global popup opener helper ===
+
+// === Helpers for Go-To-Park popup behavior ===
+window.openTempPopupAt = function(lat, lng, html){
+    try {
+        if (!window.map) return;
+        const content = html || "<b>Loading park…</b>";
+        const tmp = L.popup({autoPan: true, keepInView: true, autoPanPadding: [30,40]})
+            .setLatLng([lat, lng]).setContent(content).openOn(map);
+        // Close automatically when a real marker popup opens
+        map.once('popupopen', function(ev){
+            try{ if (ev && ev.popup !== tmp) map.closePopup(tmp); }catch(e){}
+        });
+    } catch(e){ console.warn("openTempPopupAt failed", e); }
+};
+
+window.__findMarkerByRef = window.__findMarkerByRef || function(reference){
+    if (!window.map || !reference) return null;
+    if (window.markerByRef && window.markerByRef[reference]) return window.markerByRef[reference];
+    function scanGroup(g){
+        var found = null;
+        if (!g || !g.eachLayer) return null;
+        g.eachLayer(function(layer){
+            if (found) return;
+            // include CircleMarker and DivIcon markers (all inherit from Marker in Leaflet)
+            if (layer && (layer instanceof L.Marker)) {
+                var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
+                if (ref === reference) found = layer;
+            } else if (layer && layer.eachLayer){
+                var inner = scanGroup(layer);
+                if (inner) found = inner;
+            }
+        });
+        return found;
+    }
+    var groups = [];
+    if (map.activationsLayer) groups.push(map.activationsLayer);
+    if (map.spotsLayer) groups.push(map.spotsLayer);
+    if (map.reviewLayer) groups.push(map.reviewLayer);
+    for (var i=0;i<groups.length;i++){
+        var m = scanGroup(groups[i]);
+        if (m) return m;
+    }
+    return scanGroup(map) || null;
+};
+
+window.openParkPopupByRef = function(reference, attempts){
+    attempts = (typeof attempts === 'number') ? attempts : 14;
+    if (!window.map || !reference) return;
+    var marker = window.__findMarkerByRef(reference);
+    if (marker){
+        try {
+            if (typeof marker.fire === 'function') { marker.fire('click'); }
+            else if (typeof marker.openPopup === 'function') { marker.openPopup(); }
+        } catch(e){ console.warn("openParkPopupByRef failed", e); }
+        return;
+    }
+    if (attempts > 0){
+        try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
+        setTimeout(function(){ window.openParkPopupByRef(reference, attempts-1); }, 120);
+    } else {
+        console.warn("openParkPopupByRef: marker not found for", reference);
+    }
+};
+
 window.openParkPopupByRef = function(reference, attempts){
     attempts = (typeof attempts === 'number') ? attempts : 14;
     if (!window.map || !reference) return;
