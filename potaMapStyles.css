@@ -427,3 +427,69 @@
 .leaflet-popup-content{
     overflow-wrap: break-word;
 }
+
+#searchBoxContainer {
+    position: relative;
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+    z-index: 10;
+}
+
+#searchBox {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    outline: none;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+}
+
+#clearSearch {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+}
+
+#clearSearch i {
+    pointer-events: none;
+    color: inherit;
+}
+
+/* Hamburger menu styling */
+#hamburgerMenu #menu .toggle-button.active {
+    background: #28a745;
+}
+
+#hamburgerMenu #menu #uploadActivations {
+    background: #007BFF;
+}
+
+#hamburgerMenu #menu #uploadActivations:hover {
+    background: #0056b3;
+}
+
+/* Mobile hamburger menu tweaks */
+#hamburgerMenu.mobile {
+    top: 4px;
+    right: 4px;
+}
+
+#hamburgerMenu.mobile #menu {
+    width: 70vw;
+    max-width: 260px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+}
+
+#hamburgerMenu.mobile #menu li {
+    margin: 6px 0;
+}
+
+#hamburgerMenu.mobile #menu button {
+    padding: 8px 10px;
+    font-size: 14px;
+}
