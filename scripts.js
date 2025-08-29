@@ -137,6 +137,16 @@ window.openParkPopupByRef = function(reference, attempts){
 // Yield to the browser for first paint
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
 
+function getModeLoadingIndicator() {
+    let el = document.getElementById('mode-loading');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'mode-loading';
+        el.textContent = 'Updating mode data…';
+        document.body.appendChild(el);
+    }
+    return el;
+}
 
 // --- Single-run guard for modes init ---
 let __modesInitStarted = false;
@@ -147,10 +157,14 @@ async function ensureModesInitOnce() {
     try {
         const haveChanges = await detectModeChanges();
         if (haveChanges) {
+            const indicator = getModeLoadingIndicator();
+            indicator.style.display = 'block';
             try {
                 await checkAndUpdateModesAtStartup();
             } catch (e) {
                 console.warn(e);
+            } finally {
+                indicator.style.display = 'none';
             }
             if (typeof initQsoWorkerIfNeeded === 'function') {
                 try {
@@ -590,8 +604,8 @@ function clearPqlFilterDisplay() {
 
 let activationToggleState = 0; // 0: Show all, 1: Show my activations, 2: Remove my activations
 let spots = []; //holds spot info
-const appVersion = "20250829"; // manually update as needed
-const cacheDuration = (24 * 60 * 60 * 1000) * 8; // 8 days in milliseconds
+const appVersion = "20250412a"; // manually update as needed
+const cacheDuration = (24 * 60 * 60 * 1000) * 2; // 8 days in milliseconds
 
 // See if we are in desktop mode
 const urlParams = new URLSearchParams(window.location.search);
@@ -740,26 +754,28 @@ async function applyModeChangesToIndexedDB() {
     if (!body && patches.length === 0) return {applied: 0};
 
     let applied = 0;
-    // Use existing helper to upsert into IDB, and also update in-memory parks
-    for (const entry of patches) {
-        const {reference, patch} = entry || {};
-        if (!reference || !patch || typeof patch !== 'object') continue;
-        try {
-            await upsertParkFieldsInIndexedDB(reference, patch);
-            // Update in-memory `parks` so UI can reflect changes immediately
-            if (Array.isArray(parks)) {
-                const idx = parks.findIndex(p => p && p.reference === reference);
-                if (idx >= 0) {
-                    parks[idx] = Object.assign({}, parks[idx], patch);
+    const CHUNK_SIZE = 200;
+    for (let i = 0; i < patches.length; i += CHUNK_SIZE) {
+        const slice = patches.slice(i, i + CHUNK_SIZE);
+        await Promise.all(slice.map(async entry => {
+            const {reference, patch} = entry || {};
+            if (!reference || !patch || typeof patch !== 'object') return;
+            try {
+                await upsertParkFieldsInIndexedDB(reference, patch);
+                if (Array.isArray(parks)) {
+                    const idx = parks.findIndex(p => p && p.reference === reference);
+                    if (idx >= 0) {
+                        parks[idx] = Object.assign({}, parks[idx], patch);
+                    }
                 }
+                applied++;
+            } catch (e) {
+                console.warn('[modes] upsert failed for', reference, e);
             }
-            applied++;
-        } catch (e) {
-            console.warn('[modes] upsert failed for', reference, e);
-        }
+        }));
+        try { await nextFrame(); } catch (_) {}
     }
 
-    // Trigger a light redraw
     try {
         if (typeof refreshMarkers === 'function') refreshMarkers();
     } catch (_) {
@@ -2003,567 +2019,19 @@ document.addEventListener('DOMContentLoaded', () => {
  * Enhances the hamburger menu's responsiveness, touch-friendliness, and styles the activation slider.
  */
 function enhanceHamburgerMenuForMobile() {
-    const style = document.createElement('style');
-    style.innerHTML = `
-       @media (max-width: 600px) {
-    #hamburgerMenu {
-        top: 5px;
-        right: 5px;
-        max-width: 200px; /* Reduce the width slightly on small screens */
-    }
+    const root = document.getElementById('hamburgerMenu');
+    if (!root) return;
 
-    #menu {
-        width: 150px;
-    }
-}
-
-        /* Menu Toggle */
-        #menuToggle {
-            display: flex;
-            flex-direction: column;
-            cursor: pointer;
-            user-select: none;
+    const apply = () => {
+        if (window.innerWidth <= 480) {
+            root.classList.add('mobile');
+        } else {
+            root.classList.remove('mobile');
         }
+    };
 
-        /* Hide the checkbox */
-        #menuToggle input[type="checkbox"] {
-            display: none;
-        }
-
-        /* Hamburger Lines within Label */
-        #menuToggle label span {
-            background: #333;
-            height: 3px;
-            margin: 5px 0;
-            width: 25px;
-            transition: all 0.3s ease;
-            display: block;
-        }
-
-        /* Menu Styling */
-        #menu {
-            display: none;
-            list-style: none;
-            padding: 10px;
-            background: #fff;
-            border: 1px solid #ccc;
-            position: absolute;
-            top: 35px;
-            right: 0; /* Positioned to the right */
-            width: 220px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            border-radius: 8px;
-        }
-
-        /* Show Menu When Checkbox is Checked */
-        #menuToggle input[type="checkbox"]:checked ~ #menu {
-            display: block;
-        }
-
-        /* Animate Hamburger to 'X' When Menu is Open */
-        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(1) {
-            transform: translateY(8px) rotate(45deg);
-        }
-
-        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(2) {
-            opacity: 0;
-        }
-
-        #menuToggle input[type="checkbox"]:checked ~ label span:nth-child(3) {
-            transform: translateY(-8px) rotate(-45deg);
-        }
-
-        /* Style Menu Items */
-        #menu li {
-            margin: 15px 0;
-        }
-
-        /* Upload Activations Button */
-        #uploadActivations {
-            cursor: pointer;
-            background: #007BFF;
-            color: #fff;
-            border: none;
-            padding: 12px;
-            font-size: 16px;
-            width: 100%;
-            border-radius: 6px;
-            transition: background 0.3s ease, transform 0.2s ease;
-        }
-
-        #uploadActivations:hover {
-            background: #0056b3;
-            transform: translateY(-2px);
-        }
-
-        /* Toggle Activations Button */
-        .toggle-button {
-            cursor: pointer;
-            background: #6c757d;
-            color: #fff;
-            border: none;
-            padding: 12px;
-            font-size: 16px;
-            width: 100%;
-            border-radius: 6px;
-            transition: background 0.3s ease, transform 0.2s ease;
-        }
-
-        .toggle-button.active {
-            background: #28a745;
-        }
-
-        .toggle-button:hover {
-            background: #5a6268;
-            transform: translateY(-2px);
-        }
-
-        /* Slider Container */
-        #activationSliderContainer {
-            margin-top: 20px;
-        }
-
-        /* Slider Label */
-        #activationSliderContainer label {
-            display: block;
-            font-size: 16px;
-            margin-bottom: 8px;
-            color: #333;
-        }
-
-        /* Slider Value Display */
-        #sliderValue {
-            font-weight: bold;
-            margin-left: 8px;
-            color: #007BFF;
-        }
-
-        /* Slider Styling */
-        #activationSlider {
-            -webkit-appearance: none;
-            width: 100%;
-            height: 8px;
-            border-radius: 4px;
-            background: #d3d3d3;
-            outline: none;
-            transition: background 0.3s ease;
-        }
-
-        #activationSlider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #007BFF;
-            cursor: pointer;
-            transition: background 0.3s ease, transform 0.2s ease;
-        }
-
-        #activationSlider::-webkit-slider-thumb:hover {
-            background: #0056b3;
-            transform: scale(1.1);
-        }
-
-        #activationSlider::-moz-range-thumb {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #007BFF;
-            cursor: pointer;
-            transition: background 0.3s ease, transform 0.2s ease;
-        }
-
-        #activationSlider::-moz-range-thumb:hover {
-            background: #0056b3;
-            transform: scale(1.1);
-        }
-
-        #activationSlider::-ms-thumb {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #007BFF;
-            cursor: pointer;
-            transition: background 0.3s ease, transform 0.2s ease;
-        }
-
-        #activationSlider::-ms-thumb:hover {
-            background: #0056b3;
-            transform: scale(1.1);
-        }
-
-        /* Responsive Styles for Mobile Devices */
-        @media (max-width: 600px) {
-            /* Adjust hamburger menu size and positioning */
-            #hamburgerMenu {
-                top: 5px;
-                right: 5px;
-            }
-
-            #menuToggle label span {
-                width: 20px;
-                height: 2px;
-                margin: 4px 0;
-            }
-
-            /* Adjust menu width */
-            #menu {
-                width: 180px;
-                padding: 10px;
-            }
-
-            /* Increase font sizes for better readability */
-            #menu button,
-            #menu label {
-                font-size: 18px;
-            }
-
-            /* Increase button sizes for touch */
-            button,
-            input[type="file"] {
-                padding: 10px;
-                font-size: 16px;
-            }
-
-            /* Adjust map container height */
-            #map {
-                height: 100vh; /* Full viewport height */
-            }
-            
-            #centerOnGeolocation {
-    cursor: pointer;
-    background: #336633; /* Forest green */
-    color: #fff;
-    border: none;
-    padding: 10px;
-    font-size: 16px;
-    width: 100%;
-    border-radius: 6px;
-    transition: background 0.3s ease, transform 0.2s ease;
-}
-
-#centerOnGeolocation:hover {
-    background: #264d26; /* Darker green */
-    transform: translateY(-2px);
-}
-
-
-            /* Style Callsign Display */
-            #callsignDisplay {
-                position: absolute;
-                top: 10px;
-                left: 10px;
-                background: rgba(255, 255, 255, 0.8);
-                padding: 8px 12px;
-                border-radius: 4px;
-                font-size: 16px;
-                z-index: 1001;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-        }
-/* Container for the search box and clear button */
-#searchBoxContainer {
-    position: relative;
-    width: 100%; /* Constrain to parent width */
-    box-sizing: border-box;
-    margin-bottom: 10px;
-    z-index: 10;
-}
-
-#searchBox {
-    width: 100%;
-    padding: 10px;
-    font-size: 16px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    outline: none;
-    box-sizing: border-box; /* Include padding in width */
-    margin-bottom: 10px; /* Add spacing between input and button */
-}
-
-#clearSearch {
-    display: block; /* Make it behave as a block element */
-    width: 100%; /* Full width for alignment */
-    padding: 10px;
-    font-size: 16px; /* Adjust font size */
-    color: #fff; /* Text color */
-    background-color: #336633; /* Forest green background */
-    border: none; /* Remove border */
-    border-radius: 4px; /* Round edges */
-    cursor: pointer;
-    text-align: center; /* Center-align text */
-    transition: background-color 0.3s ease, transform 0.2s ease; /* Add hover/active effects */
-}
-
-#clearSearch:hover {
-    background-color: #264d26; /* Darker green background on hover */
-    transform: scale(1.02); /* Slightly enlarge on hover */
-}
-
-#clearSearch:active {
-    transform: scale(0.98); /* Slightly shrink when clicked */
-}
-
-/* Make the search box and button responsive */
-@media (max-width: 600px) {
-    #searchBox {
-        font-size: 14px;
-    }
-
-    #clearSearch {
-        font-size: 16px;
-        height: 36px;
-        width: 36px;
-    }
-}
-
-#clearSearch:active {
-    transform: translateY(-50%) scale(1.2);
-}
-
-/* Icon Styling */
-#clearSearch i {
-    pointer-events: none; /* Prevent icon from blocking button clicks */
-    color: inherit;
-}
-
-/* Responsive Styles for Search Box */
-@media (max-width: 600px) {
-    #searchBoxContainer label {
-        font-size: 18px;
-    }
-}
-
-@media (min-width: 601px) and (max-width: 1024px) {
-    #searchBoxContainer label {
-        font-size: 16px;
-    }
-
-    #searchBox {
-        font-size: 16px;
-    }
-
-    #clearSearch {
-        font-size: 18px;
-    }
-}
-
-        @media (min-width: 601px) and (max-width: 1024px) {
-            /* Tablet-specific styles */
-            #hamburgerMenu {
-                top: 10px;
-                right: 10px;
-            }
-
-            #menuToggle label span {
-                width: 25px;
-                height: 3px;
-                margin: 5px 0;
-            }
-
-            /* Adjust menu width */
-            #menu {
-                width: 200px;
-                padding: 12px;
-            }
-
-            /* Increase font sizes moderately */
-            #menu button,
-            #menu label {
-                font-size: 16px;
-            }
-
-            /* Adjust map container height */
-            #map {
-                height: 90vh; /* Slightly less than viewport height */
-            }
-
-            /* Increase button sizes */
-            button,
-            input[type="file"] {
-                padding: 8px;
-                font-size: 14px;
-            }
-
-            /* Style Callsign Display */
-            #callsignDisplay {
-                position: absolute;
-                top: 10px;
-                left: 10px;
-                background: rgba(255, 255, 255, 0.8);
-                padding: 8px 12px;
-                border-radius: 4px;
-                font-size: 14px;
-                z-index: 1001;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-        }
-
-        /* General Responsive Enhancements */
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-        }
-
-        #map {
-            width: 100%;
-            height: 90vh; /* Adjust height as needed */
-        }
-
-        /* Adjust Leaflet Controls for Mobile */
-        .leaflet-control-attribution {
-            font-size: 12px;
-        }
-
-        .leaflet-control {
-            font-size: 16px; /* Increase control sizes */
-        }
-
-        /* Popup Content Adjustments */
-        .leaflet-popup-content {
-            font-size: 14px;
-        }
-
-        /* Tooltip Adjustments */
-        .custom-tooltip {
-            font-size: 14px;
-            padding: 5px;
-        }
-
-        /* Ensure buttons and inputs have adequate size and spacing */
-        button, label, input[type="file"] {
-            min-height: 40px;
-            padding: 10px;
-            font-size: 16px;
-        }
-    `;
-    document.head.appendChild(style);
-    console.log("Responsive styles with enhanced slider added."); // Debugging
-
-    // Add styles for the activation slider
-    const sliderStyle = document.createElement('style');
-    sliderStyle.innerHTML = `
-        /* Slider Container */
-        #activationSliderContainer {
-            margin-top: 20px;
-        }
-
-        /* Slider Label */
-        #activationSliderContainer label {
-            display: block;
-            font-size: 16px;
-            margin-bottom: 8px;
-            color: #333;
-        }
-
-        /* Slider Value Display */
-        #sliderValue {
-            font-weight: bold;
-            margin-left: 8px;
-            color: #007BFF;
-        }
-
-        /* Slider Styling */
-        #activationSlider {
-            -webkit-appearance: none;
-            width: 100%;
-            height: 8px;
-            border-radius: 4px;
-            background: #d3d3d3;
-            outline: none;
-            transition: background 0.3s ease;
-        }
-
-        #activationSlider:hover {
-            background: #c0c0c0;
-        }
-
-        #activationSlider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #007BFF;
-            cursor: pointer;
-            transition: background 0.3s ease, transform 0.2s ease;
-            box-shadow: 0 0 2px rgba(0,0,0,0.5);
-        }
-
-        #activationSlider::-webkit-slider-thumb:hover {
-            background: #0056b3;
-            transform: scale(1.1);
-        }
-
-        #activationSlider::-moz-range-thumb {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #007BFF;
-            cursor: pointer;
-            transition: background 0.3s ease, transform 0.2s ease;
-            box-shadow: 0 0 2px rgba(0,0,0,0.5);
-        }
-
-        #activationSlider::-moz-range-thumb:hover {
-            background: #0056b3;
-            transform: scale(1.1);
-        }
-
-        #activationSlider::-ms-thumb {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #007BFF;
-            cursor: pointer;
-            transition: background 0.3s ease, transform 0.2s ease;
-            box-shadow: 0 0 2px rgba(0,0,0,0.5);
-        }
-
-        #activationSlider::-ms-thumb:hover {
-            background: #0056b3;
-            transform: scale(1.1);
-        }
-
-        /* Track Styling */
-        #activationSlider::-webkit-slider-runnable-track {
-            height: 8px;
-            border-radius: 4px;
-            background: #ff6666;
-        }
-
-        #activationSlider::-moz-range-track {
-            height: 8px;
-            border-radius: 4px;
-            background: #ff6666;
-        }
-
-        #activationSlider::-ms-track {
-            height: 8px;
-            border-radius: 4px;
-            background: #ff6666;
-            border: none;
-            color: transparent;
-        }
-
-        /* Active Range Styling */
-        #activationSlider::-webkit-slider-thumb:active {
-            transform: scale(1.2);
-        }
-
-        #activationSlider::-moz-range-thumb:active {
-            transform: scale(1.2);
-        }
-
-        #activationSlider::-ms-thumb:active {
-            transform: scale(1.2);
-        }
-    `;
-    document.head.appendChild(sliderStyle);
-    console.log("Activation slider custom styles added."); // Debugging
+    apply();
+    window.addEventListener('resize', apply);
 }
 
 /**
@@ -5109,98 +4577,6 @@ function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
 }
 
-/**
- * Robustly detects which parks have mode/QSO changes.
- * Returns an array of park references (uppercase) that have mode/QSO updates.
- * Supports multiple input shapes from MODES_CHANGES_URLS:
- *   1) ["US-0001", ...]
- *   2) [{ reference: "US-0001", ... }, ...]
- *   3) [{ reference: "US-0001", cw: 10, ssb: 20, data: 5 }, ...]
- *   4) { changes: [...] } or { batches: [{date, changes: [...]}, ...] }
- */
-async function detectModeChanges() {
-    // Returns an array of park references (uppercase) that have mode/QSO updates.
-    // Supports multiple input shapes:
-    //  1) ["US-0001", "US-6363", ...]
-    //  2) [{ reference: "US-0001", ...full park... }, ...]
-    //  3) [{ reference: "US-0001", cw: 10, ssb: 20, data: 5 }, ...]
-    //  4) { changes: [...] } or { batches: [{date, changes: [...]}, ...] }
-
-    const urls = Array.isArray(MODES_CHANGES_URLS) ? MODES_CHANGES_URLS : [];
-
-    // Helper: normalize a single row to a reference string
-    const toRef = (row) => {
-        if (!row) return null;
-        if (typeof row === 'string') return String(row).trim().toUpperCase();
-        if (typeof row === 'object') {
-            const r = row.reference || row.ref || row.id;
-            if (!r) return null;
-            return String(r).trim().toUpperCase();
-        }
-        return null;
-    };
-
-    // Helper: extract refs from a parsed JSON payload
-    const extractRefs = (body) => {
-        const out = [];
-        if (!body) return out;
-
-        if (Array.isArray(body)) {
-            for (const item of body) {
-                const ref = toRef(item);
-                if (ref) out.push(ref);
-            }
-            return out;
-        }
-
-        // Object wrapper forms
-        if (Array.isArray(body.changes)) {
-            for (const item of body.changes) {
-                const ref = toRef(item);
-                if (ref) out.push(ref);
-            }
-            return out;
-        }
-
-        if (Array.isArray(body.batches)) {
-            for (const batch of body.batches) {
-                if (!Array.isArray(batch.changes)) continue;
-                for (const item of batch.changes) {
-                    const ref = toRef(item);
-                    if (ref) out.push(ref);
-                }
-            }
-            return out;
-        }
-
-        return out;
-    };
-
-    // Try candidates in order until one succeeds
-    for (const url of urls) {
-        try {
-            const res = await fetch(url, {cache: 'no-store'});
-            if (!res.ok) {
-                // Try the next candidate on 404/403/etc.
-                continue;
-            }
-            const body = await res.json();
-            const refs = extractRefs(body);
-            if (!refs.length) continue;
-
-            // Deduplicate & normalize
-            const unique = [...new Set(refs.filter(Boolean))];
-            return unique;
-        } catch (e) {
-            // Network or parse error — try next candidate
-            continue;
-        }
-    }
-
-    // Nothing found
-    return [];
-}
-
 function getFromStore(store, key) {
     return new Promise((resolve, reject) => {
         const request = store.get(key);
@@ -5402,10 +4778,9 @@ async function setupPOTAMap() {
             console.warn('initial render failed', e);
         }
 
-        // 6) Defer modes check so it never blocks map paint; ensure it runs only once
-        if (!window.__modesInitStarted && typeof checkAndUpdateModesAtStartup === 'function') {
-            window.__modesInitStarted = true;
-            const startModes = () => checkAndUpdateModesAtStartup().catch(console.warn);
+        // 6) Defer mode-change detection so it never blocks map paint
+        if (typeof ensureModesInitOnce === 'function') {
+            const startModes = () => ensureModesInitOnce().catch(console.warn);
             if ('requestIdleCallback' in window) requestIdleCallback(startModes); else setTimeout(startModes, 0);
         }
 
