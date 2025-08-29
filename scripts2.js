@@ -1368,34 +1368,79 @@ function refreshMarkers() {
     if (typeof suppressRedrawUntil !== 'undefined' && Date.now() < suppressRedrawUntil) { return; }
 
 
-    /** Open a park's popup by its reference, retrying briefly until the marker exists. */
-    function openParkPopupByRef(reference, attempts) {
-        attempts = (typeof attempts === 'number') ? attempts : 12;
-        if (!map || !reference) return;
-        // Try a few common places we store markers
-        let marker = null;
+    /** Robustly find a park's marker by reference, searching common layer groups. */
+    function __findMarkerByRef(reference) {
+        if (!map || !reference) return null;
+
+        // 1) Explicit registry if you attach markers here elsewhere:
         if (window.markerByRef && window.markerByRef[reference]) {
-            marker = window.markerByRef[reference];
-        } else {
-            // Walk layers
-            map.eachLayer(function(layer){
-                if (marker) return;
-                if (layer && layer instanceof L.Marker) {
-                    if (layer._parkRef === reference || (layer.options && layer.options.reference === reference)) {
-                        marker = layer;
-                    }
-                }
-            });
+            return window.markerByRef[reference];
         }
+
+        // 2) Scan known groups first
+        var groups = [];
+        if (map.activationsLayer) groups.push(map.activationsLayer);
+        if (map.spotsLayer) groups.push(map.spotsLayer);
+        if (map.reviewLayer) groups.push(map.reviewLayer);
+
+        function scanGroup(g) {
+            var found = null;
+            if (!g) return null;
+            if (g.eachLayer) {
+                g.eachLayer(function(layer){
+                    if (found) return;
+                    if (layer && layer instanceof L.Marker) {
+                        var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
+                        if (ref === reference) { found = layer; }
+                    } else if (layer && layer.eachLayer) {
+                        var inner = scanGroup(layer);
+                        if (inner) found = inner;
+                    }
+                });
+            }
+            return found;
+        }
+
+        for (var i=0;i<groups.length;i++){
+            var m = scanGroup(groups[i]);
+            if (m) return m;
+        }
+
+        // 3) Full map scan as last resort
+        var result = null;
+        map.eachLayer(function(layer){
+            if (result) return;
+            if (layer && layer instanceof L.Marker) {
+                var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
+                if (ref === reference) { result = layer; }
+            } else if (layer && layer.eachLayer) {
+                var inner = scanGroup(layer);
+                if (inner) result = inner;
+            }
+        });
+        return result;
+    }
+
+    /** Open a park's popup by its reference with retries; prefers firing 'click' to trigger async content loaders. */
+    function openParkPopupByRef(reference, attempts) {
+        attempts = (typeof attempts === 'number') ? attempts : 14;
+        if (!map || !reference) return;
+        var marker = __findMarkerByRef(reference);
         if (marker) {
             try {
-                // Let Leaflet handle auto-pan; our debounce already protects redraws
-                marker.openPopup();
-            } catch(e){ console.warn("openParkPopupByRef openPopup failed", e); }
+                // Prefer click to ensure any bound 'click' handlers run (async content, analytics, etc.)
+                if (typeof marker.fire === 'function') {
+                    marker.fire('click');
+                } else if (typeof marker.openPopup === 'function') {
+                    marker.openPopup();
+                }
+            } catch(e){ console.warn("openParkPopupByRef failed to open", e); }
             return;
         }
         if (attempts > 0) {
-            setTimeout(function(){ openParkPopupByRef(reference, attempts-1); }, 120);
+            // If the layer may not exist yet, nudge a refresh, then retry
+            try { if (typeof refreshMarkers === 'function') refreshMarkers(); } catch(e){}
+            setTimeout(function(){ openParkPopupByRef(reference, attempts-1); }, 110);
         } else {
             console.warn("openParkPopupByRef: marker not found for", reference);
         }
@@ -5661,7 +5706,9 @@ function triggerGoToPark() {
     } else {
         alert('No matching park.');
     }
-    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 150);
+    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 120);
+    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 260);
+    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 420);
 
 }
 
