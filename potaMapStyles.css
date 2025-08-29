@@ -395,3 +395,12 @@
     .mode-dot{ width: 24px; height: 24px; }
     .mode-dot svg{ width: 16px; height: 16px; }
 }
+
+/* Ensure Leaflet popups fit and wrap on small screens */
+.leaflet-popup-content-wrapper{
+    max-width: 280px;
+}
+
+.leaflet-popup-content{
+    overflow-wrap: break-word;
+}
