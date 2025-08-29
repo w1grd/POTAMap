@@ -546,15 +546,15 @@
 .ssp-item{
     display:flex;
     align-items:center;
-    justify-content:space-between;    /* keep name and icons on one line */
-    flex-wrap:nowrap;
+    flex-wrap:nowrap;                 /* keep everything on one line */
+    gap:8px;
     padding:6px 0;
     border-bottom:1px solid #f1f5f9;
 }
 .ssp-item:last-child{ border-bottom:none; }
 .ssp-name{
-    flex:1 1 auto;
-    min-width:140px;
+    flex:1 1 0;
+    min-width:0;                      /* allow shrink for narrow panels */
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
@@ -576,6 +576,7 @@
     flex:0 0 auto;
     display:flex;
     align-items:center;
+    margin-left:auto;                 /* push icons to the far right */
     gap:4px;                          /* tight icon group */
 }
 .ssp-actions > * { flex:0 0 auto; }
