@@ -1,3 +1,136 @@
+
+/** Run a callback once the Leaflet map exists and is fully ready. */
+function whenMapReady(cb){
+    if (typeof cb !== 'function') return;
+    const go = function(){ try { cb(); } catch(e){} };
+    if (typeof window === 'undefined' || !window.map) {
+        // Poll briefly until map is created
+        let tries = 40;
+        const t = setInterval(function(){
+            if (window.map) { clearInterval(t); whenMapReady(cb); }
+            else if (--tries <= 0) { clearInterval(t); console.warn("whenMapReady: map not initialized"); }
+        }, 50);
+        return;
+    }
+    if (typeof map.whenReady === 'function') {
+        map.whenReady(go);
+    } else if (map._loaded) {
+        go();
+    } else {
+        map.once && map.once('load', go);
+    }
+}
+
+
+// === Marker registry shim: auto-register markers created with options.reference/ref ===
+(function(){
+    if (typeof L === 'undefined' || !L.marker) return;
+    if (L.__markerShimInstalled) return;
+    L.__markerShimInstalled = true;
+
+    const __origMarker = L.marker;
+    L.marker = function(latlng, options){
+        const m = __origMarker.call(this, latlng, options || {});
+        try {
+            const ref = (options && (options.reference || options.ref)) || m._parkRef;
+            if (ref) {
+                m._parkRef = ref;
+                window.markerByRef = window.markerByRef || {};
+                window.markerByRef[ref] = m;
+            }
+        } catch(e){ /* no-op */ }
+        return m;
+    };
+})();
+
+
+// === Global popup opener helper ===
+
+// === Helpers for Go-To-Park popup behavior ===
+window.openTempPopupAt = function(lat, lng, html){
+    try {
+        if (!window.map) return;
+        const content = html || "<b>Loading park…</b>";
+        var tmp = null;
+        whenMapReady(function(){ tmp = L.popup({autoPan: true, keepInView: true, autoPanPadding: [30,40]})
+            .setLatLng([lat, lng]).setContent(content).openOn(map); });
+        // Close automatically when a real marker popup opens
+        map.once('popupopen', function(ev){
+            try{ if (ev && ev.popup !== tmp) map.closePopup(tmp); }catch(e){}
+        });
+    } catch(e){ console.warn("openTempPopupAt failed", e); }
+};
+
+window.__findMarkerByRef = window.__findMarkerByRef || function(reference){
+    if (!window.map || !reference) return null;
+    if (window.markerByRef && window.markerByRef[reference]) return window.markerByRef[reference];
+    function scanGroup(g){
+        var found = null;
+        if (!g || !g.eachLayer) return null;
+        g.eachLayer(function(layer){
+            if (found) return;
+            // include CircleMarker and DivIcon markers (all inherit from Marker in Leaflet)
+            if (layer && (layer instanceof L.Marker)) {
+                var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
+                if (ref === reference) found = layer;
+            } else if (layer && layer.eachLayer){
+                var inner = scanGroup(layer);
+                if (inner) found = inner;
+            }
+        });
+        return found;
+    }
+    var groups = [];
+    if (map.activationsLayer) groups.push(map.activationsLayer);
+    if (map.spotsLayer) groups.push(map.spotsLayer);
+    if (map.reviewLayer) groups.push(map.reviewLayer);
+    for (var i=0;i<groups.length;i++){
+        var m = scanGroup(groups[i]);
+        if (m) return m;
+    }
+    return scanGroup(map) || null;
+};
+
+window.openParkPopupByRef = function(reference, attempts){
+    attempts = (typeof attempts === 'number') ? attempts : 14;
+    whenMapReady(function(){
+        if (!reference) return;
+        var marker = (typeof window.__findMarkerByRef === 'function') ? window.__findMarkerByRef(reference) : null;
+        if (marker){
+            try {
+                if (typeof marker.fire === 'function') { marker.fire('click'); }
+                else if (typeof marker.openPopup === 'function') { marker.openPopup(); }
+            } catch(e){ console.warn("openParkPopupByRef: open failed", e); }
+            return;
+        }
+        if (attempts > 0){
+            try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
+            setTimeout(function(){ window.openParkPopupByRef(reference, attempts-1); }, 140);
+        } else {
+            console.warn("openParkPopupByRef: marker not found for", reference);
+        }
+    });
+};
+
+window.openParkPopupByRef = function(reference, attempts){
+    attempts = (typeof attempts === 'number') ? attempts : 14;
+    if (!window.map || !reference) return;
+    var marker = (typeof window.__findMarkerByRef === 'function') ? window.__findMarkerByRef(reference) : null;
+    if (marker){
+        try {
+            if (typeof marker.fire === 'function') { marker.fire('click'); }
+            else if (typeof marker.openPopup === 'function') { marker.openPopup(); }
+        } catch(e){ console.warn("openParkPopupByRef failed", e); }
+        return;
+    }
+    if (attempts > 0){
+        try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
+        setTimeout(function(){ window.openParkPopupByRef(reference, attempts-1); }, 110);
+    } else {
+        console.warn("openParkPopupByRef: marker not found for", reference);
+    }
+};
+
 //POTAmap (c) POTA News & Reviews https://pota.review
 //261
 //
@@ -161,8 +294,9 @@ function centerMapOnGeolocation() {
         if (saved) {
             try {
                 const [lat, lng] = JSON.parse(saved);
-                map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.0});
-            } catch {
+                map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+            } catch (e) {
+                // ignore parse error
             }
         } else if (typeof fallbackToDefaultLocation === 'function') {
             fallbackToDefaultLocation();
@@ -172,11 +306,18 @@ function centerMapOnGeolocation() {
 
     navigator.geolocation.getCurrentPosition(
         (position) => {
-            userLat = position.coords.latitude;
-            userLng = position.coords.longitude;
-            setUserLocationMarker(userLat, userLng);
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+
+            // Update globals if you rely on them elsewhere
+            try { window.userLat = lat; window.userLng = lng; } catch (e) {}
+
+            if (typeof setUserLocationMarker === 'function') {
+                setUserLocationMarker(lat, lng);
+            }
+
             if (map) {
-                map.setView([userLat, userLng], map.getZoom(), {animate: true, duration: 1.0});
+                map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
             }
         },
         (error) => {
@@ -185,14 +326,15 @@ function centerMapOnGeolocation() {
             if (saved) {
                 try {
                     const [lat, lng] = JSON.parse(saved);
-                    map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.0});
-                } catch {
+                    map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+                } catch (e) {
+                    // ignore parse error
                 }
             } else if (typeof fallbackToDefaultLocation === 'function') {
                 fallbackToDefaultLocation();
             }
         },
-        {enableHighAccuracy: true, maximumAge: 30000, timeout: 15000}
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 }
     );
 }
 
@@ -1366,6 +1508,86 @@ function refreshMarkers() {
 
     // Skip marker redraws while Leaflet is auto-panning a freshly opened popup (mobile tap stability).
     if (typeof suppressRedrawUntil !== 'undefined' && Date.now() < suppressRedrawUntil) { return; }
+
+
+    /** Robustly find a park's marker by reference, searching common layer groups. */
+    function __findMarkerByRef(reference) {
+        if (!map || !reference) return null;
+
+        // 1) Explicit registry if you attach markers here elsewhere:
+        if (window.markerByRef && window.markerByRef[reference]) {
+            return window.markerByRef[reference];
+        }
+
+        // 2) Scan known groups first
+        var groups = [];
+        if (map.activationsLayer) groups.push(map.activationsLayer);
+        if (map.spotsLayer) groups.push(map.spotsLayer);
+        if (map.reviewLayer) groups.push(map.reviewLayer);
+
+        function scanGroup(g) {
+            var found = null;
+            if (!g) return null;
+            if (g.eachLayer) {
+                g.eachLayer(function(layer){
+                    if (found) return;
+                    if (layer && layer instanceof L.Marker) {
+                        var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
+                        if (ref === reference) { found = layer; }
+                    } else if (layer && layer.eachLayer) {
+                        var inner = scanGroup(layer);
+                        if (inner) found = inner;
+                    }
+                });
+            }
+            return found;
+        }
+
+        for (var i=0;i<groups.length;i++){
+            var m = scanGroup(groups[i]);
+            if (m) return m;
+        }
+
+        // 3) Full map scan as last resort
+        var result = null;
+        map.eachLayer(function(layer){
+            if (result) return;
+            if (layer && layer instanceof L.Marker) {
+                var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
+                if (ref === reference) { result = layer; }
+            } else if (layer && layer.eachLayer) {
+                var inner = scanGroup(layer);
+                if (inner) result = inner;
+            }
+        });
+        return result;
+    }
+
+    /** Open a park's popup by its reference with retries; prefers firing 'click' to trigger async content loaders. */
+    function openParkPopupByRef(reference, attempts) {
+        attempts = (typeof attempts === 'number') ? attempts : 14;
+        if (!map || !reference) return;
+        var marker = __findMarkerByRef(reference);
+        if (marker) {
+            try {
+                // Prefer click to ensure any bound 'click' handlers run (async content, analytics, etc.)
+                if (typeof marker.fire === 'function') {
+                    marker.fire('click');
+                } else if (typeof marker.openPopup === 'function') {
+                    marker.openPopup();
+                }
+            } catch(e){ console.warn("openParkPopupByRef failed to open", e); }
+            return;
+        }
+        if (attempts > 0) {
+            // If the layer may not exist yet, nudge a refresh, then retry
+            try { if (typeof refreshMarkers === 'function') refreshMarkers(); } catch(e){}
+            setTimeout(function(){ openParkPopupByRef(reference, attempts-1); }, 110);
+        } else {
+            console.warn("openParkPopupByRef: marker not found for", reference);
+        }
+    }
+
 // Avoid redraws while a popup is open (prevents immediate close after auto-pan)
     if (typeof isPopupOpen !== 'undefined' && isPopupOpen) { return; }
     if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
@@ -3002,12 +3224,19 @@ function mapSliderValue(value) {
 
 function fallbackToDefaultLocation() {
     if (!map) return;
-    userLat = 39.8283;
-    userLng = -98.5795;
-    map.setView([userLat, userLng], map.getZoom(), {
-        animate: true,
-        duration: 1.5,
-    });
+
+    const lat = 39.8283;   // CONUS centroid
+    const lng = -98.5795;
+
+    // If you track these globally elsewhere:
+    try { window.userLat = lat; window.userLng = lng; } catch (e) {}
+
+    // Optionally update the user pin if you have this helper
+    if (typeof setUserLocationMarker === 'function') {
+        setUserLocationMarker(lat, lng);
+    }
+
+    map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.5 });
     console.log("Map centered on default fallback location.");
 }
 
@@ -3191,7 +3420,7 @@ async function zoomToPark(park) {
     const currentZoom = map.getZoom();
     const maxZoom = map.getMaxZoom();
     const newZoomLevel = Math.min(currentZoom + 2, maxZoom); // or pick any desired zoom
-    map.setView([latitude, longitude], newZoomLevel, {
+    map.setView([latitude, longitude], map.getZoom(), {
         animate: true,
         duration: 1.5, // animation in seconds
     });
@@ -5602,7 +5831,8 @@ function addGoToParkButton() {
 /**
  * Triggers the Go To Park functionality by searching and zooming to a park.
  */
-function triggerGoToPark() {
+function triggerGoToPark() {whenMapReady(function(){
+
     const searchBox = document.getElementById('searchBox');
 
     if (!searchBox || !searchBox.value.trim()) {
@@ -5620,12 +5850,23 @@ function triggerGoToPark() {
         normalizeString(park.name).includes(query) ||
         normalizeString(park.reference).includes(query)
     );
+    const destLatLng = (typeof L !== 'undefined' && L.latLng) ? L.latLng(matchingPark.latitude, matchingPark.longitude) : {lat: matchingPark.latitude, lng: matchingPark.longitude};
+    const inView = (map && map.getBounds && destLatLng && map.getBounds().contains(destLatLng)) ? true : false;
 
     if (matchingPark) {
         zoomToPark(matchingPark);
     } else {
         alert('No matching park.');
     }
+    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 120);
+    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 260);
+    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 420);
+
+    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 140);
+    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 300);
+    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 540);
+
+});
 }
 
 
