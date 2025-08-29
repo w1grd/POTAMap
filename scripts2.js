@@ -57,6 +57,37 @@ let previousMapState = {
 // Fast rendering path
 let __canvasRenderer = null; // initialized after map setup
 let __panInProgress = false; // suppress redraws while panning
+let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
+
+/**
+ * Opens a marker's popup, panning the map first if the marker is too close
+ * to the edge of the current viewport.  This keeps popups reachable and
+ * prevents them from immediately closing when near map boundaries.
+ * @param {L.Marker} marker - Leaflet marker with a bound popup
+ */
+function openPopupWithAutoPan(marker) {
+    if (!map || !marker) return;
+    const latlng = marker.getLatLng();
+    const mapSize = map.getSize();
+    const point = map.latLngToContainerPoint(latlng);
+    const padding = 120; // space in px to keep around the popup
+    const needsPan =
+        point.x < padding || point.x > mapSize.x - padding ||
+        point.y < padding || point.y > mapSize.y - padding;
+
+    if (needsPan) {
+        __skipNextMarkerRefresh = true;
+        if (typeof map.panInside === 'function') {
+            map.panInside(latlng, { padding: [padding, padding], animate: true });
+            map.once('moveend', () => marker.openPopup());
+        } else {
+            map.once('moveend', () => marker.openPopup());
+            map.panTo(latlng, { animate: true });
+        }
+    } else {
+        marker.openPopup();
+    }
+}
 
 /**
  * Opens a marker's popup, panning the map first if the marker is too close
@@ -877,7 +908,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             map.on('zoomstart', () => { __panInProgress = true; });
             const debouncedMoveEnd = (function(){
                 let t = null;
-                return () => { clearTimeout(t); t = setTimeout(() => { __panInProgress = false; refreshMarkers(); }, 120); };
+                return () => {
+                    clearTimeout(t);
+                    t = setTimeout(() => {
+                        __panInProgress = false;
+                        if (__skipNextMarkerRefresh) {
+                            __skipNextMarkerRefresh = false;
+                        } else {
+                            refreshMarkers();
+                        }
+                    }, 120);
+                };
             })();
             map.on('moveend', debouncedMoveEnd);
             map.on('zoomend', debouncedMoveEnd);
@@ -1301,7 +1342,7 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [40, 40]})
+                .bindPopup("<b>Loading park info...</b>", {keepInView: false, autoPan: false})
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
                 .on('click', function () {
                     this.closeTooltip();
@@ -3069,7 +3110,7 @@ function handleSearchInput(event) {
         const showPopup = async (e) => {
             if (e) L.DomEvent.stop(e);
             const popupContent = await fetchFullPopupContent(park);
-            marker.bindPopup(popupContent);
+            marker.bindPopup(popupContent, { autoPan: false });
             openPopupWithAutoPan(marker);
         };
         marker.on('click', showPopup);
