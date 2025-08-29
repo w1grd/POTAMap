@@ -5490,12 +5490,7 @@ function initializeFilterChips() {
             const li = document.createElement('li');
             li.className = 'ssp-item';
 
-            const runBtn = document.createElement('button');
-            runBtn.className = 'ssp-btn ssp-icon';
-            runBtn.title = 'Run';
-            runBtn.textContent = '▶︎';
-            runBtn.addEventListener('click', () => runSavedEntry(e));
-
+            // Editable name (flush-left)
             const name = document.createElement('span');
             name.className = 'ssp-name';
             name.textContent = e.name || e.pql;
@@ -5504,22 +5499,45 @@ function initializeFilterChips() {
             name.addEventListener('blur', () => renameSavedSearch(e.id, name.textContent || ''));
             name.addEventListener('keydown', (ev) => { if (ev.key === 'Enter'){ ev.preventDefault(); name.blur(); }});
 
-            const shareBtn = document.createElement('button');
-            shareBtn.className = 'ssp-btn';
-            shareBtn.textContent = 'Share';
-            shareBtn.title = 'Copy shareable URL';
+            // Actions container (flush-right)
+            const actions = document.createElement('div');
+            actions.className = 'ssp-actions';
+
+            // Helper to make an icon button
+            const makeIconBtn = (title, svg) => {
+                const b = document.createElement('button');
+                b.className = 'ssp-iconbtn';
+                b.type = 'button';
+                b.title = title;
+                b.setAttribute('aria-label', title);
+                b.innerHTML = svg;
+                return b;
+            };
+
+            // Play button (run saved search)
+            const runBtn = makeIconBtn('Run saved search',
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"></path></svg>'
+            );
+            runBtn.addEventListener('click', () => runSavedEntry(e));
+
+            // Share button (copy URL)
+            const shareBtn = makeIconBtn('Copy shareable link',
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M14 9V5l7 7-7 7v-4H6V9h8z" fill="currentColor"></path></svg>'
+            );
             shareBtn.addEventListener('click', async () => {
                 const url = buildShareUrl(e);
-                try { await navigator.clipboard.writeText(url); } catch {}
+                try { await navigator.clipboard.writeText(url); } catch{}
                 console.log('Copied:', url);
             });
 
-            const delBtn = document.createElement('button');
-            delBtn.className = 'ssp-btn';
-            delBtn.textContent = 'Delete';
+            // Delete button
+            const delBtn = makeIconBtn('Delete saved search',
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z" fill="currentColor"></path></svg>'
+            );
             delBtn.addEventListener('click', () => { deleteSavedSearch(e.id); renderSavedList(); });
 
-            li.append(runBtn, name, shareBtn, delBtn);
+            actions.append(runBtn, shareBtn, delBtn);
+            li.append(name, actions);
             ul.appendChild(li);
         }
     }
