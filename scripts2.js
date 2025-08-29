@@ -520,7 +520,9 @@ async function ensureRecentAddsFromChangesJSON() {
     }
 }
 
-// Ensure parks are present in memory and IndexedDB; if DB is empty, force-load allparks.json
+// Ensure parks are present in memory and IndexedDB.
+// If IndexedDB already has data, hydrate memory from it without a network fetch.
+// Otherwise, fetch allparks.json once and seed the database.
 async function ensureParksLoadedFromNetworkIfEmpty() {
     try {
         const db = await getDatabase();
@@ -534,9 +536,22 @@ async function ensureParksLoadedFromNetworkIfEmpty() {
         });
 
         const haveMem = Array.isArray(window.parks) && window.parks.length > 0;
-        if (count > 0 && haveMem) return; // everything is fine
 
-        // Fetch fresh allparks.json regardless of any localStorage timestamp
+        // If we already have data in IndexedDB, load it into memory when needed
+        if (count > 0) {
+            if (!haveMem) {
+                try {
+                    window.parks = await getAllParksFromIndexedDB();
+                    console.log(`[bootstrap] Hydrated ${window.parks.length} parks from IndexedDB.`);
+                    if (typeof refreshMarkers === 'function') refreshMarkers({full: true});
+                } catch (e) {
+                    console.warn('Failed to load parks from IndexedDB:', e);
+                }
+            }
+            return; // nothing further to do
+        }
+
+        // No parks in IndexedDB — fetch baseline allparks.json
         const res = await fetch('/potamap/data/allparks.json', {cache: 'no-store'});
         if (!res.ok) throw new Error('Failed to load allparks.json');
         const rows = await res.json();
@@ -554,7 +569,7 @@ async function ensureParksLoadedFromNetworkIfEmpty() {
         // Update in-memory copy and mark fetch timestamp
         window.parks = rows;
         try {
-            localStorage.setItem('fetchTimestamp::allparks.json', Date.now().toString());
+            await setLastFetchTimestamp('allparks.json', Date.now());
         } catch (_) {
         }
         console.log(`[bootstrap] Loaded ${rows.length} parks from network and repopulated IndexedDB.`);
