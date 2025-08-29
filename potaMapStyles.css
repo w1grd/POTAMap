@@ -564,6 +564,7 @@
     padding:6px 0;
     border-bottom:1px solid #f1f5f9;
     flex-wrap: nowrap;
+    background: transparent;
 }
 .ssp-item:last-child{ border-bottom:none; }
 .ssp-name{
@@ -578,6 +579,13 @@
     font-weight: 600;                 /* bold, sans-serif */
     font-size: 0.95rem;
     color:#183a2a;
+    background: transparent;
+    min-height: 20px;
+}
+.ssp-name:empty::before {
+    content: "(untitled)";
+    color: #9aa4b2;        /* muted grey */
+    font-weight: 500;
 }
 .ssp-actions{
     display:flex;
