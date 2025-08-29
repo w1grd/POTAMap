@@ -2,6 +2,11 @@
 
 /* ================= Pulsing markers ================= */
 
+/* Highlight used when "Go To Park" centers a search result */
+.goto-park-highlight {
+    pointer-events: none;
+}
+
 .pulse-marker {
     pointer-events: none;
     width: 20px;
