@@ -5516,13 +5516,13 @@ function initializeFilterChips() {
 
             // Play button (run saved search)
             const runBtn = makeIconBtn('Run saved search',
-                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"></path></svg>'
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"></path></svg>'
             );
             runBtn.addEventListener('click', () => runSavedEntry(e));
 
             // Share button (copy URL)
             const shareBtn = makeIconBtn('Copy shareable link',
-                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M14 9V5l7 7-7 7v-4H6V9h8z" fill="currentColor"></path></svg>'
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 9V5l7 7-7 7v-4H6V9h8z" fill="currentColor"></path></svg>'
             );
             shareBtn.addEventListener('click', async () => {
                 const url = buildShareUrl(e);
@@ -5532,7 +5532,7 @@ function initializeFilterChips() {
 
             // Delete button
             const delBtn = makeIconBtn('Delete saved search',
-                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z" fill="currentColor"></path></svg>'
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z" fill="currentColor"></path></svg>'
             );
             delBtn.addEventListener('click', () => { deleteSavedSearch(e.id); renderSavedList(); });
 
