@@ -57,6 +57,19 @@ let previousMapState = {
 // Fast rendering path
 let __canvasRenderer = null; // initialized after map setup
 let __panInProgress = false; // suppress redraws while panning
+let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
+
+/**
+ * Opens a marker's popup and lets Leaflet auto-pan the map so the popup
+ * remains fully visible. Skips the next marker refresh so the popup isn't
+ * closed by the resulting map move.
+ * @param {L.Marker} marker - Leaflet marker with a bound popup
+ */
+function openPopupWithAutoPan(marker) {
+    if (!map || !marker) return;
+    __skipNextMarkerRefresh = true;
+    marker.openPopup();
+}
 
 // --- Lightweight Toast UI -------------------------------------------------
 function ensureToastCss() {
@@ -848,7 +861,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             map.on('zoomstart', () => { __panInProgress = true; });
             const debouncedMoveEnd = (function(){
                 let t = null;
-                return () => { clearTimeout(t); t = setTimeout(() => { __panInProgress = false; refreshMarkers(); }, 120); };
+                return () => {
+                    clearTimeout(t);
+                    t = setTimeout(() => {
+                        __panInProgress = false;
+                        if (__skipNextMarkerRefresh) {
+                            __skipNextMarkerRefresh = false;
+                        } else {
+                            refreshMarkers();
+                        }
+                    }, 120);
+                };
             })();
             map.on('moveend', debouncedMoveEnd);
             map.on('zoomend', debouncedMoveEnd);
@@ -1272,9 +1295,9 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [40, 40]})
+                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40]})
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
-                .on('click', function () {
+                .on('click touchend', function () {
                     this.closeTooltip();
                 });
 
@@ -1340,6 +1363,11 @@ async function redrawMarkersWithFilters() {
 
 function refreshMarkers() {
     if (!map) return;
+
+    // Skip marker redraws while Leaflet is auto-panning a freshly opened popup (mobile tap stability).
+    if (typeof suppressRedrawUntil !== 'undefined' && Date.now() < suppressRedrawUntil) { return; }
+// Avoid redraws while a popup is open (prevents immediate close after auto-pan)
+    if (typeof isPopupOpen !== 'undefined' && isPopupOpen) { return; }
     if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
         updateVisibleModeCounts();
     }
@@ -3037,10 +3065,14 @@ function handleSearchInput(event) {
             className: 'custom-tooltip'
         });
 
-        marker.on('click', async () => {
+        const showPopup = async (e) => {
+            if (e) L.DomEvent.stop(e);
             const popupContent = await fetchFullPopupContent(park);
-            marker.bindPopup(popupContent).openPopup();
-        });
+            marker.bindPopup(popupContent, { autoPan: true, autoPanPadding: [20, 20] });
+            openPopupWithAutoPan(marker);
+        };
+        marker.on('click touchend', showPopup);
+        marker.on('touchend', showPopup);
     });
 }
 
@@ -3208,7 +3240,7 @@ async function zoomToPark(park) {
         // Ensure the popup is bound (it should be, from your displayParksOnMap or fetchAndDisplaySpots function)
         if (foundMarker._popup) {
             // This will automatically trigger the 'popupopen' event if you have it set
-            foundMarker.openPopup();
+            openPopupWithAutoPan(foundMarker);
             console.log(`Opened popup for existing marker of park ${park.reference}.`);
         } else {
             console.warn(`Marker has no bound popup for ${park.reference}.`);
@@ -3369,7 +3401,7 @@ function zoomToParks(parks) {
         map.activationsLayer.eachLayer(layer => {
             const layerLatLng = layer.getLatLng();
             if (layerLatLng.lat === park.latitude && layerLatLng.lng === park.longitude) {
-                layer.openPopup();
+                openPopupWithAutoPan(layer);
             }
         });
     });
@@ -4561,13 +4593,12 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         marker
             .addTo(layerGroup)
             .bindPopup("<b>Loading park info...</b>", {
-                // keep the popup fully in view
+                // cap its width on small screens
+                maxWidth: 280,
                 keepInView: true,
                 autoPan: true,
-                // add a little breathing room around the popup
-                autoPanPadding: [40, 40],
-                // cap its width on small screens
-                maxWidth: 280
+                autoPanPadding: [30, 40],
+                keepInView: false
             })
 
             .bindTooltip(tooltipText, {
@@ -4575,10 +4606,15 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 opacity: 0.9,
                 sticky: false,
                 className: "custom-tooltip",
-            })
-            .on('click', function () {
-                this.closeTooltip();
             });
+
+        const handleMarkerTap = (e) => {
+            if (e) L.DomEvent.stop(e);
+            marker.closeTooltip();
+            openPopupWithAutoPan(marker);
+        };
+        marker.on('click touchend', handleMarkerTap);
+        marker.on('touchend', handleMarkerTap);
 
         marker.on('popupopen', async function () {
             try {
