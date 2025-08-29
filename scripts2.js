@@ -60,62 +60,15 @@ let __panInProgress = false; // suppress redraws while panning
 let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
 
 /**
- * Opens a marker's popup, panning the map first if the marker is too close
- * to the edge of the current viewport.  This keeps popups reachable and
- * prevents them from immediately closing when near map boundaries.
+ * Opens a marker's popup and lets Leaflet auto-pan the map so the popup
+ * remains fully visible. Skips the next marker refresh so the popup isn't
+ * closed by the resulting map move.
  * @param {L.Marker} marker - Leaflet marker with a bound popup
  */
 function openPopupWithAutoPan(marker) {
     if (!map || !marker) return;
-    const latlng = marker.getLatLng();
-    const mapSize = map.getSize();
-    const point = map.latLngToContainerPoint(latlng);
-    const padding = 120; // space in px to keep around the popup
-    const needsPan =
-        point.x < padding || point.x > mapSize.x - padding ||
-        point.y < padding || point.y > mapSize.y - padding;
-
-    if (needsPan) {
-        __skipNextMarkerRefresh = true;
-        if (typeof map.panInside === 'function') {
-            map.panInside(latlng, { padding: [padding, padding], animate: true });
-            map.once('moveend', () => marker.openPopup());
-        } else {
-            map.once('moveend', () => marker.openPopup());
-            map.panTo(latlng, { animate: true });
-        }
-    } else {
-        marker.openPopup();
-    }
-}
-
-/**
- * Opens a marker's popup, panning the map first if the marker is too close
- * to the edge of the current viewport.  This keeps popups reachable and
- * prevents them from immediately closing when near map boundaries.
- * @param {L.Marker} marker - Leaflet marker with a bound popup
- */
-function openPopupWithAutoPan(marker) {
-    if (!map || !marker) return;
-    const latlng = marker.getLatLng();
-    const mapSize = map.getSize();
-    const point = map.latLngToContainerPoint(latlng);
-    const padding = 120; // space in px to keep around the popup
-    const needsPan =
-        point.x < padding || point.x > mapSize.x - padding ||
-        point.y < padding || point.y > mapSize.y - padding;
-
-    if (needsPan) {
-        if (typeof map.panInside === 'function') {
-            map.panInside(latlng, { padding: [padding, padding], animate: true });
-            map.once('moveend', () => marker.openPopup());
-        } else {
-            map.once('moveend', () => marker.openPopup());
-            map.panTo(latlng, { animate: true });
-        }
-    } else {
-        marker.openPopup();
-    }
+    __skipNextMarkerRefresh = true;
+    marker.openPopup();
 }
 
 // --- Lightweight Toast UI -------------------------------------------------
@@ -1342,7 +1295,7 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {keepInView: false, autoPan: false})
+                .bindPopup("<b>Loading park info...</b>", {keepInView: false, autoPan: true})
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
                 .on('click', function () {
                     this.closeTooltip();
@@ -3110,7 +3063,7 @@ function handleSearchInput(event) {
         const showPopup = async (e) => {
             if (e) L.DomEvent.stop(e);
             const popupContent = await fetchFullPopupContent(park);
-            marker.bindPopup(popupContent, { autoPan: false });
+            marker.bindPopup(popupContent, { autoPan: true });
             openPopupWithAutoPan(marker);
         };
         marker.on('click', showPopup);
@@ -4637,7 +4590,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             .bindPopup("<b>Loading park info...</b>", {
                 // cap its width on small screens
                 maxWidth: 280,
-                autoPan: false,
+                autoPan: true,
                 keepInView: false
             })
 
