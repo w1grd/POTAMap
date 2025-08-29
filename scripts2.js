@@ -1366,6 +1366,41 @@ function refreshMarkers() {
 
     // Skip marker redraws while Leaflet is auto-panning a freshly opened popup (mobile tap stability).
     if (typeof suppressRedrawUntil !== 'undefined' && Date.now() < suppressRedrawUntil) { return; }
+
+
+    /** Open a park's popup by its reference, retrying briefly until the marker exists. */
+    function openParkPopupByRef(reference, attempts) {
+        attempts = (typeof attempts === 'number') ? attempts : 12;
+        if (!map || !reference) return;
+        // Try a few common places we store markers
+        let marker = null;
+        if (window.markerByRef && window.markerByRef[reference]) {
+            marker = window.markerByRef[reference];
+        } else {
+            // Walk layers
+            map.eachLayer(function(layer){
+                if (marker) return;
+                if (layer && layer instanceof L.Marker) {
+                    if (layer._parkRef === reference || (layer.options && layer.options.reference === reference)) {
+                        marker = layer;
+                    }
+                }
+            });
+        }
+        if (marker) {
+            try {
+                // Let Leaflet handle auto-pan; our debounce already protects redraws
+                marker.openPopup();
+            } catch(e){ console.warn("openParkPopupByRef openPopup failed", e); }
+            return;
+        }
+        if (attempts > 0) {
+            setTimeout(function(){ openParkPopupByRef(reference, attempts-1); }, 120);
+        } else {
+            console.warn("openParkPopupByRef: marker not found for", reference);
+        }
+    }
+
 // Avoid redraws while a popup is open (prevents immediate close after auto-pan)
     if (typeof isPopupOpen !== 'undefined' && isPopupOpen) { return; }
     if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
@@ -5626,6 +5661,8 @@ function triggerGoToPark() {
     } else {
         alert('No matching park.');
     }
+    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 150);
+
 }
 
 
