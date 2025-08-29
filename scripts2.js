@@ -3281,6 +3281,7 @@ function handleSearchInput(event) {
 
     filteredParks.forEach((park) => {
         const marker = L.circleMarker([park.latitude, park.longitude], {
+            className: 'goto-park-highlight',
             radius: 8,
             fillColor: '#ffff00',
             color: '#000',
@@ -3464,21 +3465,15 @@ async function zoomToPark(park) {
         });
     }
 
-    // 2) If we found an existing marker, open its popup so it triggers the normal "popupopen" logic
-    if (foundMarker) {
-        // Ensure the popup is bound (it should be, from your displayParksOnMap or fetchAndDisplaySpots function)
-        if (foundMarker._popup) {
-            // This will automatically trigger the 'popupopen' event if you have it set
+    // After the map finishes moving, open the popup for the park.
+    map.once('moveend', () => {
+        if (foundMarker && foundMarker._popup) {
             openPopupWithAutoPan(foundMarker);
             console.log(`Opened popup for existing marker of park ${park.reference}.`);
         } else {
-            console.warn(`Marker has no bound popup for ${park.reference}.`);
+            openParkPopupByRef(park.reference);
         }
-    } else {
-        console.warn(`No existing marker found for park ${park.reference}.`);
-        // Optionally, create a *temporary* marker if you like
-        // ...
-    }
+    });
 }
 
 /**
@@ -5850,21 +5845,12 @@ function triggerGoToPark() {whenMapReady(function(){
         normalizeString(park.name).includes(query) ||
         normalizeString(park.reference).includes(query)
     );
-    const destLatLng = (typeof L !== 'undefined' && L.latLng) ? L.latLng(matchingPark.latitude, matchingPark.longitude) : {lat: matchingPark.latitude, lng: matchingPark.longitude};
-    const inView = (map && map.getBounds && destLatLng && map.getBounds().contains(destLatLng)) ? true : false;
 
     if (matchingPark) {
         zoomToPark(matchingPark);
     } else {
         alert('No matching park.');
     }
-    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 120);
-    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 260);
-    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 420);
-
-    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 140);
-    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 300);
-    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 540);
 
 });
 }
