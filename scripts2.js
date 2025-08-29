@@ -3750,9 +3750,11 @@ function updateMapWithFilteredParks(filteredParks) {
             const z = map.getZoom();
             map.flyTo(pts[0], z);
         } else if (pts.length > 1) {
-            // Multiple results: center and fit bounds with padding
+            // Multiple results: compute bounds, center on them, and zoom to fit
             const b = L.latLngBounds(pts);
-            map.fitBounds(b, { padding: [50, 50], animate: true });
+            const targetZoom = map.getBoundsZoom(b, true); // respect padding when fitting
+            const targetCenter = b.getCenter();
+            map.flyTo(targetCenter, targetZoom, { animate: true });
         }
     } catch (e) {
         console.warn('updateMapWithFilteredParks: view adjust failed', e);
