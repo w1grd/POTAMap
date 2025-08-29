@@ -5358,3 +5358,269 @@ function initializeFilterChips() {
         refreshMarkers();
     });
 }
+
+
+
+/* =====================================================================
+ * POTAmap — Saved PQL Searches (MVP)
+ * Adds a collapsible "Saved Searches" panel to the hamburger menu (#menu)
+ * and supports saving/running/renaming/deleting/shareable-URL for PQL.
+ * ===================================================================== */
+(() => {
+    'use strict';
+    if (window.__POTAMapSavedSearchesInit) return;
+    window.__POTAMapSavedSearchesInit = true;
+
+    const POTA_SAVED_PQL_KEY = 'pota.savedSearches.v1'; // [{id, name, pql, view?}]
+
+    function normalizePql(pql){
+        const q = (pql || '').trim();
+        return q.startsWith('?') ? q : ('?' + q);
+    }
+
+    function getSearchBoxEl(){
+        return document.getElementById('searchBox') || document.getElementById('pqlInput');
+    }
+
+    function getCurrentPqlFromUI(){
+        const el = getSearchBoxEl();
+        const raw = (el?.value ?? window.__pqlCurrent ?? '').trim();
+        return normalizePql(raw);
+    }
+
+    function loadSavedPql(){
+        try { return JSON.parse(localStorage.getItem(POTA_SAVED_PQL_KEY) || '[]'); }
+        catch { return []; }
+    }
+
+    function persistSavedPql(list){
+        localStorage.setItem(POTA_SAVED_PQL_KEY, JSON.stringify(list));
+    }
+
+    function saveCurrentSearch({ name, pql, includeView = true }){
+        const list = loadSavedPql();
+        const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+        const entry = { id, name: (name||'').trim() || '(unnamed)', pql: normalizePql(pql) };
+
+        if (includeView && typeof window.map !== 'undefined' && window.map){
+            try {
+                const c = map.getCenter(); const z = map.getZoom();
+                entry.view = { z, lat: +c.lat.toFixed(6), lng: +c.lng.toFixed(6) };
+            } catch {}
+        }
+
+        // De-dupe identical {pql,view}
+        const key = JSON.stringify({p: entry.pql, v: entry.view||null});
+        if (list.some(e => JSON.stringify({p:e.pql, v:e.view||null}) === key)){
+            return null;
+        }
+
+        list.unshift(entry);
+        if (list.length > 50) list.pop();
+        persistSavedPql(list);
+        return entry;
+    }
+
+    function deleteSavedSearch(id){
+        persistSavedPql(loadSavedPql().filter(e => e.id !== id));
+    }
+
+    function renameSavedSearch(id, nextName){
+        const list = loadSavedPql();
+        const i = list.findIndex(e => e.id === id);
+        if (i >= 0){
+            list[i].name = (nextName||'').trim() || '(unnamed)';
+            persistSavedPql(list);
+        }
+    }
+
+    function buildShareUrl(entry){
+        const base = `${location.origin}${location.pathname}`;
+        const params = new URLSearchParams();
+        params.set('pql', entry.pql);
+        if (entry.view){
+            params.set('z', String(entry.view.z));
+            params.set('lat', String(entry.view.lat));
+            params.set('lng', String(entry.view.lng));
+        }
+        return `${base}?${params.toString()}`;
+    }
+
+    async function runSavedEntry(entry){
+        if (entry.view && typeof window.map !== 'undefined' && window.map){
+            try { map.setView([entry.view.lat, entry.view.lng], entry.view.z, { animate:false }); } catch {}
+        }
+        const box = getSearchBoxEl();
+        if (box) box.value = entry.pql;
+        window.__pqlCurrent = entry.pql;
+
+        // Preferred: call your PQL engine if available
+        try {
+            if (typeof window.runPQL === 'function'){
+                await window.runPQL(entry.pql);
+                return;
+            }
+            if (typeof window.redrawMarkersWithFilters === 'function'){
+                // If you have something like setPotaFiltersFromPql, call it here.
+                await window.redrawMarkersWithFilters();
+                return;
+            }
+        } catch(e){
+            console.warn('runSavedEntry direct call failed, falling back to Enter-dispatch', e);
+        }
+
+        // Fallback: dispatch Enter on the search box (your handler should pick this up)
+        try {
+            const evt = new KeyboardEvent('keydown', { key: 'Enter' });
+            box?.dispatchEvent(evt);
+        } catch(e){ console.warn('Enter dispatch failed', e); }
+    }
+
+    function renderSavedList(){
+        const ul = document.getElementById('ssp-list');
+        if (!ul) return;
+        const items = loadSavedPql();
+        ul.innerHTML = '';
+        if (items.length === 0){
+            ul.innerHTML = `<li class="ssp-empty"><em>No saved searches yet.</em></li>`;
+            return;
+        }
+        for (const e of items){
+            const li = document.createElement('li');
+            li.className = 'ssp-item';
+
+            const runBtn = document.createElement('button');
+            runBtn.className = 'ssp-btn ssp-icon';
+            runBtn.title = 'Run';
+            runBtn.textContent = '▶︎';
+            runBtn.addEventListener('click', () => runSavedEntry(e));
+
+            const name = document.createElement('span');
+            name.className = 'ssp-name';
+            name.textContent = e.name || e.pql;
+            name.title = e.pql;
+            name.contentEditable = 'true';
+            name.addEventListener('blur', () => renameSavedSearch(e.id, name.textContent || ''));
+            name.addEventListener('keydown', (ev) => { if (ev.key === 'Enter'){ ev.preventDefault(); name.blur(); }});
+
+            const shareBtn = document.createElement('button');
+            shareBtn.className = 'ssp-btn';
+            shareBtn.textContent = 'Share';
+            shareBtn.title = 'Copy shareable URL';
+            shareBtn.addEventListener('click', async () => {
+                const url = buildShareUrl(e);
+                try { await navigator.clipboard.writeText(url); } catch {}
+                console.log('Copied:', url);
+            });
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'ssp-btn';
+            delBtn.textContent = 'Delete';
+            delBtn.addEventListener('click', () => { deleteSavedSearch(e.id); renderSavedList(); });
+
+            li.append(runBtn, name, shareBtn, delBtn);
+            ul.appendChild(li);
+        }
+    }
+
+    function buildSavedSearchesPanel(){
+        const menu = document.getElementById('menu');
+        if (!menu) return;
+
+        document.getElementById('savedSearchesPanelContainer')?.remove();
+
+        // Use <li> to match typical menu structure
+        const li = document.createElement('li');
+        li.id = 'savedSearchesPanelContainer';
+        li.innerHTML = `
+      <div class="saved-searches-panel">
+        <div class="ssp-title">Saved Searches</div>
+        <div class="ssp-row">
+          <input id="ssp-name" class="ssp-input" placeholder="Name this search…" />
+          <label class="ssp-check">
+            <input type="checkbox" id="ssp-include-view" checked />
+            Include map view
+          </label>
+          <button id="ssp-save" class="ssp-btn">Save Current</button>
+        </div>
+        <ul id="ssp-list" class="ssp-list"></ul>
+      </div>
+    `;
+
+        // Try to place after a known panel if present; else append at end
+        const anchorAfter = document.getElementById('modeFilterPanelContainer');
+        if (anchorAfter?.nextSibling) menu.insertBefore(li, anchorAfter.nextSibling);
+        else menu.appendChild(li);
+
+        // Wire save button
+        li.querySelector('#ssp-save')?.addEventListener('click', () => {
+            const name = li.querySelector('#ssp-name')?.value || '';
+            const includeView = !!li.querySelector('#ssp-include-view')?.checked;
+            const pql = getCurrentPqlFromUI();
+            const saved = saveCurrentSearch({ name, pql, includeView });
+            if (saved){
+                const nameEl = li.querySelector('#ssp-name'); if (nameEl) nameEl.value = '';
+                renderSavedList();
+            } else {
+                console.log('Saved search already exists (same PQL & view).');
+            }
+        });
+
+        renderSavedList();
+    }
+
+    function applyIncomingPqlFromUrl(){
+        try {
+            const url = new URL(location.href);
+            const pqlParam = url.searchParams.get('pql');
+            const z = url.searchParams.get('z');
+            const lat = url.searchParams.get('lat');
+            const lng = url.searchParams.get('lng');
+
+            if (lat && lng && z && typeof window.map !== 'undefined' && window.map){
+                try { map.setView([parseFloat(lat), parseFloat(lng)], parseInt(z,10), { animate:false }); } catch {}
+            }
+            if (!pqlParam) return;
+
+            const pql = normalizePql(pqlParam);
+            const box = getSearchBoxEl();
+            if (box) box.value = pql;
+            window.__pqlCurrent = pql;
+
+            if (typeof window.runPQL === 'function'){
+                window.runPQL(pql);
+            } else {
+                const evt = new KeyboardEvent('keydown', { key: 'Enter' });
+                box?.dispatchEvent(evt);
+            }
+        } catch (e){
+            console.warn('applyIncomingPqlFromUrl: failed', e);
+        }
+    }
+
+    // Initialize on DOM ready; wait for #menu if needed.
+    function ensurePanelWhenMenuExists(){
+        const attempt = () => {
+            if (document.getElementById('menu')){
+                buildSavedSearchesPanel();
+                return true;
+            }
+            return false;
+        };
+        if (attempt()) return;
+        const obs = new MutationObserver(() => {
+            if (attempt()){ obs.disconnect(); }
+        });
+        obs.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        ensurePanelWhenMenuExists();
+        if (typeof window.whenMapReady === 'function'){
+            window.whenMapReady(() => applyIncomingPqlFromUrl());
+        } else {
+            applyIncomingPqlFromUrl();
+        }
+    });
+})();
+
