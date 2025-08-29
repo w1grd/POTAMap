@@ -1297,7 +1297,7 @@ async function redrawMarkersWithFilters() {
                 .addTo(map.activationsLayer)
                 .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40]})
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
-                .on('click', function () {
+                .on('click touchend', function () {
                     this.closeTooltip();
                 });
 
@@ -3071,7 +3071,7 @@ function handleSearchInput(event) {
             marker.bindPopup(popupContent, { autoPan: true, autoPanPadding: [20, 20] });
             openPopupWithAutoPan(marker);
         };
-        marker.on('click', showPopup);
+        marker.on('click touchend', showPopup);
         marker.on('touchend', showPopup);
     });
 }
@@ -4613,7 +4613,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             marker.closeTooltip();
             openPopupWithAutoPan(marker);
         };
-        marker.on('click', handleMarkerTap);
+        marker.on('click touchend', handleMarkerTap);
         marker.on('touchend', handleMarkerTap);
 
         marker.on('popupopen', async function () {
