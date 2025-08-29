@@ -12,6 +12,7 @@
     font-size: 0.85em;
     z-index: 1000;
     display: none;
+    pointer-events: none; /* allow map interaction beneath indicator */
 }
 
 /* ================= Pulsing markers ================= */
