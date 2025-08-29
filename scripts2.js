@@ -5555,13 +5555,16 @@ function initializeFilterChips() {
         <div class="ssp-title">Saved Searches</div>
         <div class="ssp-row">
           <input id="ssp-name" class="ssp-input" placeholder="Name this search…" />
+<!--
           <label class="ssp-check">
             <input type="checkbox" id="ssp-include-view" checked />
             Include map view
           </label>
+-->
           <button id="ssp-save" class="ssp-btn">Save Current</button>
-        </div>
+        
         <ul id="ssp-list" class="ssp-list"></ul>
+        </div> <!-- PD moved the end div down to here
       </div>
     `;
 
