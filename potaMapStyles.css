@@ -541,30 +541,13 @@
     border-color:#0f172a;
 }
 .ssp-list{ list-style:none; margin:0; padding:0; }
-.ssp-item{
-    display:flex; gap:8px; align-items:center;
-    padding:6px 0; border-bottom:1px solid #f1f5f9;
-}
-.ssp-item:last-child{ border-bottom:none; }
-.ssp-icon{ width:34px; }
-.ssp-name{
-    flex:1 1 auto; min-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    border-radius:6px; padding:2px 4px;
-}
-.ssp-name:focus{ outline:2px solid #94a3b8; background:#f8fafc; }
-.ssp-empty{ color:#64748b; padding:6px 0; }
-
-
 
 /* --- Saved Searches: single-row layout with right-aligned icons --- */
 .ssp-item{
     display:flex;
     align-items:center;
-    gap:8px;
     padding:6px 0;
     border-bottom:1px solid #f1f5f9;
-    flex-wrap: nowrap;
-    background: transparent;
 }
 .ssp-item:last-child{ border-bottom:none; }
 .ssp-name{
@@ -576,35 +559,35 @@
     border-radius:6px;
     padding:2px 4px;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-weight: 600;                 /* bold, sans-serif */
-    font-size: 0.95rem;
+    font-weight:700;                  /* bold, sans-serif */
+    font-size:0.95rem;
     color:#183a2a;
-    background: transparent;
-    min-height: 20px;
+    background:transparent;
 }
+.ssp-name:focus{ outline:2px solid #94a3b8; background:#f8fafc; }
 .ssp-name:empty::before {
-    content: "(untitled)";
-    color: #9aa4b2;        /* muted grey */
-    font-weight: 500;
+    content:"(untitled)";
+    color:#9aa4b2;        /* muted grey */
+    font-weight:500;
 }
 .ssp-actions{
+    margin-left:auto;                 /* push icons to the right */
     display:flex;
     align-items:center;
-    gap:6px;
-    margin-left:auto;                 /* push icons to the right */
-    flex-wrap: nowrap;
+    gap:4px;                          /* tight icon group */
 }
-.ssp-actions > * { flex: 0 0 auto; }
+.ssp-actions > * { flex:0 0 auto; }
 .ssp-iconbtn{
     appearance:none;
     border:none;
     background:transparent;
-    padding:6px;
+    padding:4px;                      /* smaller click target */
     line-height:0;
-    border-radius:6px;
+    border-radius:4px;
     cursor:pointer;
     color:#1f4d2f;                    /* icon color */
 }
 .ssp-iconbtn:hover{ background:rgba(0,0,0,0.06); }
 .ssp-iconbtn:focus-visible{ outline:2px solid #1f4d2f; outline-offset:2px; }
-.ssp-iconbtn svg{ width:18px; height:18px; display:block; }
+.ssp-iconbtn svg{ width:16px; height:16px; display:block; }
+.ssp-empty{ color:#64748b; padding:6px 0; }
