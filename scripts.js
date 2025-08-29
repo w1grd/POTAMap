@@ -3281,6 +3281,7 @@ function handleSearchInput(event) {
 
     filteredParks.forEach((park) => {
         const marker = L.circleMarker([park.latitude, park.longitude], {
+            className: 'goto-park-highlight',
             radius: 8,
             fillColor: '#ffff00',
             color: '#000',
@@ -3433,52 +3434,66 @@ async function zoomToPark(park) {
         console.log("Hamburger menu closed.");
     }
 
-    // 1) Try to find the existing marker in map activations/spots layers
-    //    We'll assume your "parks" go in map.activationsLayer, but if spots are separate, check map.spotsLayer too.
-    let foundMarker = null;
+    // After the map finishes moving, refresh spots and open the popup for the park.
+    map.once('moveend', async () => {
+        try {
+            await fetchAndDisplaySpotsInCurrentBounds(map);
+            applyActivationToggleState();
+        } catch (err) {
+            console.warn('zoomToPark: failed to refresh spots', err);
+        }
 
-    // If you have a single group for parks:
-    if (map.activationsLayer) {
-        map.activationsLayer.eachLayer((layer) => {
-            // If it's a circleMarker, check if it belongs to the park
-            // For your code, you might store the park reference in layer.options or layer.parkReference
-            // or match lat/long. For instance:
-            if (layer.getLatLng) {
-                const latLng = layer.getLatLng();
-                if (latLng.lat === park.latitude && latLng.lng === park.longitude) {
-                    foundMarker = layer;
+        // Try to find the existing marker in activations or spots layers now that the area has refreshed.
+        let foundMarker = null;
+        if (map.activationsLayer) {
+            map.activationsLayer.eachLayer((layer) => {
+                if (layer.getLatLng) {
+                    const latLng = layer.getLatLng();
+                    if (latLng.lat === latitude && latLng.lng === longitude) {
+                        foundMarker = layer;
+                    }
                 }
-            }
-        });
-    }
-
-    // If you also keep "spot" markers in map.spotsLayer, you might do the same loop there:
-    if (!foundMarker && map.spotsLayer) {
-        map.spotsLayer.eachLayer((layer) => {
-            if (layer.getLatLng) {
-                const latLng = layer.getLatLng();
-                if (latLng.lat === park.latitude && latLng.lng === park.longitude) {
-                    foundMarker = layer;
+            });
+        }
+        if (!foundMarker && map.spotsLayer) {
+            map.spotsLayer.eachLayer((layer) => {
+                if (layer.getLatLng) {
+                    const latLng = layer.getLatLng();
+                    if (latLng.lat === latitude && latLng.lng === longitude) {
+                        foundMarker = layer;
+                    }
                 }
-            }
-        });
-    }
+            });
+        }
 
-    // 2) If we found an existing marker, open its popup so it triggers the normal "popupopen" logic
-    if (foundMarker) {
-        // Ensure the popup is bound (it should be, from your displayParksOnMap or fetchAndDisplaySpots function)
-        if (foundMarker._popup) {
-            // This will automatically trigger the 'popupopen' event if you have it set
+        if (foundMarker && foundMarker._popup) {
             openPopupWithAutoPan(foundMarker);
             console.log(`Opened popup for existing marker of park ${park.reference}.`);
-        } else {
-            console.warn(`Marker has no bound popup for ${park.reference}.`);
+            return;
         }
-    } else {
-        console.warn(`No existing marker found for park ${park.reference}.`);
-        // Optionally, create a *temporary* marker if you like
-        // ...
-    }
+
+        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
+        map.highlightLayer.clearLayers();
+
+        const highlight = L.circleMarker([latitude, longitude], {
+            className: 'goto-park-highlight',
+            radius: 8,
+            fillColor: '#ffff00',
+            color: '#000',
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 0.8
+        }).addTo(map.highlightLayer);
+
+        try {
+            const popupContent = await fetchFullPopupContent(park);
+            highlight.bindPopup(popupContent, { autoPan: true, autoPanPadding: [20, 20] });
+            openPopupWithAutoPan(highlight);
+            console.log(`Opened popup for ${park.reference} via temporary highlight.`);
+        } catch (e) {
+            console.warn('zoomToPark: failed to fetch popup content', e);
+        }
+    });
 }
 
 /**
@@ -5850,21 +5865,12 @@ function triggerGoToPark() {whenMapReady(function(){
         normalizeString(park.name).includes(query) ||
         normalizeString(park.reference).includes(query)
     );
-    const destLatLng = (typeof L !== 'undefined' && L.latLng) ? L.latLng(matchingPark.latitude, matchingPark.longitude) : {lat: matchingPark.latitude, lng: matchingPark.longitude};
-    const inView = (map && map.getBounds && destLatLng && map.getBounds().contains(destLatLng)) ? true : false;
 
     if (matchingPark) {
         zoomToPark(matchingPark);
     } else {
         alert('No matching park.');
     }
-    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 120);
-    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 260);
-    setTimeout(function(){ openParkPopupByRef(matchingPark.reference); }, 420);
-
-    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 140);
-    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 300);
-    setTimeout(function(){ window.openParkPopupByRef(matchingPark.reference); }, 540);
 
 });
 }
