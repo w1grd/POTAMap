@@ -546,6 +546,8 @@
 .ssp-item{
     display:flex;
     align-items:center;
+    justify-content:space-between;    /* keep name and icons on one line */
+    flex-wrap:nowrap;
     padding:6px 0;
     border-bottom:1px solid #f1f5f9;
 }
@@ -571,7 +573,7 @@
     font-weight:500;
 }
 .ssp-actions{
-    margin-left:auto;                 /* push icons to the right */
+    flex:0 0 auto;
     display:flex;
     align-items:center;
     gap:4px;                          /* tight icon group */
