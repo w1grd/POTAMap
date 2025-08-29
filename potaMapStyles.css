@@ -573,25 +573,27 @@
     white-space:nowrap;
     border-radius:6px;
     padding:2px 4px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-weight: 600;                 /* bold, sans-serif */
+    font-size: 0.95rem;
+    color:#183a2a;
 }
 .ssp-actions{
     display:flex;
+    align-items:center;
     gap:6px;
-    margin-left:auto;
+    margin-left:auto;                 /* push icons to the right */
 }
 .ssp-iconbtn{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    width:34px;
-    height:34px;
-    border-radius:8px;
-    border:1px solid #334155;
-    background:#fff;
-    color:#0f172a;
+    appearance:none;
+    border:none;
+    background:transparent;
+    padding:6px;
+    line-height:0;
+    border-radius:6px;
     cursor:pointer;
+    color:#1f4d2f;                    /* icon color */
 }
-.ssp-iconbtn:hover{
-    background:#f1f5f9;
-    border-color:#0f172a;
-}
+.ssp-iconbtn:hover{ background:rgba(0,0,0,0.06); }
+.ssp-iconbtn:focus-visible{ outline:2px solid #1f4d2f; outline-offset:2px; }
+.ssp-iconbtn svg{ width:18px; height:18px; display:block; }
