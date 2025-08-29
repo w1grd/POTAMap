@@ -1001,7 +1001,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return getModeCounts(reference);
         }
 
-        // expose inner worker helpers to global wrappers
+        // Expose inner worker helpers to global wrappers
         window.initQsoWorkerIfNeededInner = initQsoWorkerIfNeeded;
         window.updateVisibleModeCountsInner = updateVisibleModeCounts;
         window.modeCountsForParkRefInner = modeCountsForParkRef;
