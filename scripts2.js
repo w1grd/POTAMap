@@ -3434,39 +3434,38 @@ async function zoomToPark(park) {
         console.log("Hamburger menu closed.");
     }
 
-    // 1) Try to find the existing marker in map activations/spots layers
-    //    We'll assume your "parks" go in map.activationsLayer, but if spots are separate, check map.spotsLayer too.
-    let foundMarker = null;
-
-    // If you have a single group for parks:
-    if (map.activationsLayer) {
-        map.activationsLayer.eachLayer((layer) => {
-            // If it's a circleMarker, check if it belongs to the park
-            // For your code, you might store the park reference in layer.options or layer.parkReference
-            // or match lat/long. For instance:
-            if (layer.getLatLng) {
-                const latLng = layer.getLatLng();
-                if (latLng.lat === park.latitude && latLng.lng === park.longitude) {
-                    foundMarker = layer;
-                }
-            }
-        });
-    }
-
-    // If you also keep "spot" markers in map.spotsLayer, you might do the same loop there:
-    if (!foundMarker && map.spotsLayer) {
-        map.spotsLayer.eachLayer((layer) => {
-            if (layer.getLatLng) {
-                const latLng = layer.getLatLng();
-                if (latLng.lat === park.latitude && latLng.lng === park.longitude) {
-                    foundMarker = layer;
-                }
-            }
-        });
-    }
-
-    // After the map finishes moving, open the popup for the park.
+    // After the map finishes moving, refresh spots and open the popup for the park.
     map.once('moveend', async () => {
+        try {
+            await fetchAndDisplaySpotsInCurrentBounds(map);
+            applyActivationToggleState();
+        } catch (err) {
+            console.warn('zoomToPark: failed to refresh spots', err);
+        }
+
+        // Try to find the existing marker in activations or spots layers now that the area has refreshed.
+        let foundMarker = null;
+        if (map.activationsLayer) {
+            map.activationsLayer.eachLayer((layer) => {
+                if (layer.getLatLng) {
+                    const latLng = layer.getLatLng();
+                    if (latLng.lat === latitude && latLng.lng === longitude) {
+                        foundMarker = layer;
+                    }
+                }
+            });
+        }
+        if (!foundMarker && map.spotsLayer) {
+            map.spotsLayer.eachLayer((layer) => {
+                if (layer.getLatLng) {
+                    const latLng = layer.getLatLng();
+                    if (latLng.lat === latitude && latLng.lng === longitude) {
+                        foundMarker = layer;
+                    }
+                }
+            });
+        }
+
         if (foundMarker && foundMarker._popup) {
             openPopupWithAutoPan(foundMarker);
             console.log(`Opened popup for existing marker of park ${park.reference}.`);
