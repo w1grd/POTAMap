@@ -137,6 +137,16 @@ window.openParkPopupByRef = function(reference, attempts){
 // Yield to the browser for first paint
 const nextFrame = () => new Promise(r => requestAnimationFrame(r));
 
+function getModeLoadingIndicator() {
+    let el = document.getElementById('mode-loading');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'mode-loading';
+        el.textContent = 'Updating mode data…';
+        document.body.appendChild(el);
+    }
+    return el;
+}
 
 // --- Single-run guard for modes init ---
 let __modesInitStarted = false;
@@ -147,10 +157,14 @@ async function ensureModesInitOnce() {
     try {
         const haveChanges = await detectModeChanges();
         if (haveChanges) {
+            const indicator = getModeLoadingIndicator();
+            indicator.style.display = 'block';
             try {
                 await checkAndUpdateModesAtStartup();
             } catch (e) {
                 console.warn(e);
+            } finally {
+                indicator.style.display = 'none';
             }
             if (typeof initQsoWorkerIfNeeded === 'function') {
                 try {
@@ -740,26 +754,28 @@ async function applyModeChangesToIndexedDB() {
     if (!body && patches.length === 0) return {applied: 0};
 
     let applied = 0;
-    // Use existing helper to upsert into IDB, and also update in-memory parks
-    for (const entry of patches) {
-        const {reference, patch} = entry || {};
-        if (!reference || !patch || typeof patch !== 'object') continue;
-        try {
-            await upsertParkFieldsInIndexedDB(reference, patch);
-            // Update in-memory `parks` so UI can reflect changes immediately
-            if (Array.isArray(parks)) {
-                const idx = parks.findIndex(p => p && p.reference === reference);
-                if (idx >= 0) {
-                    parks[idx] = Object.assign({}, parks[idx], patch);
+    const CHUNK_SIZE = 200;
+    for (let i = 0; i < patches.length; i += CHUNK_SIZE) {
+        const slice = patches.slice(i, i + CHUNK_SIZE);
+        await Promise.all(slice.map(async entry => {
+            const {reference, patch} = entry || {};
+            if (!reference || !patch || typeof patch !== 'object') return;
+            try {
+                await upsertParkFieldsInIndexedDB(reference, patch);
+                if (Array.isArray(parks)) {
+                    const idx = parks.findIndex(p => p && p.reference === reference);
+                    if (idx >= 0) {
+                        parks[idx] = Object.assign({}, parks[idx], patch);
+                    }
                 }
+                applied++;
+            } catch (e) {
+                console.warn('[modes] upsert failed for', reference, e);
             }
-            applied++;
-        } catch (e) {
-            console.warn('[modes] upsert failed for', reference, e);
-        }
+        }));
+        try { await nextFrame(); } catch (_) {}
     }
 
-    // Trigger a light redraw
     try {
         if (typeof refreshMarkers === 'function') refreshMarkers();
     } catch (_) {
@@ -5109,98 +5125,6 @@ function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
 }
 
-/**
- * Robustly detects which parks have mode/QSO changes.
- * Returns an array of park references (uppercase) that have mode/QSO updates.
- * Supports multiple input shapes from MODES_CHANGES_URLS:
- *   1) ["US-0001", ...]
- *   2) [{ reference: "US-0001", ... }, ...]
- *   3) [{ reference: "US-0001", cw: 10, ssb: 20, data: 5 }, ...]
- *   4) { changes: [...] } or { batches: [{date, changes: [...]}, ...] }
- */
-async function detectModeChanges() {
-    // Returns an array of park references (uppercase) that have mode/QSO updates.
-    // Supports multiple input shapes:
-    //  1) ["US-0001", "US-6363", ...]
-    //  2) [{ reference: "US-0001", ...full park... }, ...]
-    //  3) [{ reference: "US-0001", cw: 10, ssb: 20, data: 5 }, ...]
-    //  4) { changes: [...] } or { batches: [{date, changes: [...]}, ...] }
-
-    const urls = Array.isArray(MODES_CHANGES_URLS) ? MODES_CHANGES_URLS : [];
-
-    // Helper: normalize a single row to a reference string
-    const toRef = (row) => {
-        if (!row) return null;
-        if (typeof row === 'string') return String(row).trim().toUpperCase();
-        if (typeof row === 'object') {
-            const r = row.reference || row.ref || row.id;
-            if (!r) return null;
-            return String(r).trim().toUpperCase();
-        }
-        return null;
-    };
-
-    // Helper: extract refs from a parsed JSON payload
-    const extractRefs = (body) => {
-        const out = [];
-        if (!body) return out;
-
-        if (Array.isArray(body)) {
-            for (const item of body) {
-                const ref = toRef(item);
-                if (ref) out.push(ref);
-            }
-            return out;
-        }
-
-        // Object wrapper forms
-        if (Array.isArray(body.changes)) {
-            for (const item of body.changes) {
-                const ref = toRef(item);
-                if (ref) out.push(ref);
-            }
-            return out;
-        }
-
-        if (Array.isArray(body.batches)) {
-            for (const batch of body.batches) {
-                if (!Array.isArray(batch.changes)) continue;
-                for (const item of batch.changes) {
-                    const ref = toRef(item);
-                    if (ref) out.push(ref);
-                }
-            }
-            return out;
-        }
-
-        return out;
-    };
-
-    // Try candidates in order until one succeeds
-    for (const url of urls) {
-        try {
-            const res = await fetch(url, {cache: 'no-store'});
-            if (!res.ok) {
-                // Try the next candidate on 404/403/etc.
-                continue;
-            }
-            const body = await res.json();
-            const refs = extractRefs(body);
-            if (!refs.length) continue;
-
-            // Deduplicate & normalize
-            const unique = [...new Set(refs.filter(Boolean))];
-            return unique;
-        } catch (e) {
-            // Network or parse error — try next candidate
-            continue;
-        }
-    }
-
-    // Nothing found
-    return [];
-}
-
 function getFromStore(store, key) {
     return new Promise((resolve, reject) => {
         const request = store.get(key);
@@ -5402,10 +5326,9 @@ async function setupPOTAMap() {
             console.warn('initial render failed', e);
         }
 
-        // 6) Defer modes check so it never blocks map paint; ensure it runs only once
-        if (!window.__modesInitStarted && typeof checkAndUpdateModesAtStartup === 'function') {
-            window.__modesInitStarted = true;
-            const startModes = () => checkAndUpdateModesAtStartup().catch(console.warn);
+        // 6) Defer mode-change detection so it never blocks map paint
+        if (typeof ensureModesInitOnce === 'function') {
+            const startModes = () => ensureModesInitOnce().catch(console.warn);
             if ('requestIdleCallback' in window) requestIdleCallback(startModes); else setTimeout(startModes, 0);
         }
 

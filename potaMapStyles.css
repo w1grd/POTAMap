@@ -1,5 +1,19 @@
 /* potaMapStyles.css */
 
+/* Indicator while mode data updates */
+#mode-loading {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    z-index: 1000;
+    display: none;
+}
+
 /* ================= Pulsing markers ================= */
 
 /* Highlight used when "Go To Park" centers a search result */
