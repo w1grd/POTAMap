@@ -89,6 +89,35 @@ function openPopupWithAutoPan(marker) {
     }
 }
 
+/**
+ * Opens a marker's popup, panning the map first if the marker is too close
+ * to the edge of the current viewport.  This keeps popups reachable and
+ * prevents them from immediately closing when near map boundaries.
+ * @param {L.Marker} marker - Leaflet marker with a bound popup
+ */
+function openPopupWithAutoPan(marker) {
+    if (!map || !marker) return;
+    const latlng = marker.getLatLng();
+    const mapSize = map.getSize();
+    const point = map.latLngToContainerPoint(latlng);
+    const padding = 120; // space in px to keep around the popup
+    const needsPan =
+        point.x < padding || point.x > mapSize.x - padding ||
+        point.y < padding || point.y > mapSize.y - padding;
+
+    if (needsPan) {
+        if (typeof map.panInside === 'function') {
+            map.panInside(latlng, { padding: [padding, padding], animate: true });
+            map.once('moveend', () => marker.openPopup());
+        } else {
+            map.once('moveend', () => marker.openPopup());
+            map.panTo(latlng, { animate: true });
+        }
+    } else {
+        marker.openPopup();
+    }
+}
+
 // --- Lightweight Toast UI -------------------------------------------------
 function ensureToastCss() {
     if (document.getElementById('pql-toast-css')) return;
