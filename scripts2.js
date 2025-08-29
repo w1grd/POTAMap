@@ -5436,14 +5436,14 @@ function initializeFilterChips() {
 
     function buildShareUrl(entry){
         const base = `${location.origin}${location.pathname}`;
-        const params = new URLSearchParams();
-        params.set('pql', entry.pql);
+        theParams = new URLSearchParams();
+        theParams.set('pql', entry.pql);
         if (entry.view){
-            params.set('z', String(entry.view.z));
-            params.set('lat', String(entry.view.lat));
-            params.set('lng', String(entry.view.lng));
+            theParams.set('z', String(entry.view.z));
+            theParams.set('lat', String(entry.view.lat));
+            theParams.set('lng', String(entry.view.lng));
         }
-        return `${base}?${params.toString()}`;
+        return `${base}?${theParams.toString()}`;
     }
 
     async function runSavedEntry(entry){
@@ -5454,14 +5454,16 @@ function initializeFilterChips() {
         if (box) box.value = entry.pql;
         window.__pqlCurrent = entry.pql;
 
-        // Preferred: call your PQL engine if available
         try {
             if (typeof window.runPQL === 'function'){
                 await window.runPQL(entry.pql);
                 return;
             }
+            if (typeof window.handleSearchEnter === 'function'){
+                window.handleSearchEnter({ key:'Enter', preventDefault: ()=>{} });
+                return;
+            }
             if (typeof window.redrawMarkersWithFilters === 'function'){
-                // If you have something like setPotaFiltersFromPql, call it here.
                 await window.redrawMarkersWithFilters();
                 return;
             }
@@ -5469,7 +5471,6 @@ function initializeFilterChips() {
             console.warn('runSavedEntry direct call failed, falling back to Enter-dispatch', e);
         }
 
-        // Fallback: dispatch Enter on the search box (your handler should pick this up)
         try {
             const evt = new KeyboardEvent('keydown', { key: 'Enter' });
             box?.dispatchEvent(evt);
@@ -5529,7 +5530,6 @@ function initializeFilterChips() {
 
         document.getElementById('savedSearchesPanelContainer')?.remove();
 
-        // Use <li> to match typical menu structure
         const li = document.createElement('li');
         li.id = 'savedSearchesPanelContainer';
         li.innerHTML = `
@@ -5547,12 +5547,11 @@ function initializeFilterChips() {
       </div>
     `;
 
-        // Try to place after a known panel if present; else append at end
-        const anchorAfter = document.getElementById('modeFilterPanelContainer');
-        if (anchorAfter?.nextSibling) menu.insertBefore(li, anchorAfter.nextSibling);
+        // Insert near the top, just after Filters panel if present
+        const filtersPanel = document.getElementById('filtersPanelContainer') || document.getElementById('modeFilterPanelContainer');
+        if (filtersPanel?.nextSibling) menu.insertBefore(li, filtersPanel.nextSibling);
         else menu.appendChild(li);
 
-        // Wire save button
         li.querySelector('#ssp-save')?.addEventListener('click', () => {
             const name = li.querySelector('#ssp-name')?.value || '';
             const includeView = !!li.querySelector('#ssp-include-view')?.checked;
@@ -5589,6 +5588,8 @@ function initializeFilterChips() {
 
             if (typeof window.runPQL === 'function'){
                 window.runPQL(pql);
+            } else if (typeof window.handleSearchEnter === 'function'){
+                window.handleSearchEnter({ key:'Enter', preventDefault: ()=>{} });
             } else {
                 const evt = new KeyboardEvent('keydown', { key: 'Enter' });
                 box?.dispatchEvent(evt);
@@ -5598,7 +5599,6 @@ function initializeFilterChips() {
         }
     }
 
-    // Initialize on DOM ready; wait for #menu if needed.
     function ensurePanelWhenMenuExists(){
         const attempt = () => {
             if (document.getElementById('menu')){
@@ -5623,4 +5623,3 @@ function initializeFilterChips() {
         }
     });
 })();
-

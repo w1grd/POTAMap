@@ -529,12 +529,17 @@
 }
 .ssp-btn{
     padding:6px 10px;
-    border:1px solid #cbd5e1;
+    border:1px solid #334155;
     border-radius:8px;
-    background:#f8fafc;
+    background:#ffffff;
+    color:#0f172a;
+    font-weight:600;
     cursor:pointer;
 }
-.ssp-btn:hover{ background:#eef2f7; }
+.ssp-btn:hover{
+    background:#f1f5f9;
+    border-color:#0f172a;
+}
 .ssp-list{ list-style:none; margin:0; padding:0; }
 .ssp-item{
     display:flex; gap:8px; align-items:center;
@@ -548,4 +553,3 @@
 }
 .ssp-name:focus{ outline:2px solid #94a3b8; background:#f8fafc; }
 .ssp-empty{ color:#64748b; padding:6px 0; }
-
