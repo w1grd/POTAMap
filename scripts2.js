@@ -253,6 +253,12 @@ let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
  */
 function openPopupWithAutoPan(marker) {
     if (!map || !marker) return;
+
+    // Refresh markers first so newly visible areas aren't empty after the map pans.
+    if (typeof refreshMarkers === 'function') {
+        refreshMarkers();
+    }
+
     __skipNextMarkerRefresh = true;
     marker.openPopup();
 }
@@ -3917,13 +3923,10 @@ function setupSearchBoxListeners() {
         return;
     }
 
-    // Show the Clear button only when there is input
+    // Keep the Clear button visible regardless of input state
     searchBox.addEventListener('input', () => {
-        if (searchBox.value.trim() !== '') {
-            clearButton.style.display = 'block';
-        } else {
-            clearButton.style.display = 'none';
-        }
+        // Always show the Clear button so it doesn't disappear after use
+        clearButton.style.display = 'block';
     });
 
     // Attach the Clear button functionality
