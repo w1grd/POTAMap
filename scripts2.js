@@ -3945,6 +3945,13 @@ async function runPQL(raw, ctx = {}) {
         fitToMatchesIfGlobalScope(parsed, matched);
         updateMapWithFilteredParks(matched);
 
+        // Ensure matched parks are visibly highlighted
+        try {
+            applyPqlFilterDisplay(matched);
+        } catch (e) {
+            console.warn('applyPqlFilterDisplay failed', e);
+        }
+
         return matched;
     } catch (e) {
         console.warn('runPQL failed:', e);
