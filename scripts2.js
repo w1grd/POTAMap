@@ -3872,6 +3872,45 @@ function __pqlWantsGlobalScope(parsed) {
 }
 
 function clearSearchInput() {
+    // 1) Clear pulsing PQL overlay (if any)
+    try { clearPqlFilterDisplay(); } catch (e) {}
+
+    // 2) Clear legacy highlight layer (non-PQL incremental search)
+    if (map && map.highlightLayer) {
+        try { map.highlightLayer.clearLayers(); } catch (e) {}
+    }
+
+    // 3) Clear the search box
+    const searchBox = document.getElementById('searchBox');
+    if (searchBox) {
+        searchBox.value = '';
+        // If you want to force downstream listeners to react, you can emit input:
+        // searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    // 4) Drop any cached results from the last search
+    try { currentSearchResults = []; } catch (e) {}
+
+    // 5) Restore the previous map view (if we saved it before the search)
+    if (previousMapState && previousMapState.bounds) {
+        try {
+            map.fitBounds(previousMapState.bounds);
+            // Restore base display according to current toggles/filters
+            if (typeof applyActivationToggleState === 'function') {
+                applyActivationToggleState();
+            }
+            // Clear saved state
+            previousMapState = {bounds: null, displayedParks: []};
+            console.log('Map view restored to prior state.');
+        } catch (e) {
+            console.warn('Failed to restore previous map view:', e);
+        }
+    } else {
+        // If we didn’t save a state, at least ensure the base display is consistent
+        if (typeof applyActivationToggleState === 'function') {
+            applyActivationToggleState();
+        }
+    }
 }
 
 // --- PQL SEARCH: Main runner ---
@@ -3912,57 +3951,7 @@ async function runPQL(raw, ctx = {}) {
     }
 }
 
-window.runPQL = runPQL;
 
-window.runPQL = runPQL;
-// 1) Clear pulsing PQL overlay (if any)
-try {
-    clearPqlFilterDisplay();
-} catch (e) {
-}
-
-// 2) Clear legacy highlight layer (non-PQL incremental search)
-if (map && map.highlightLayer) {
-    try {
-        map.highlightLayer.clearLayers();
-    } catch (e) {
-    }
-}
-
-// 3) Clear the search box
-const searchBox = document.getElementById('searchBox');
-if (searchBox) {
-    searchBox.value = '';
-    // If you want to force downstream listeners to react, you can emit input:
-    // searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-// 4) Drop any cached results from the last search
-try {
-    currentSearchResults = [];
-} catch (e) {
-}
-
-// 5) Restore the previous map view (if we saved it before the search)
-if (previousMapState && previousMapState.bounds) {
-    try {
-        map.fitBounds(previousMapState.bounds);
-        // Restore base display according to current toggles/filters
-        if (typeof applyActivationToggleState === 'function') {
-            applyActivationToggleState();
-        }
-        // Clear saved state
-        previousMapState = {bounds: null, displayedParks: []};
-        console.log('Map view restored to prior state.');
-    } catch (e) {
-        console.warn('Failed to restore previous map view:', e);
-    }
-} else {
-    // If we didn’t save a state, at least ensure the base display is consistent
-    if (typeof applyActivationToggleState === 'function') {
-        applyActivationToggleState();
-    }
-}
 
 
 /**
