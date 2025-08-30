@@ -668,10 +668,6 @@ function clearPqlFilterDisplay() {
         P.highlightLayer.clearLayers();
         if (map.hasLayer(P.highlightLayer)) map.removeLayer(P.highlightLayer);
     }
-    // Remove any leftover custom pane used for PQL overlays so it can't block
-    // interaction (particularly on mobile where empty SVG panes may intercept taps)
-    const pane = map.getPane && map.getPane('pqlOverlayPane');
-    if (pane) pane.remove();
     map._pql = {};
 }
 
