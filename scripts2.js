@@ -3429,7 +3429,7 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const {bounds} = ctx || {};
 
     // 1) Proximity or in-view constraint
-    const hasDistConstraint = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    const hasDistConstraint = (parsed.minDist != null) || (parsed.maxDist != null);
     const hasStateConstraint = !!parsed.state;
     const hasNferConstraint = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
     const hasCountryConstraint = !!parsed.country;
@@ -3444,8 +3444,8 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (hasDistConstraint) {
             if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
             const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
-            if (parsed.minDist !== null && dMiles < parsed.minDist) return false;
-            if (parsed.maxDist !== null && dMiles > parsed.maxDist) return false;
+            if (parsed.minDist != null && dMiles < parsed.minDist) return false;
+            if (parsed.maxDist != null && dMiles > parsed.maxDist) return false;
             park._distMiles = dMiles;
         }
     } else {
@@ -3606,15 +3606,7 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 }
 
 function fitToMatchesIfGlobalScope(parsed, matched) {
-    const usedGlobalScope =
-        (!!parsed.state) ||
-        (!!parsed.country) ||
-        (!!parsed.callsign) ||
-        (Array.isArray(parsed.refs) && parsed.refs.length > 0) ||
-        (parsed.minDist !== null) || (parsed.maxDist !== null) ||
-        (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
-
-    if (!usedGlobalScope || !map || !matched || !matched.length) return;
+    if (!map || !matched || !matched.length) return;
 
     const latlngs = matched.map(p => [p.latitude, p.longitude]);
     const bounds = L.latLngBounds(latlngs);
@@ -3833,25 +3825,6 @@ function updateMapWithFilteredParks(filteredParks) {
 
     console.log("Activated References in Filtered Search:", activatedReferences); // Debugging
 
-    // --- Adjust view based on search results ---
-    try {
-        const pts = filteredParks
-            .filter(p => typeof p.latitude === 'number' && typeof p.longitude === 'number')
-            .map(p => [p.latitude, p.longitude]);
-
-        if (pts.length === 1) {
-            // Single result: fly to it at the current zoom level
-            const z = map.getZoom();
-            map.flyTo(pts[0], z);
-        } else if (pts.length > 1) {
-            // Multiple results: always fit bounds with padding, and do nothing else after
-            const b = L.latLngBounds(pts);
-            map.fitBounds(b, { padding: [50, 50], animate: true });
-        }
-    } catch (e) {
-        console.warn('updateMapWithFilteredParks: view adjust failed', e);
-    }
-
     // Display ONLY the filtered parks on the map (PQL result)
     displayParksOnMap(map, filteredParks, activatedReferences, map.activationsLayer);
     console.log("Displayed filtered parks on the map."); // Debugging
@@ -3864,7 +3837,7 @@ function __pqlWantsGlobalScope(parsed) {
         parsed.country ||
         parsed.callsign ||
         (Array.isArray(parsed.refs) && parsed.refs.length) ||
-        parsed.minDist !== null || parsed.maxDist !== null ||
+        parsed.minDist != null || parsed.maxDist != null ||
         (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length)
     ));
 }
@@ -3917,17 +3890,47 @@ function clearSearchInput() {
 // Exposed as window.runPQL for saved searches and Enter key
 async function runPQL(raw, ctx = {}) {
     try {
-        // 1) Parse PQL
         const parsed = parsePQL(raw);
 
-        // 2) Choose candidate set (global vs in-view)
+        const bounds = getCurrentMapBounds();
+
+        // Build context for matchers
+        const spotByRef = {};
+        const spotByCall = {};
+        if (Array.isArray(spots)) {
+            for (const s of spots) {
+                if (s && s.reference) {
+                    spotByRef[s.reference] = s;
+                    const call = (s.activator || s.callsign || '').trim().toUpperCase();
+                    if (call) {
+                        if (!spotByCall[call]) spotByCall[call] = [];
+                        spotByCall[call].push(s);
+                    }
+                }
+            }
+        }
+        const userActivatedRefs = (activations || []).map(a => a.reference);
+        const now = Date.now();
+        const nferByRef = buildNferByRef(parks);
+
+        const fullCtx = {
+            bounds,
+            spotByRef,
+            spotByCall,
+            userActivatedRefs,
+            now,
+            userLat,
+            userLng,
+            nferByRef,
+            ...ctx
+        };
+
         const useGlobal = __pqlWantsGlobalScope(parsed);
         const candidates = useGlobal ? parks : getParksInBounds(parks);
 
-        // 3) Filter
-        const matched = candidates.filter(p => parkMatchesParsedPQL(p, parsed, ctx));
+        const matched = candidates.filter(p => parkMatchesStructuredQuery(p, parsed, fullCtx));
+        currentSearchResults = matched;
 
-        // 4) No matches (scope-aware text)
         if (!matched.length) {
             const scopeMsg = useGlobal ? '' : ' in the current view';
             if (typeof showNoMatchModal === 'function') {
@@ -3938,8 +3941,7 @@ async function runPQL(raw, ctx = {}) {
             return [];
         }
 
-        // 5) Center/fit on results + render only the matches
-        try { fitToMatchesIfGlobalScope(parsed, matched); } catch {}
+        fitToMatchesIfGlobalScope(parsed, matched);
         updateMapWithFilteredParks(matched);
 
         return matched;
@@ -5645,6 +5647,9 @@ function initializeFilterChips() {
         }
     }
 
+    // Expose globally for external callers and saved-search buttons
+    window.runSavedEntry = runSavedEntry;
+
     function renderSavedList() {
         const ul = document.getElementById('ssp-list');
         if (!ul) return;
@@ -5691,7 +5696,7 @@ function initializeFilterChips() {
             const runBtn = makeIconBtn('Run saved search',
                 '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"></path></svg>'
             );
-            runBtn.addEventListener('click', () => runSavedEntry(e));
+            runBtn.addEventListener('click', () => window.runSavedEntry(e));
 
             // Share button (copy URL)
             const shareBtn = makeIconBtn('Copy shareable link',
@@ -5834,31 +5839,3 @@ function initializeFilterChips() {
     });
 })();
 
-// ---- Saved Searches: runSavedEntry helper ----
-/**
- * Restores a saved search entry (view + PQL), updates the search box, and executes the query.
- * @param {Object} entry - The saved search entry, e.g. {view: {lat,lng,z}, pql: "..."}
- */
-function runSavedEntry(entry){
-    try{
-        // 1) Restore saved map view first (if it exists)
-        if (entry && entry.view && map) {
-            const {lat, lng, z} = entry.view;
-            if (typeof lat === 'number' && typeof lng === 'number' && typeof z === 'number'){
-                try { map.setView([lat, lng], z, {animate:false}); } catch {}
-            }
-        }
-        // 2) Reflect the PQL in the search box (optional but nice)
-        const box = document.getElementById('searchBox');
-        if (box) box.value = entry.pql || '';
-        // 3) Execute the search (this is the important bit)
-        if (typeof window.runPQL === 'function') {
-            window.runPQL(entry.pql);
-        } else if (typeof window.handleSearchEnter === 'function') {
-            // Fallback path: simulate Enter
-            window.handleSearchEnter({ key:'Enter', preventDefault: ()=>{} });
-        }
-    } catch(e){
-        console.warn('runSavedEntry failed', e);
-    }
-}
