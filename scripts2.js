@@ -5631,8 +5631,16 @@ function initializeFilterChips() {
         window.__pqlCurrent = entry.pql;
 
         try {
-            if (typeof window.runPQL === 'function') {
-                await window.runPQL(entry.pql);
+            if (typeof runPQL === 'function') {
+                await runPQL(entry.pql);
+                return;
+            }
+            if (typeof handleSearchEnter === 'function') {
+                handleSearchEnter({key: 'Enter', preventDefault: () => {}});
+                return;
+            }
+            if (typeof redrawMarkersWithFilters === 'function') {
+                await redrawMarkersWithFilters();
                 return;
             }
         } catch (e) {
