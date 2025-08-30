@@ -341,13 +341,15 @@ function setUserLocationMarker(lat, lng) {
  * Keeps the current zoom level.
  */
 function centerMapOnGeolocation() {
+    const currentZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : undefined;
+
     if (!navigator.geolocation) {
         console.warn('Geolocation not supported; falling back.');
         const saved = localStorage.getItem('mapCenter');
         if (saved) {
             try {
                 const [lat, lng] = JSON.parse(saved);
-                map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.0});
+                map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
             } catch (e) {
                 // ignore parse error
             }
@@ -374,7 +376,7 @@ function centerMapOnGeolocation() {
             }
 
             if (map) {
-                map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.0});
+                map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
             }
         },
         (error) => {
@@ -383,7 +385,7 @@ function centerMapOnGeolocation() {
             if (saved) {
                 try {
                     const [lat, lng] = JSON.parse(saved);
-                    map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.0});
+                    map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
                 } catch (e) {
                     // ignore parse error
                 }
