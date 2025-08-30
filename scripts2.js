@@ -3401,6 +3401,13 @@ function parseStructuredQuery(raw) {
     return result;
 }
 
+// Alias for compatibility with older code that expects `parsePQL`
+// This keeps existing calls to `parseStructuredQuery` working while
+// ensuring `runPQL` can locate the parser.
+function parsePQL(raw) {
+    return parseStructuredQuery(raw);
+}
+
 function buildNferByRef(parks) {
     // Map<REF, Set<REF>>
     const map = new Map();
