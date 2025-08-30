@@ -19,6 +19,12 @@
 
 /* Highlight used when "Go To Park" centers a search result */
 .goto-park-highlight {
+    /* Ensure search highlights never intercept taps/clicks */
+    pointer-events: none !important;
+}
+
+/* Pane that holds search highlight markers should never block interaction */
+.leaflet-pane.searchHighlightPane {
     pointer-events: none;
 }
 
@@ -507,6 +513,13 @@
 }
 
 /* Hamburger menu styling */
+#hamburgerMenu {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+}
+
 #hamburgerMenu #menu .toggle-button.active {
     background: #28a745;
 }

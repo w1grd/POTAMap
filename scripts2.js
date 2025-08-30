@@ -1808,7 +1808,7 @@ function enhancePOTAMenuStyles() {
     const style = document.createElement('style');
     style.innerHTML = `
         #hamburgerMenu {
-    position: absolute;
+    position: fixed;
     top: 10px;
     right: 10px; /* Keep it positioned to the right */
     z-index: 1000;
@@ -2044,15 +2044,14 @@ function enhanceHamburgerMenuForMobile() {
     if (!root) return;
 
     const apply = () => {
-        if (window.innerWidth <= 480) {
-            root.classList.add('mobile');
-        } else {
-            root.classList.remove('mobile');
-        }
+        const isTouch = window.matchMedia('(pointer: coarse)').matches;
+        const mobile = isTouch || window.innerWidth <= 480;
+        root.classList.toggle('mobile', mobile);
     };
 
     apply();
     window.addEventListener('resize', apply);
+    window.addEventListener('orientationchange', apply);
 }
 
 /**
@@ -2743,6 +2742,23 @@ function fallbackToDefaultLocation() {
  * Handles input in the search box and dynamically highlights matching parks within the visible map bounds.
  * @param {Event} event - The input event from the search box.
  */
+/**
+ * Ensure a dedicated non-interactive highlight layer exists below spot markers.
+ * This prevents search results from blocking taps on mobile devices.
+ */
+function ensureSearchHighlightLayer() {
+    if (!window.map) return null;
+    if (!map.getPane('searchHighlightPane')) {
+        const pane = map.createPane('searchHighlightPane');
+        pane.style.zIndex = 450; // below default marker pane (600)
+        pane.style.pointerEvents = 'none';
+    }
+    if (!map.highlightLayer) {
+        map.highlightLayer = L.layerGroup([], { pane: 'searchHighlightPane' }).addTo(map);
+    }
+    return map.highlightLayer;
+}
+
 function handleSearchInput(event) {
     const raw = event.target.value || '';
     const trimmed = raw.trim();
@@ -2756,8 +2772,8 @@ function handleSearchInput(event) {
     const query = normalizeString(raw);
     console.log(`Search query received: "${query}"`);
 
-    if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
-    map.highlightLayer.clearLayers();
+    const highlightLayer = ensureSearchHighlightLayer();
+    highlightLayer.clearLayers();
 
     if (!query) {
         currentSearchResults = [];
@@ -2786,22 +2802,15 @@ function handleSearchInput(event) {
             color: '#000',
             weight: 2,
             opacity: 1,
-            fillOpacity: 0.8
-        }).addTo(map.highlightLayer);
+            fillOpacity: 0.8,
+            // Prevent highlight markers from blocking interaction with underlying spots
+            interactive: false,
+            bubblingMouseEvents: false
+        }).addTo(highlightLayer);
 
-        marker.bindTooltip(`${park.name} (${park.reference})`, {
-            direction: 'top',
-            className: 'custom-tooltip'
-        });
-
-        const showPopup = async (e) => {
-            if (e) L.DomEvent.stop(e);
-            const popupContent = await fetchFullPopupContent(park);
-            marker.bindPopup(popupContent, {autoPan: true, autoPanPadding: [20, 20]});
-            openPopupWithAutoPan(marker);
-        };
-        marker.on('click touchend', showPopup);
-        marker.on('touchend', showPopup);
+        // The highlight is purely visual; the actual spot marker underneath
+        // remains fully interactive. Tooltips/popup handling are therefore
+        // unnecessary on this overlay marker.
     });
 }
 
@@ -2971,8 +2980,8 @@ async function zoomToPark(park) {
             return;
         }
 
-        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
-        map.highlightLayer.clearLayers();
+        const layer = ensureSearchHighlightLayer();
+        layer.clearLayers();
 
         const highlight = L.circleMarker([latitude, longitude], {
             className: 'goto-park-highlight',
@@ -2982,7 +2991,7 @@ async function zoomToPark(park) {
             weight: 2,
             opacity: 1,
             fillOpacity: 0.8
-        }).addTo(map.highlightLayer);
+        }).addTo(layer);
 
         try {
             const popupContent = await fetchFullPopupContent(park);
@@ -3777,15 +3786,21 @@ function clearSearchInput() {
 
     // 2) Clear legacy highlight layer (non-PQL incremental search)
     if (map && map.highlightLayer) {
-        try { map.highlightLayer.clearLayers(); } catch (e) {}
+        try {
+            map.highlightLayer.clearLayers();
+            map.removeLayer(map.highlightLayer);
+            const pane = map.getPane('searchHighlightPane');
+            if (pane) pane.remove();
+        } catch (e) {}
+        map.highlightLayer = null;
     }
 
     // 3) Clear the search box
     const searchBox = document.getElementById('searchBox');
     if (searchBox) {
         searchBox.value = '';
-        // If you want to force downstream listeners to react, you can emit input:
-        // searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+        // Force downstream listeners (like handleSearchInput) to react
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     // 4) Drop any cached results from the last search
