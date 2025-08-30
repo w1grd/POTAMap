@@ -1210,12 +1210,13 @@ function queryHasExplicitScope(parsed) {
     const s = (parsed.state || parsed.STATE || parsed.region || parsed.country || parsed.COUNTRY || parsed.ref || parsed.reference || parsed.id);
     if (s) return true;
     if (Array.isArray(parsed.refs) && parsed.refs.length > 0) return true;
+    if (parsed.minDist != null || parsed.maxDist != null) return true;
     // Some parsers return a list of filters; look for STATE:/COUNTRY:/REF:
     const filters = parsed.filters || parsed.terms || [];
     if (Array.isArray(filters)) {
         for (const f of filters) {
             const k = (f && (f.key || f.type || f.name || '')).toString().toUpperCase();
-            if (k === 'STATE' || k === 'COUNTRY' || k === 'REF' || k === 'REFERENCE' || k === 'ID') return true;
+            if (k === 'STATE' || k === 'COUNTRY' || k === 'REF' || k === 'REFERENCE' || k === 'ID' || k === 'MINDIST' || k === 'MAXDIST' || k === 'DIST') return true;
         }
     }
     // A meta flag can force global behavior

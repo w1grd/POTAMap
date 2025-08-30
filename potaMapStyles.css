@@ -93,7 +93,7 @@
 /* Ensure PQL highlight pulses render behind standard markers */
 .pql-pulse-icon {
     pointer-events: none;
-    z-index: 0;
+    z-index: -1000;
 }
 /* Desktop mode: shrink mode filter dots by ~20% */
 .desktop-mode .mode-dot {
