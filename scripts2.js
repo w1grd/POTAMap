@@ -3786,15 +3786,21 @@ function clearSearchInput() {
 
     // 2) Clear legacy highlight layer (non-PQL incremental search)
     if (map && map.highlightLayer) {
-        try { map.highlightLayer.clearLayers(); } catch (e) {}
+        try {
+            map.highlightLayer.clearLayers();
+            map.removeLayer(map.highlightLayer);
+            const pane = map.getPane('searchHighlightPane');
+            if (pane) pane.remove();
+        } catch (e) {}
+        map.highlightLayer = null;
     }
 
     // 3) Clear the search box
     const searchBox = document.getElementById('searchBox');
     if (searchBox) {
         searchBox.value = '';
-        // If you want to force downstream listeners to react, you can emit input:
-        // searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+        // Force downstream listeners (like handleSearchInput) to react
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     // 4) Drop any cached results from the last search

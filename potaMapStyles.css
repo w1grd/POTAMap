@@ -23,6 +23,11 @@
     pointer-events: none !important;
 }
 
+/* Pane that holds search highlight markers should never block interaction */
+.leaflet-pane.searchHighlightPane {
+    pointer-events: none;
+}
+
 .pulse-marker {
     pointer-events: none;
     width: 20px;
