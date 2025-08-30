@@ -2786,22 +2786,15 @@ function handleSearchInput(event) {
             color: '#000',
             weight: 2,
             opacity: 1,
-            fillOpacity: 0.8
+            fillOpacity: 0.8,
+            // Prevent highlight markers from blocking interaction with underlying spots
+            interactive: false,
+            bubblingMouseEvents: false
         }).addTo(map.highlightLayer);
 
-        marker.bindTooltip(`${park.name} (${park.reference})`, {
-            direction: 'top',
-            className: 'custom-tooltip'
-        });
-
-        const showPopup = async (e) => {
-            if (e) L.DomEvent.stop(e);
-            const popupContent = await fetchFullPopupContent(park);
-            marker.bindPopup(popupContent, {autoPan: true, autoPanPadding: [20, 20]});
-            openPopupWithAutoPan(marker);
-        };
-        marker.on('click touchend', showPopup);
-        marker.on('touchend', showPopup);
+        // The highlight is purely visual; the actual spot marker underneath
+        // remains fully interactive. Tooltips/popup handling are therefore
+        // unnecessary on this overlay marker.
     });
 }
 
