@@ -1,14 +1,23 @@
-
 /** Run a callback once the Leaflet map exists and is fully ready. */
-function whenMapReady(cb){
+function whenMapReady(cb) {
     if (typeof cb !== 'function') return;
-    const go = function(){ try { cb(); } catch(e){} };
+    const go = function () {
+        try {
+            cb();
+        } catch (e) {
+        }
+    };
     if (typeof window === 'undefined' || !window.map) {
         // Poll briefly until map is created
         let tries = 40;
-        const t = setInterval(function(){
-            if (window.map) { clearInterval(t); whenMapReady(cb); }
-            else if (--tries <= 0) { clearInterval(t); console.warn("whenMapReady: map not initialized"); }
+        const t = setInterval(function () {
+            if (window.map) {
+                clearInterval(t);
+                whenMapReady(cb);
+            } else if (--tries <= 0) {
+                clearInterval(t);
+                console.warn("whenMapReady: map not initialized");
+            }
         }, 50);
         return;
     }
@@ -23,13 +32,13 @@ function whenMapReady(cb){
 
 
 // === Marker registry shim: auto-register markers created with options.reference/ref ===
-(function(){
+(function () {
     if (typeof L === 'undefined' || !L.marker) return;
     if (L.__markerShimInstalled) return;
     L.__markerShimInstalled = true;
 
     const __origMarker = L.marker;
-    L.marker = function(latlng, options){
+    L.marker = function (latlng, options) {
         const m = __origMarker.call(this, latlng, options || {});
         try {
             const ref = (options && (options.reference || options.ref)) || m._parkRef;
@@ -38,7 +47,8 @@ function whenMapReady(cb){
                 window.markerByRef = window.markerByRef || {};
                 window.markerByRef[ref] = m;
             }
-        } catch(e){ /* no-op */ }
+        } catch (e) { /* no-op */
+        }
         return m;
     };
 })();
@@ -47,85 +57,114 @@ function whenMapReady(cb){
 // === Global popup opener helper ===
 
 // === Helpers for Go-To-Park popup behavior ===
-window.openTempPopupAt = function(lat, lng, html){
+window.openTempPopupAt = function (lat, lng, html) {
     try {
         if (!window.map) return;
         const content = html || "<b>Loading park…</b>";
         var tmp = null;
-        whenMapReady(function(){ tmp = L.popup({autoPan: true, keepInView: true, autoPanPadding: [30,40]})
-            .setLatLng([lat, lng]).setContent(content).openOn(map); });
-        // Close automatically when a real marker popup opens
-        map.once('popupopen', function(ev){
-            try{ if (ev && ev.popup !== tmp) map.closePopup(tmp); }catch(e){}
+        whenMapReady(function () {
+            tmp = L.popup({autoPan: true, keepInView: true, autoPanPadding: [30, 40]})
+                .setLatLng([lat, lng]).setContent(content).openOn(map);
         });
-    } catch(e){ console.warn("openTempPopupAt failed", e); }
+        // Close automatically when a real marker popup opens
+        map.once('popupopen', function (ev) {
+            try {
+                if (ev && ev.popup !== tmp) map.closePopup(tmp);
+            } catch (e) {
+            }
+        });
+    } catch (e) {
+        console.warn("openTempPopupAt failed", e);
+    }
 };
 
-window.__findMarkerByRef = window.__findMarkerByRef || function(reference){
+window.__findMarkerByRef = window.__findMarkerByRef || function (reference) {
     if (!window.map || !reference) return null;
     if (window.markerByRef && window.markerByRef[reference]) return window.markerByRef[reference];
-    function scanGroup(g){
+
+    function scanGroup(g) {
         var found = null;
         if (!g || !g.eachLayer) return null;
-        g.eachLayer(function(layer){
+        g.eachLayer(function (layer) {
             if (found) return;
             // include CircleMarker and DivIcon markers (all inherit from Marker in Leaflet)
             if (layer && (layer instanceof L.Marker)) {
                 var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
                 if (ref === reference) found = layer;
-            } else if (layer && layer.eachLayer){
+            } else if (layer && layer.eachLayer) {
                 var inner = scanGroup(layer);
                 if (inner) found = inner;
             }
         });
         return found;
     }
+
     var groups = [];
     if (map.activationsLayer) groups.push(map.activationsLayer);
     if (map.spotsLayer) groups.push(map.spotsLayer);
     if (map.reviewLayer) groups.push(map.reviewLayer);
-    for (var i=0;i<groups.length;i++){
+    for (var i = 0; i < groups.length; i++) {
         var m = scanGroup(groups[i]);
         if (m) return m;
     }
     return scanGroup(map) || null;
 };
 
-window.openParkPopupByRef = function(reference, attempts){
+window.openParkPopupByRef = function (reference, attempts) {
     attempts = (typeof attempts === 'number') ? attempts : 14;
-    whenMapReady(function(){
+    whenMapReady(function () {
         if (!reference) return;
         var marker = (typeof window.__findMarkerByRef === 'function') ? window.__findMarkerByRef(reference) : null;
-        if (marker){
+        if (marker) {
             try {
-                if (typeof marker.fire === 'function') { marker.fire('click'); }
-                else if (typeof marker.openPopup === 'function') { marker.openPopup(); }
-            } catch(e){ console.warn("openParkPopupByRef: open failed", e); }
+                if (typeof marker.fire === 'function') {
+                    marker.fire('click');
+                } else if (typeof marker.openPopup === 'function') {
+                    marker.openPopup();
+                }
+            } catch (e) {
+                console.warn("openParkPopupByRef: open failed", e);
+            }
             return;
         }
-        if (attempts > 0){
-            try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
-            setTimeout(function(){ window.openParkPopupByRef(reference, attempts-1); }, 140);
+        if (attempts > 0) {
+            try {
+                if (typeof window.refreshMarkers === 'function') window.refreshMarkers();
+            } catch (e) {
+            }
+            setTimeout(function () {
+                window.openParkPopupByRef(reference, attempts - 1);
+            }, 140);
         } else {
             console.warn("openParkPopupByRef: marker not found for", reference);
         }
     });
 };
 
-window.openParkPopupByRef = function(reference, attempts){
+window.openParkPopupByRef = function (reference, attempts) {
     attempts = (typeof attempts === 'number') ? attempts : 14;
     if (!window.map || !reference) return;
     var marker = (typeof window.__findMarkerByRef === 'function') ? window.__findMarkerByRef(reference) : null;
-    if (marker){
+    if (marker) {
         try {
-            if (typeof marker.fire === 'function') { marker.fire('click'); }
-            else if (typeof marker.openPopup === 'function') { marker.openPopup(); }
-        } catch(e){ console.warn("openParkPopupByRef failed", e); }
+            if (typeof marker.fire === 'function') {
+                marker.fire('click');
+            } else if (typeof marker.openPopup === 'function') {
+                marker.openPopup();
+            }
+        } catch (e) {
+            console.warn("openParkPopupByRef failed", e);
+        }
         return;
     }
-    if (attempts > 0){
-        try { if (typeof window.refreshMarkers === 'function') window.refreshMarkers(); } catch(e){}
-        setTimeout(function(){ window.openParkPopupByRef(reference, attempts-1); }, 110);
+    if (attempts > 0) {
+        try {
+            if (typeof window.refreshMarkers === 'function') window.refreshMarkers();
+        } catch (e) {
+        }
+        setTimeout(function () {
+            window.openParkPopupByRef(reference, attempts - 1);
+        }, 110);
     } else {
         console.warn("openParkPopupByRef: marker not found for", reference);
     }
@@ -222,7 +261,7 @@ function openPopupWithAutoPan(marker) {
 function ensureToastCss() {
     if (document.getElementById('pql-toast-css')) return;
     const css = `
-  .toast-container{position:fixed;right:14px;top:14px;z-index:10000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  .toast-container{position:fixed;right:14px;bottom:14px;z-index:10000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
   .toast{min-width:260px;max-width:360px;background:rgba(24,24,24,.92);color:#fff;border-radius:10px;padding:10px 12px;box-shadow:0 8px 20px rgba(0,0,0,.25);display:flex;align-items:flex-start;gap:10px;font:14px/1.35 system-ui,Segoe UI,Roboto,Helvetica,Arial}
   .toast .icon{flex:0 0 auto;margin-top:1px}
   .toast .msg{flex:1 1 auto;white-space:pre-wrap}
@@ -302,13 +341,15 @@ function setUserLocationMarker(lat, lng) {
  * Keeps the current zoom level.
  */
 function centerMapOnGeolocation() {
+    const currentZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : undefined;
+
     if (!navigator.geolocation) {
         console.warn('Geolocation not supported; falling back.');
         const saved = localStorage.getItem('mapCenter');
         if (saved) {
             try {
                 const [lat, lng] = JSON.parse(saved);
-                map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+                map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
             } catch (e) {
                 // ignore parse error
             }
@@ -324,14 +365,18 @@ function centerMapOnGeolocation() {
             const lng = position.coords.longitude;
 
             // Update globals if you rely on them elsewhere
-            try { window.userLat = lat; window.userLng = lng; } catch (e) {}
+            try {
+                window.userLat = lat;
+                window.userLng = lng;
+            } catch (e) {
+            }
 
             if (typeof setUserLocationMarker === 'function') {
                 setUserLocationMarker(lat, lng);
             }
 
             if (map) {
-                map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+                map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
             }
         },
         (error) => {
@@ -340,7 +385,7 @@ function centerMapOnGeolocation() {
             if (saved) {
                 try {
                     const [lat, lng] = JSON.parse(saved);
-                    map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.0 });
+                    map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
                 } catch (e) {
                     // ignore parse error
                 }
@@ -348,7 +393,7 @@ function centerMapOnGeolocation() {
                 fallbackToDefaultLocation();
             }
         },
-        { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 }
+        {enableHighAccuracy: true, maximumAge: 30000, timeout: 15000}
     );
 }
 
@@ -446,7 +491,10 @@ async function ensureRecentAddsFromChangesJSON() {
     const qp = new URLSearchParams(location.search);
     if (qp.get('nonew') === '1') {
         window.__RECENT_ADDS = new Set();
-        try { localStorage.removeItem('recentAddsSig::changes.json'); } catch {}
+        try {
+            localStorage.removeItem('recentAddsSig::changes.json');
+        } catch {
+        }
         return window.__RECENT_ADDS;
     }
     const isWithinDays = (iso, days) => {
@@ -472,7 +520,10 @@ async function ensureRecentAddsFromChangesJSON() {
             if (window.__RECENT_ADDS.size > MAX_RECENT_ADDS) {
                 console.warn(`[new-parks] Cached recent-adds set is too large (${window.__RECENT_ADDS.size}); clearing.`);
                 window.__RECENT_ADDS = new Set();
-                try { localStorage.removeItem(SIG_KEY); } catch {}
+                try {
+                    localStorage.removeItem(SIG_KEY);
+                } catch {
+                }
             } else {
                 return window.__RECENT_ADDS; // up-to-date and sane
             }
@@ -502,7 +553,10 @@ async function ensureRecentAddsFromChangesJSON() {
         if (set.size > MAX_RECENT_ADDS) {
             console.warn(`[new-parks] Ignoring changes.json because it marks ${set.size} parks as new (> ${MAX_RECENT_ADDS}).`);
             // Clear signature so we re-check next load
-            try { localStorage.removeItem(SIG_KEY); } catch {}
+            try {
+                localStorage.removeItem(SIG_KEY);
+            } catch {
+            }
             window.__RECENT_ADDS = new Set();
             return window.__RECENT_ADDS;
         }
@@ -788,7 +842,10 @@ async function applyModeChangesToIndexedDB() {
                 console.warn('[modes] upsert failed for', reference, e);
             }
         }));
-        try { await nextFrame(); } catch (_) {}
+        try {
+            await nextFrame();
+        } catch (_) {
+        }
     }
 
     try {
@@ -875,17 +932,9 @@ async function healParksIfCorrupted() {
 }
 
 function updateVisibleModeCounts() {
-    if (!map || !parks || parks.length === 0) return;
-    if (!MODE_CHANGES_AVAILABLE || !(MODE_CHANGE_REFS instanceof Set)) return; // nothing to do
-    const b = map.getBounds();
-    const refs = [];
-    for (const park of parks) {
-        const {latitude, longitude, reference} = park || {};
-        if (latitude == null || longitude == null || !reference) continue;
-        if (!MODE_CHANGE_REFS.has(reference)) continue; // Only compute where changes exist
-        if (b.contains([latitude, longitude])) refs.push(reference);
+    if (typeof window.updateVisibleModeCountsInner === 'function') {
+        return window.updateVisibleModeCountsInner();
     }
-    enqueueVisibleReferences(refs);
 }
 
 function modeCountsForParkRef(reference) {
@@ -1026,13 +1075,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         await setupPOTAMap();
 
         // Use a shared Canvas renderer for circle markers (significantly faster than default SVG)
-        try { __canvasRenderer = L.canvas({ padding: 0.5 }); } catch (_) {}
+        try {
+            __canvasRenderer = L.canvas({padding: 0.5});
+        } catch (_) {
+        }
 
         // Debounce redraws on pan/zoom; redraw only when interaction settles
         if (map && typeof map.on === 'function') {
-            map.on('movestart', () => { __panInProgress = true; });
-            map.on('zoomstart', () => { __panInProgress = true; });
-            const debouncedMoveEnd = (function(){
+            map.on('movestart', () => {
+                __panInProgress = true;
+            });
+            map.on('zoomstart', () => {
+                __panInProgress = true;
+            });
+            const debouncedMoveEnd = (function () {
                 let t = null;
                 return () => {
                     clearTimeout(t);
@@ -1055,7 +1111,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Load PN&R review URLs **before** first draw so halos & links are present
         try {
             await fetchAndApplyReviewUrls();
-        } catch (_) {}
+        } catch (_) {
+        }
 
         await initializeActivationsDisplay();
     } catch (e) {
@@ -1147,12 +1204,13 @@ function queryHasExplicitScope(parsed) {
     const s = (parsed.state || parsed.STATE || parsed.region || parsed.country || parsed.COUNTRY || parsed.ref || parsed.reference || parsed.id);
     if (s) return true;
     if (Array.isArray(parsed.refs) && parsed.refs.length > 0) return true;
+    if (parsed.minDist != null || parsed.maxDist != null) return true;
     // Some parsers return a list of filters; look for STATE:/COUNTRY:/REF:
     const filters = parsed.filters || parsed.terms || [];
     if (Array.isArray(filters)) {
         for (const f of filters) {
             const k = (f && (f.key || f.type || f.name || '')).toString().toUpperCase();
-            if (k === 'STATE' || k === 'COUNTRY' || k === 'REF' || k === 'REFERENCE' || k === 'ID') return true;
+            if (k === 'STATE' || k === 'COUNTRY' || k === 'REF' || k === 'REFERENCE' || k === 'ID' || k === 'MINDIST' || k === 'MAXDIST' || k === 'DIST') return true;
         }
     }
     // A meta flag can force global behavior
@@ -1177,24 +1235,15 @@ function getMarkerColorConfigured(activations, isUserActivated) {
 
 
 // Build Filters UI inside the hamburger menu (thresholdChip fully removed)
-function buildFiltersPanel() {
-    const menu = document.getElementById('menu');
-    if (!menu) return;
+function buildFiltersPanel(container) {
+    const target = container || document.getElementById('filtersPanelContent');
+    if (!target) return;
 
-    // Hide old toggle button if present
     const oldToggle = document.getElementById('toggleActivations');
     if (oldToggle) oldToggle.style.display = 'none';
 
-    // Remove any previously-inserted filters panel or legacy copies
-    const oldPanels = menu.querySelectorAll('.filters-panel');
-    oldPanels.forEach(p => p.parentElement && p.parentElement.remove());
-
-    // Build the minimal panel (no threshold UI)
-    const li = document.createElement('li');
-    li.id = 'filtersPanelContainer';
-    li.innerHTML = `
+    target.innerHTML = `
     <div class="filters-panel">
-      <div class="filters-title">Filters</div>
       <div class="filters-grid">
         <button class="filter-chip" id="chipMyActs"   type="button" aria-pressed="false">My</button>
         <button class="filter-chip" id="chipOnAir"    type="button" aria-pressed="false">Active</button>
@@ -1203,28 +1252,14 @@ function buildFiltersPanel() {
       </div>
     </div>
   `;
-
-    // Insert at top of menu
-    menu.insertBefore(li, menu.firstChild || null);
-
-    // Nothing else to initialize here — threshold UI is retired.
 }
 
 
-function buildModeFilterPanel() {
-    const menu = document.getElementById('menu');
-    if (!menu) return;
+function buildModeFilterPanel(container) {
+    const target = container || document.getElementById('modeFilterPanelContent');
+    if (!target) return;
 
-    // nuke old copy if present
-    const old = document.getElementById('modeFilterPanelContainer');
-    if (old) old.remove();
-
-    // find the Filters panel <li> so we can insert right after it
-    const anchor = document.getElementById('filtersPanelContainer');
-
-    const li = document.createElement('li');
-    li.id = 'modeFilterPanelContainer';
-    li.innerHTML = `
+    target.innerHTML = `
   <div class="mode-filter-panel" role="group" aria-label="Activation mode filters">
     <div class="mode-dots-row">
       <button class="mode-dot dot-new"  data-mode="new"  aria-pressed="${modeFilters.new}">
@@ -1249,13 +1284,8 @@ function buildModeFilterPanel() {
   </div>
 `;
 
-
-    // insert right after Filters panel; if not found, put at top
-    if (anchor?.nextSibling) menu.insertBefore(li, anchor.nextSibling);
-    else menu.insertBefore(li, menu.firstChild || null);
-
     // initialize visual "off" state + interactions
-    li.querySelectorAll('.mode-dot').forEach(btn => {
+    target.querySelectorAll('.mode-dot').forEach(btn => {
         const mode = btn.dataset.mode;
         const isOn = !!modeFilters[mode];
         btn.classList.toggle('off', !isOn);
@@ -1267,10 +1297,8 @@ function buildModeFilterPanel() {
             btn.classList.toggle('off', !next);
             btn.setAttribute('aria-pressed', String(next));
             saveModeFilters();
-            // redraw (uses shouldDisplayByMode)
             if (typeof refreshMarkers === 'function') refreshMarkers();
             else if (typeof redrawMarkersWithFilters === 'function') redrawMarkersWithFilters();
-
         });
     });
 }
@@ -1436,7 +1464,10 @@ async function redrawMarkersWithFilters() {
                     decorateReviewHalo(marker, park);
                 } else if (window.__REVIEW_URLS instanceof Map) {
                     const u = window.__REVIEW_URLS.get(reference);
-                    if (u) { park.reviewURL = u; decorateReviewHalo(marker, park); }
+                    if (u) {
+                        park.reviewURL = u;
+                        decorateReviewHalo(marker, park);
+                    }
                 }
             } else {
                 const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
@@ -1455,7 +1486,10 @@ async function redrawMarkersWithFilters() {
                     decorateReviewHalo(marker, park);
                 } else if (window.__REVIEW_URLS instanceof Map) {
                     const u = window.__REVIEW_URLS.get(reference);
-                    if (u) { park.reviewURL = u; decorateReviewHalo(marker, park); }
+                    if (u) {
+                        park.reviewURL = u;
+                        decorateReviewHalo(marker, park);
+                    }
                 }
             }
 
@@ -1504,7 +1538,7 @@ async function redrawMarkersWithFilters() {
                     // Back-compat: some popup templates may look for different keys
                     if (park.reviewURL && !displayPark.reviewURL) displayPark.reviewURL = park.reviewURL;
                     if (park.reviewURL && !displayPark.reviewUrl) displayPark.reviewUrl = park.reviewURL; // camelCase alt
-                    if (park.reviewURL && !displayPark.pnrUrl)    displayPark.pnrUrl    = park.reviewURL; // legacy key
+                    if (park.reviewURL && !displayPark.pnrUrl) displayPark.pnrUrl = park.reviewURL; // legacy key
                     try {
                         const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
                         const isTrulyNew = RECENT.has(park.reference);
@@ -1538,7 +1572,9 @@ function refreshMarkers() {
     if (!map) return;
 
     // Skip marker redraws while Leaflet is auto-panning a freshly opened popup (mobile tap stability).
-    if (typeof suppressRedrawUntil !== 'undefined' && Date.now() < suppressRedrawUntil) { return; }
+    if (typeof suppressRedrawUntil !== 'undefined' && Date.now() < suppressRedrawUntil) {
+        return;
+    }
 
 
     /** Robustly find a park's marker by reference, searching common layer groups. */
@@ -1560,11 +1596,13 @@ function refreshMarkers() {
             var found = null;
             if (!g) return null;
             if (g.eachLayer) {
-                g.eachLayer(function(layer){
+                g.eachLayer(function (layer) {
                     if (found) return;
                     if (layer && layer instanceof L.Marker) {
                         var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
-                        if (ref === reference) { found = layer; }
+                        if (ref === reference) {
+                            found = layer;
+                        }
                     } else if (layer && layer.eachLayer) {
                         var inner = scanGroup(layer);
                         if (inner) found = inner;
@@ -1574,18 +1612,20 @@ function refreshMarkers() {
             return found;
         }
 
-        for (var i=0;i<groups.length;i++){
+        for (var i = 0; i < groups.length; i++) {
             var m = scanGroup(groups[i]);
             if (m) return m;
         }
 
         // 3) Full map scan as last resort
         var result = null;
-        map.eachLayer(function(layer){
+        map.eachLayer(function (layer) {
             if (result) return;
             if (layer && layer instanceof L.Marker) {
                 var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
-                if (ref === reference) { result = layer; }
+                if (ref === reference) {
+                    result = layer;
+                }
             } else if (layer && layer.eachLayer) {
                 var inner = scanGroup(layer);
                 if (inner) result = inner;
@@ -1607,20 +1647,29 @@ function refreshMarkers() {
                 } else if (typeof marker.openPopup === 'function') {
                     marker.openPopup();
                 }
-            } catch(e){ console.warn("openParkPopupByRef failed to open", e); }
+            } catch (e) {
+                console.warn("openParkPopupByRef failed to open", e);
+            }
             return;
         }
         if (attempts > 0) {
             // If the layer may not exist yet, nudge a refresh, then retry
-            try { if (typeof refreshMarkers === 'function') refreshMarkers(); } catch(e){}
-            setTimeout(function(){ openParkPopupByRef(reference, attempts-1); }, 110);
+            try {
+                if (typeof refreshMarkers === 'function') refreshMarkers();
+            } catch (e) {
+            }
+            setTimeout(function () {
+                openParkPopupByRef(reference, attempts - 1);
+            }, 110);
         } else {
             console.warn("openParkPopupByRef: marker not found for", reference);
         }
     }
 
 // Avoid redraws while a popup is open (prevents immediate close after auto-pan)
-    if (typeof isPopupOpen !== 'undefined' && isPopupOpen) { return; }
+    if (typeof isPopupOpen !== 'undefined' && isPopupOpen) {
+        return;
+    }
     if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
         updateVisibleModeCounts();
     }
@@ -1650,104 +1699,61 @@ function initializeMenu() {
             </label>
             <ul id="menu">
                 <li>
-                    <button id="uploadActivations" title="Download your activations from your POTA.app Stats page, upper right corner, then upload it here.">Upload Activations File</button>
-                    <input type="file" id="fileUpload" accept=".csv, text/csv" style="display:none;" />
+                    <details class="menu-panel" open>
+                        <summary>Search</summary>
+                        <div class="panel-content">
+                            <div id="searchBoxContainer">
+                                <input type="text" id="searchBox" placeholder="Search name, ID, location..." />
+                                <button id="clearSearch" title="Clear Search" aria-label="Clear Search">Clear Search</button>
+                                <button id="goToParkButton" title="Expand search to the full dataset and zoom to a park">Go To Park</button>
+                                <button id="centerOnGeolocation" title="Center the map based on your current location.">Center on My Location</button>
+                            </div>
+                            <details class="menu-subpanel">
+                                <summary>Saved Searches</summary>
+                                <div class="panel-content" id="savedSearchesContainer"></div>
+                            </details>
+                        </div>
+                    </details>
                 </li>
                 <li>
-                    <button id="toggleActivations" class="toggle-button">Show My Activations</button>
-                </li>
-                <li id="searchBoxContainer">
-                    <!-- <label for="searchBox">Search Parks:</label> -->
-                    <input type="text" id="searchBox" placeholder="Search name, ID, location..." />
-                    <br/>
-                    <button id="clearSearch" title="Clear Search" aria-label="Clear Search">Clear Search</button>
+                    <details class="menu-panel">
+                        <summary>Filters</summary>
+                        <div class="panel-content">
+                            <div id="filtersPanelContent"></div>
+                            <div id="modeFilterPanelContent"></div>
+                        </div>
+                    </details>
                 </li>
                 <li>
-                    <button id="centerOnGeolocation" title="Center the map based on your current location.">Center on My Location</button>
+                    <details class="menu-panel">
+                        <summary>Info</summary>
+                        <div class="panel-content">
+                            <button id="mapHelpButton" onclick="window.open('https://pota.review/howto/how-to-use-the-potamap/', '_blank')">How to Use This Map</button>
+                            <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Reviews</button>
+                            <div id="callsignDisplay" style="text-align: center; font-weight: bold; padding: 0.5em; font-size: 0.75em; background: #f0f0f0; margin-top: 0.5em;">
+                                Callsign: <span id="callsignText">please set</span>
+                            </div>
+                            <div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
+                        </div>
+                    </details>
                 </li>
-
-                <li>
-                <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Review</button>
-            </li>
-                <li>
-                <button id="mapHelpButton" onclick="window.open('https://pota.review/howto/how-to-use-the-potamap/', '_blank')">How to Use this Map</button>
-            </li>
-            <!-- Removing slider functionality for now, it doesn't seem useful (also listener))
-<div id="activationSliderContainer">
-    <label for="activationSlider">Maximum Activations to Display:</label>
-    <input
-        type="range"
-        id="activationSlider"
-        min="0"
-        max="100"
-        value="10"
-        data-value="10"
-    />
-</div>
--->
-<li id="callsignDisplay" style="
-    text-align: center;
-    font-weight: bold;
-    padding: 0.5em;
-    font-size: 0.75em;
-    background: #f0f0f0;
-    margin-top: 0.5em;
-">
-    Callsign: <span id="callsignText">please set</span>
-</li>
-
-<li>
-    <div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
-</li>
-
-<li>
-<div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
-</li>
             </ul>
         </div>
     `;
     document.body.appendChild(menu);
 
-    // Add event listeners for the menu options
-    document.getElementById('uploadActivations').addEventListener('click', () => {
-        document.getElementById('fileUpload').click();
-    });
-    document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
-
-    // Add event listeners for the search box
     document.getElementById('searchBox').addEventListener('input', debounce(handleSearchInput, 300));
     document.getElementById('clearSearch').addEventListener('click', clearSearchInput);
-
-    // Add event listener for 'Enter' key in the search box
     document.getElementById('searchBox').addEventListener('keydown', handleSearchEnter);
-
-    //Removing slider functionality for now, it doesn't seem useful
-    // Add event listener for the activation slider
-    //document.getElementById('activationSlider').addEventListener('input', handleSliderChange);
-    // document.getElementById('activationSlider').addEventListener('input', (event) => {
-    //     const slider = event.target;
-    //     const sliderValue = slider.value === "51" ? "All" : slider.value;
-    //     slider.setAttribute('data-value', sliderValue);
-    // });
-    //Listener for Activations button
-    document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
-    try {
-        refreshMarkers({full: true});
-    } catch (e) {
-    }
-
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
-    buildFiltersPanel();
-    buildModeFilterPanel();
+    buildFiltersPanel(document.getElementById('filtersPanelContent'));
+    buildModeFilterPanel(document.getElementById('modeFilterPanelContent'));
     initializeFilterChips && initializeFilterChips();
-    console.log("Hamburger menu initialized."); // Debugging
+    console.log("Hamburger menu initialized.");
 
-    // Add enhanced hamburger menu styles for mobile
     enhanceHamburgerMenuForMobile();
-
     displayVersionInfo();
-
 }
 
 async function displayVersionInfo() {
@@ -1802,7 +1808,7 @@ function enhancePOTAMenuStyles() {
     const style = document.createElement('style');
     style.innerHTML = `
         #hamburgerMenu {
-    position: absolute;
+    position: fixed;
     top: 10px;
     right: 10px; /* Keep it positioned to the right */
     z-index: 1000;
@@ -2038,15 +2044,14 @@ function enhanceHamburgerMenuForMobile() {
     if (!root) return;
 
     const apply = () => {
-        if (window.innerWidth <= 480) {
-            root.classList.add('mobile');
-        } else {
-            root.classList.remove('mobile');
-        }
+        const isTouch = window.matchMedia('(pointer: coarse)').matches;
+        const mobile = isTouch || window.innerWidth <= 480;
+        root.classList.toggle('mobile', mobile);
     };
 
     apply();
     window.addEventListener('resize', apply);
+    window.addEventListener('orientationchange', apply);
 }
 
 /**
@@ -2163,18 +2168,22 @@ async function fetchAndApplyReviewUrls() {
     const tryFetch = async (baseUrl) => {
         let etag = null, lastMod = null, signature = null, prevSig = null;
         try {
-            const head = await fetch(baseUrl, { method: 'HEAD', cache: 'no-store' });
+            const head = await fetch(baseUrl, {method: 'HEAD', cache: 'no-store'});
             if (head.ok) {
                 etag = head.headers.get('etag');
                 lastMod = head.headers.get('last-modified');
                 signature = etag || lastMod || 'no-sig';
-                try { prevSig = localStorage.getItem(SIG_KEY(baseUrl)); } catch { /* ignore */ }
+                try {
+                    prevSig = localStorage.getItem(SIG_KEY(baseUrl));
+                } catch { /* ignore */
+                }
                 // If unchanged and we already have a cache in memory or IDB, skip
                 if (prevSig && signature && prevSig === signature && (window.__REVIEW_URLS instanceof Map) && window.__REVIEW_URLS.size > 0) {
-                    return { changed: false, map: window.__REVIEW_URLS };
+                    return {changed: false, map: window.__REVIEW_URLS};
                 }
             }
-        } catch { /* some CDNs block HEAD; proceed to GET */ }
+        } catch { /* some CDNs block HEAD; proceed to GET */
+        }
 
         // Cache-bust GET
         const v = encodeURIComponent((etag || lastMod || Date.now()).toString());
@@ -2182,7 +2191,7 @@ async function fetchAndApplyReviewUrls() {
 
         // Try JSON first
         try {
-            const res = await fetch(url, { cache: 'no-store' });
+            const res = await fetch(url, {cache: 'no-store'});
             if (!res.ok) return null;
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
             let data = null;
@@ -2204,9 +2213,10 @@ async function fetchAndApplyReviewUrls() {
                             const ref = obj.reference || obj.ref || obj.id;
                             const url = obj.reviewURL || obj.url;
                             if (ref && url) m.set(String(ref).toUpperCase(), String(url));
-                        } catch { /* ignore bad line */ }
+                        } catch { /* ignore bad line */
+                        }
                     });
-                    data = { items: Array.from(m, ([reference, url]) => ({ reference, reviewURL: url })) };
+                    data = {items: Array.from(m, ([reference, url]) => ({reference, reviewURL: url}))};
                 }
             }
             const map = normalizeMap(data);
@@ -2220,7 +2230,7 @@ async function fetchAndApplyReviewUrls() {
                 const store = tx.objectStore('parks');
                 const req = store.getAll();
                 req.onsuccess = () => resolve(req.result || []);
-                req.onerror  = (e) => reject(e.target.error);
+                req.onerror = (e) => reject(e.target.error);
             });
 
             let updates = 0;
@@ -2237,15 +2247,18 @@ async function fetchAndApplyReviewUrls() {
                     updates++;
                 }
                 tx.oncomplete = () => resolve();
-                tx.onerror    = (e) => reject(e.target.error);
+                tx.onerror = (e) => reject(e.target.error);
             });
 
             // Also update in-memory fast cache for immediate rendering
             window.__REVIEW_URLS = map;
-            try { localStorage.setItem(SIG_KEY(baseUrl), (signature || v)); } catch { /* ignore */ }
+            try {
+                localStorage.setItem(SIG_KEY(baseUrl), (signature || v));
+            } catch { /* ignore */
+            }
 
             if (updates > 0) console.log(`[reviews] Applied ${updates} review URL updates from ${baseUrl}.`);
-            return { changed: updates > 0, map };
+            return {changed: updates > 0, map};
         } catch (e) {
             console.warn('[reviews] fetch failed for', baseUrl, e);
             return null;
@@ -2258,8 +2271,6 @@ async function fetchAndApplyReviewUrls() {
     }
     return false; // nothing fetched
 }
-
-
 
 
 /**
@@ -2712,14 +2723,18 @@ function fallbackToDefaultLocation() {
     const lng = -98.5795;
 
     // If you track these globally elsewhere:
-    try { window.userLat = lat; window.userLng = lng; } catch (e) {}
+    try {
+        window.userLat = lat;
+        window.userLng = lng;
+    } catch (e) {
+    }
 
     // Optionally update the user pin if you have this helper
     if (typeof setUserLocationMarker === 'function') {
         setUserLocationMarker(lat, lng);
     }
 
-    map.setView([lat, lng], map.getZoom(), { animate: true, duration: 1.5 });
+    map.setView([lat, lng], map.getZoom(), {animate: true, duration: 1.5});
     console.log("Map centered on default fallback location.");
 }
 
@@ -2727,6 +2742,23 @@ function fallbackToDefaultLocation() {
  * Handles input in the search box and dynamically highlights matching parks within the visible map bounds.
  * @param {Event} event - The input event from the search box.
  */
+/**
+ * Ensure a dedicated non-interactive highlight layer exists below spot markers.
+ * This prevents search results from blocking taps on mobile devices.
+ */
+function ensureSearchHighlightLayer() {
+    if (!window.map) return null;
+    if (!map.getPane('searchHighlightPane')) {
+        const pane = map.createPane('searchHighlightPane');
+        pane.style.zIndex = 450; // below default marker pane (600)
+        pane.style.pointerEvents = 'none';
+    }
+    if (!map.highlightLayer) {
+        map.highlightLayer = L.layerGroup([], { pane: 'searchHighlightPane' }).addTo(map);
+    }
+    return map.highlightLayer;
+}
+
 function handleSearchInput(event) {
     const raw = event.target.value || '';
     const trimmed = raw.trim();
@@ -2740,8 +2772,8 @@ function handleSearchInput(event) {
     const query = normalizeString(raw);
     console.log(`Search query received: "${query}"`);
 
-    if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
-    map.highlightLayer.clearLayers();
+    const highlightLayer = ensureSearchHighlightLayer();
+    highlightLayer.clearLayers();
 
     if (!query) {
         currentSearchResults = [];
@@ -2770,22 +2802,15 @@ function handleSearchInput(event) {
             color: '#000',
             weight: 2,
             opacity: 1,
-            fillOpacity: 0.8
-        }).addTo(map.highlightLayer);
+            fillOpacity: 0.8,
+            // Prevent highlight markers from blocking interaction with underlying spots
+            interactive: false,
+            bubblingMouseEvents: false
+        }).addTo(highlightLayer);
 
-        marker.bindTooltip(`${park.name} (${park.reference})`, {
-            direction: 'top',
-            className: 'custom-tooltip'
-        });
-
-        const showPopup = async (e) => {
-            if (e) L.DomEvent.stop(e);
-            const popupContent = await fetchFullPopupContent(park);
-            marker.bindPopup(popupContent, { autoPan: true, autoPanPadding: [20, 20] });
-            openPopupWithAutoPan(marker);
-        };
-        marker.on('click touchend', showPopup);
-        marker.on('touchend', showPopup);
+        // The highlight is purely visual; the actual spot marker underneath
+        // remains fully interactive. Tooltips/popup handling are therefore
+        // unnecessary on this overlay marker.
     });
 }
 
@@ -2955,8 +2980,8 @@ async function zoomToPark(park) {
             return;
         }
 
-        if (!map.highlightLayer) map.highlightLayer = L.layerGroup().addTo(map);
-        map.highlightLayer.clearLayers();
+        const layer = ensureSearchHighlightLayer();
+        layer.clearLayers();
 
         const highlight = L.circleMarker([latitude, longitude], {
             className: 'goto-park-highlight',
@@ -2966,11 +2991,11 @@ async function zoomToPark(park) {
             weight: 2,
             opacity: 1,
             fillOpacity: 0.8
-        }).addTo(map.highlightLayer);
+        }).addTo(layer);
 
         try {
             const popupContent = await fetchFullPopupContent(park);
-            highlight.bindPopup(popupContent, { autoPan: true, autoPanPadding: [20, 20] });
+            highlight.bindPopup(popupContent, {autoPan: true, autoPanPadding: [20, 20]});
             openPopupWithAutoPan(highlight);
             console.log(`Opened popup for ${park.reference} via temporary highlight.`);
         } catch (e) {
@@ -3306,6 +3331,13 @@ function parseStructuredQuery(raw) {
     return result;
 }
 
+// Alias for compatibility with older code that expects `parsePQL`
+// This keeps existing calls to `parseStructuredQuery` working while
+// ensuring `runPQL` can locate the parser.
+function parsePQL(raw) {
+    return parseStructuredQuery(raw);
+}
+
 function buildNferByRef(parks) {
     // Map<REF, Set<REF>>
     const map = new Map();
@@ -3335,7 +3367,7 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const {bounds} = ctx || {};
 
     // 1) Proximity or in-view constraint
-    const hasDistConstraint = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    const hasDistConstraint = (parsed.minDist != null) || (parsed.maxDist != null);
     const hasStateConstraint = !!parsed.state;
     const hasNferConstraint = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
     const hasCountryConstraint = !!parsed.country;
@@ -3350,8 +3382,8 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (hasDistConstraint) {
             if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
             const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
-            if (parsed.minDist !== null && dMiles < parsed.minDist) return false;
-            if (parsed.maxDist !== null && dMiles > parsed.maxDist) return false;
+            if (parsed.minDist != null && dMiles < parsed.minDist) return false;
+            if (parsed.maxDist != null && dMiles > parsed.maxDist) return false;
             park._distMiles = dMiles;
         }
     } else {
@@ -3512,15 +3544,7 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 }
 
 function fitToMatchesIfGlobalScope(parsed, matched) {
-    const usedGlobalScope =
-        (!!parsed.state) ||
-        (!!parsed.country) ||
-        (!!parsed.callsign) ||
-        (Array.isArray(parsed.refs) && parsed.refs.length > 0) ||
-        (parsed.minDist !== null) || (parsed.maxDist !== null) ||
-        (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0);
-
-    if (!usedGlobalScope || !map || !matched || !matched.length) return;
+    if (!map || !matched || !matched.length) return;
 
     const latlngs = matched.map(p => [p.latitude, p.longitude]);
     const bounds = L.latLngBounds(latlngs);
@@ -3745,34 +3769,42 @@ function updateMapWithFilteredParks(filteredParks) {
 }
 
 // Unified Clear Search
+function __pqlWantsGlobalScope(parsed) {
+    return !!(parsed && (
+        parsed.state ||
+        parsed.country ||
+        parsed.callsign ||
+        (Array.isArray(parsed.refs) && parsed.refs.length) ||
+        parsed.minDist != null || parsed.maxDist != null ||
+        (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length)
+    ));
+}
+
 function clearSearchInput() {
     // 1) Clear pulsing PQL overlay (if any)
-    try {
-        clearPqlFilterDisplay();
-    } catch (e) {
-    }
+    try { clearPqlFilterDisplay(); } catch (e) {}
 
     // 2) Clear legacy highlight layer (non-PQL incremental search)
     if (map && map.highlightLayer) {
         try {
             map.highlightLayer.clearLayers();
-        } catch (e) {
-        }
+            map.removeLayer(map.highlightLayer);
+            const pane = map.getPane('searchHighlightPane');
+            if (pane) pane.remove();
+        } catch (e) {}
+        map.highlightLayer = null;
     }
 
     // 3) Clear the search box
     const searchBox = document.getElementById('searchBox');
     if (searchBox) {
         searchBox.value = '';
-        // If you want to force downstream listeners to react, you can emit input:
-        // searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+        // Force downstream listeners (like handleSearchInput) to react
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     // 4) Drop any cached results from the last search
-    try {
-        currentSearchResults = [];
-    } catch (e) {
-    }
+    try { currentSearchResults = []; } catch (e) {}
 
     // 5) Restore the previous map view (if we saved it before the search)
     if (previousMapState && previousMapState.bounds) {
@@ -3795,6 +3827,82 @@ function clearSearchInput() {
         }
     }
 }
+
+// --- PQL SEARCH: Main runner ---
+// Exposed as window.runPQL for saved searches and Enter key
+// --- PQL SEARCH: Main runner ---
+// Exposed as window.runPQL for saved searches and Enter key
+async function runPQL(raw, ctx = {}) {
+    try {
+        const parsed = parsePQL(raw);
+
+        const bounds = getCurrentMapBounds();
+
+        // Build context for matchers
+        const spotByRef = {};
+        const spotByCall = {};
+        if (Array.isArray(spots)) {
+            for (const s of spots) {
+                if (s && s.reference) {
+                    spotByRef[s.reference] = s;
+                    const call = (s.activator || s.callsign || '').trim().toUpperCase();
+                    if (call) {
+                        if (!spotByCall[call]) spotByCall[call] = [];
+                        spotByCall[call].push(s);
+                    }
+                }
+            }
+        }
+        const userActivatedRefs = (activations || []).map(a => a.reference);
+        const now = Date.now();
+        const nferByRef = buildNferByRef(parks);
+
+        const fullCtx = {
+            bounds,
+            spotByRef,
+            spotByCall,
+            userActivatedRefs,
+            now,
+            userLat,
+            userLng,
+            nferByRef,
+            ...ctx
+        };
+
+        const useGlobal = __pqlWantsGlobalScope(parsed);
+        const candidates = useGlobal ? parks : getParksInBounds(parks);
+
+        const matched = candidates.filter(p => parkMatchesStructuredQuery(p, parsed, fullCtx));
+        currentSearchResults = matched;
+
+        if (!matched.length) {
+            const scopeMsg = useGlobal ? '' : ' in the current view';
+            if (typeof showNoMatchModal === 'function') {
+                showNoMatchModal(`No parks match that query${scopeMsg}.`);
+            } else {
+                alert(`No parks match that query${scopeMsg}.`);
+            }
+            return [];
+        }
+
+        fitToMatchesIfGlobalScope(parsed, matched);
+        updateMapWithFilteredParks(matched);
+
+        // Ensure matched parks are visibly highlighted
+        try {
+            applyPqlFilterDisplay(matched);
+        } catch (e) {
+            console.warn('applyPqlFilterDisplay failed', e);
+        }
+
+        return matched;
+    } catch (e) {
+        console.warn('runPQL failed:', e);
+        return [];
+    }
+}
+
+
 
 
 /**
@@ -5178,91 +5286,61 @@ function refreshMapActivations() {
  * Adds a "Go To Park" button below the search box for global dataset search.
  */
 function addGoToParkButton() {
-    const searchBoxContainer = document.getElementById('searchBoxContainer');
+    const goToParkButton = document.getElementById('goToParkButton');
+    const searchBox = document.getElementById('searchBox');
 
-    if (!searchBoxContainer) {
-        console.error("SearchBoxContainer not found.");
+    if (!goToParkButton || !searchBox) {
+        console.error("Go To Park initialization elements missing.");
         return;
     }
 
-    // Create Go To Park button
-    const goToParkButton = document.createElement('button');
-    goToParkButton.id = 'goToParkButton';
-    goToParkButton.innerText = 'Go To Park';
-    goToParkButton.title = 'Expand search to the full dataset and zoom to a park';
-    goToParkButton.style.marginTop = '10px';
-
-    // Add event listener for Go To Park button
     goToParkButton.addEventListener('click', () => {
         triggerGoToPark();
     });
 
-    // Add Clear Search button if not already present
-    const clearButton = document.getElementById('clearSearch');
-    if (!clearButton) {
-        const clearSearchButton = document.createElement('button');
-        clearSearchButton.id = 'clearSearch';
-        clearSearchButton.innerText = 'Clear Search';
-        clearSearchButton.title = 'Clear Search';
-        clearSearchButton.style.marginTop = '10px';
-
-        clearSearchButton.addEventListener('click', clearSearchInput);
-        searchBoxContainer.appendChild(clearSearchButton);
-        console.log("Clear Search button added.");
-    }
-
-    // Append Go To Park button after the Clear Search button
-    searchBoxContainer.appendChild(goToParkButton);
-    console.log("Go To Park button added.");
-
-    // Bind Enter key to Go To Park functionality
-    const searchBox = document.getElementById('searchBox');
-    if (searchBox) {
-        searchBox.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                const raw = searchBox.value.trim();
-                if (raw.startsWith('?')) {
-                    // Let handleSearchEnter manage PQL Enter
-                    return;
-                }
-                event.preventDefault();
-                triggerGoToPark(true);
+    searchBox.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            const raw = searchBox.value.trim();
+            if (raw.startsWith('?')) {
+                return; // Let PQL handler manage
             }
-        });
-        console.log("Enter key bound to Go To Park functionality (non-PQL only).");
-    }
+            event.preventDefault();
+            triggerGoToPark(true);
+        }
+    });
 }
 
 /**
  * Triggers the Go To Park functionality by searching and zooming to a park.
  */
-function triggerGoToPark() {whenMapReady(function(){
+function triggerGoToPark() {
+    whenMapReady(function () {
 
-    const searchBox = document.getElementById('searchBox');
+        const searchBox = document.getElementById('searchBox');
 
-    if (!searchBox || !searchBox.value.trim()) {
-        alert('Please enter a search term.');
-        return;
-    }
+        if (!searchBox || !searchBox.value.trim()) {
+            alert('Please enter a search term.');
+            return;
+        }
 
-    if (searchBox.value.trim().startsWith('?')) {
-        // PQL Enter is handled by handleSearchEnter; ignore here to avoid duplicate alerts.
-        return;
-    }
+        if (searchBox.value.trim().startsWith('?')) {
+            // PQL Enter is handled by handleSearchEnter; ignore here to avoid duplicate alerts.
+            return;
+        }
 
-    const query = normalizeString(searchBox.value);
-    const matchingPark = parks.find(park =>
-        normalizeString(park.name).includes(query) ||
-        normalizeString(park.reference).includes(query)
-    );
+        const query = normalizeString(searchBox.value);
+        const matchingPark = parks.find(park =>
+            normalizeString(park.name).includes(query) ||
+            normalizeString(park.reference).includes(query)
+        );
 
-    if (matchingPark) {
-        zoomToPark(matchingPark);
-    } else {
-        alert('No matching park.');
-    }
+        if (matchingPark) {
+            zoomToPark(matchingPark);
+        } else {
+            alert('No matching park.');
+        }
 
-});
+    });
 }
 
 
@@ -5358,3 +5436,311 @@ function initializeFilterChips() {
         refreshMarkers();
     });
 }
+
+
+/* =====================================================================
+ * POTAmap — Saved PQL Searches (MVP)
+ * Adds a collapsible "Saved Searches" panel to the hamburger menu (#menu)
+ * and supports saving/running/renaming/deleting/shareable-URL for PQL.
+ * ===================================================================== */
+(() => {
+    'use strict';
+    if (window.__POTAMapSavedSearchesInit) return;
+    window.__POTAMapSavedSearchesInit = true;
+
+    const POTA_SAVED_PQL_KEY = 'pota.savedSearches.v1'; // [{id, name, pql, view?}]
+
+    function normalizePql(pql) {
+        const q = (pql || '').trim();
+        return q.startsWith('?') ? q : ('?' + q);
+    }
+
+    function getSearchBoxEl() {
+        return document.getElementById('searchBox') || document.getElementById('pqlInput');
+    }
+
+    function getCurrentPqlFromUI() {
+        const el = getSearchBoxEl();
+        const raw = (el?.value ?? window.__pqlCurrent ?? '').trim();
+        return normalizePql(raw);
+    }
+
+    function loadSavedPql() {
+        try {
+            return JSON.parse(localStorage.getItem(POTA_SAVED_PQL_KEY) || '[]');
+        } catch {
+            return [];
+        }
+    }
+
+    function persistSavedPql(list) {
+        localStorage.setItem(POTA_SAVED_PQL_KEY, JSON.stringify(list));
+    }
+
+    function saveCurrentSearch({name, pql, includeView = true}) {
+        const list = loadSavedPql();
+        const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+        const entry = {id, name: (name || '').trim() || '(unnamed)', pql: normalizePql(pql)};
+
+        if (includeView && typeof window.map !== 'undefined' && window.map) {
+            try {
+                const c = map.getCenter();
+                const z = map.getZoom();
+                entry.view = {z, lat: +c.lat.toFixed(6), lng: +c.lng.toFixed(6)};
+            } catch {
+            }
+        }
+
+        // De-dupe identical {pql,view}
+        const key = JSON.stringify({p: entry.pql, v: entry.view || null});
+        if (list.some(e => JSON.stringify({p: e.pql, v: e.view || null}) === key)) {
+            return null;
+        }
+
+        list.unshift(entry);
+        if (list.length > 50) list.pop();
+        persistSavedPql(list);
+        return entry;
+    }
+
+    function deleteSavedSearch(id) {
+        persistSavedPql(loadSavedPql().filter(e => e.id !== id));
+    }
+
+    function renameSavedSearch(id, nextName) {
+        const list = loadSavedPql();
+        const i = list.findIndex(e => e.id === id);
+        if (i >= 0) {
+            list[i].name = (nextName || '').trim() || '(unnamed)';
+            persistSavedPql(list);
+        }
+    }
+
+    function buildShareUrl(entry) {
+        const base = `${location.origin}${location.pathname}`;
+        const params = new URLSearchParams();
+        params.set('pql', entry.pql);
+        if (entry.view) {
+            params.set('z', String(entry.view.z));
+            params.set('lat', String(entry.view.lat));
+            params.set('lng', String(entry.view.lng));
+        }
+        return `${base}?${params.toString()}`;
+    }
+
+    async function runSavedEntry(entry) {
+        if (entry.view && typeof window.map !== 'undefined' && window.map) {
+            try {
+                map.setView([entry.view.lat, entry.view.lng], entry.view.z, {animate: false});
+            } catch {
+            }
+        }
+        const box = getSearchBoxEl();
+        if (box) {
+            box.value = entry.pql;
+            box.focus();
+        }
+        window.__pqlCurrent = entry.pql;
+
+        try {
+            if (typeof runPQL === 'function') {
+                await runPQL(entry.pql);
+                return;
+            }
+            if (typeof handleSearchEnter === 'function') {
+                handleSearchEnter({key: 'Enter', preventDefault: () => {}});
+                return;
+            }
+            if (typeof redrawMarkersWithFilters === 'function') {
+                await redrawMarkersWithFilters();
+                return;
+            }
+        } catch (e) {
+            console.warn('runSavedEntry runPQL failed', e);
+        }
+
+        try {
+            const evt = new KeyboardEvent('keydown', {key: 'Enter'});
+            box?.dispatchEvent(evt);
+        } catch (e) {
+            console.warn('Enter dispatch failed', e);
+        }
+    }
+
+    // Expose globally for external callers and saved-search buttons
+    window.runSavedEntry = runSavedEntry;
+
+    function renderSavedList() {
+        const ul = document.getElementById('ssp-list');
+        if (!ul) return;
+        const items = loadSavedPql();
+        ul.innerHTML = '';
+        if (items.length === 0) {
+            ul.innerHTML = `<li class="ssp-empty"><em>No saved searches yet.</em></li>`;
+            return;
+        }
+        for (const e of items) {
+            const li = document.createElement('li');
+            li.className = 'ssp-item';
+
+            // Editable name (flush-left)
+            const name = document.createElement('span');
+            name.className = 'ssp-name';
+            name.textContent = e.name || e.pql;
+            name.title = e.pql;
+            name.contentEditable = 'true';
+            name.addEventListener('blur', () => renameSavedSearch(e.id, name.textContent || ''));
+            name.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Enter') {
+                    ev.preventDefault();
+                    name.blur();
+                }
+            });
+
+            // Actions container (flush-right)
+            const actions = document.createElement('div');
+            actions.className = 'ssp-actions';
+
+            // Helper to make an icon button
+            const makeIconBtn = (title, svg) => {
+                const b = document.createElement('button');
+                b.className = 'ssp-iconbtn';
+                b.type = 'button';
+                b.title = title;
+                b.setAttribute('aria-label', title);
+                b.innerHTML = svg;
+                return b;
+            };
+
+            // Play button (run saved search)
+            const runBtn = makeIconBtn('Run saved search',
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"></path></svg>'
+            );
+            runBtn.classList.add('ssp-playbtn');
+            runBtn.addEventListener('click', () => window.runSavedEntry(e));
+
+            // Share button (copy URL) — temporarily disabled
+            // const shareBtn = makeIconBtn('Copy shareable link',
+            //     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 9V5l7 7-7 7v-4H6V9h8z" fill="currentColor"></path></svg>'
+            // );
+            // shareBtn.addEventListener('click', async () => {
+            //     const url = buildShareUrl(e);
+            //     try {
+            //         await navigator.clipboard.writeText(url);
+            //     } catch {
+            //     }
+            //     console.log('Copied:', url);
+            // });
+
+            // Delete button
+            const delBtn = makeIconBtn('Delete saved search',
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z" fill="currentColor"></path></svg>'
+            );
+            delBtn.addEventListener('click', () => {
+                deleteSavedSearch(e.id);
+                renderSavedList();
+            });
+
+            // actions.append(runBtn, shareBtn, delBtn);
+            actions.append(runBtn, delBtn);
+            li.append(name, actions);
+            ul.appendChild(li);
+        }
+    }
+
+    function buildSavedSearchesPanel() {
+        const container = document.getElementById('savedSearchesContainer');
+        if (!container) return;
+
+        container.innerHTML = `
+      <div class="saved-searches-panel">
+        <div class="ssp-row">
+          <input id="ssp-name" class="ssp-input" placeholder="Name this search…" />
+          <button id="ssp-save" class="ssp-btn" type="button">Save Current</button>
+        </div>
+        <ul id="ssp-list" class="ssp-list"></ul>
+      </div>
+    `;
+
+        container.querySelector('#ssp-save')?.addEventListener('click', () => {
+            const name = container.querySelector('#ssp-name')?.value || '';
+            const includeEl = container.querySelector('#ssp-include-view');
+            const includeView = includeEl ? !!includeEl.checked : true;
+            const pql = getCurrentPqlFromUI();
+            const saved = saveCurrentSearch({name, pql, includeView});
+            if (saved) {
+                const nameEl = container.querySelector('#ssp-name');
+                if (nameEl) nameEl.value = '';
+                renderSavedList();
+            } else {
+                console.log('Saved search already exists (same PQL & view).');
+            }
+        });
+
+        renderSavedList();
+    }
+
+    function applyIncomingPqlFromUrl() {
+        try {
+            const url = new URL(location.href);
+            const pqlParam = url.searchParams.get('pql');
+            const z = url.searchParams.get('z');
+            const lat = url.searchParams.get('lat');
+            const lng = url.searchParams.get('lng');
+
+            if (lat && lng && z && typeof window.map !== 'undefined' && window.map) {
+                try {
+                    map.setView([parseFloat(lat), parseFloat(lng)], parseInt(z, 10), {animate: false});
+                } catch {
+                }
+            }
+            if (!pqlParam) return;
+
+            const pql = normalizePql(pqlParam);
+            const box = getSearchBoxEl();
+            if (box) box.value = pql;
+            window.__pqlCurrent = pql;
+
+            if (typeof window.runPQL === 'function') {
+                window.runPQL(pql);
+            } else if (typeof window.handleSearchEnter === 'function') {
+                window.handleSearchEnter({
+                    key: 'Enter', preventDefault: () => {
+                    }
+                });
+            } else {
+                const evt = new KeyboardEvent('keydown', {key: 'Enter'});
+                box?.dispatchEvent(evt);
+            }
+        } catch (e) {
+            console.warn('applyIncomingPqlFromUrl: failed', e);
+        }
+    }
+
+    function ensurePanelWhenMenuExists() {
+        const attempt = () => {
+            if (document.getElementById('savedSearchesContainer')) {
+                buildSavedSearchesPanel();
+                return true;
+            }
+            return false;
+        };
+        if (attempt()) return;
+        const obs = new MutationObserver(() => {
+            if (attempt()) {
+                obs.disconnect();
+            }
+        });
+        obs.observe(document.documentElement, {childList: true, subtree: true});
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        ensurePanelWhenMenuExists();
+        if (typeof window.whenMapReady === 'function') {
+            window.whenMapReady(() => applyIncomingPqlFromUrl());
+        } else {
+            applyIncomingPqlFromUrl();
+        }
+    });
+})();
+
