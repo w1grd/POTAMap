@@ -1241,24 +1241,15 @@ function getMarkerColorConfigured(activations, isUserActivated) {
 
 
 // Build Filters UI inside the hamburger menu (thresholdChip fully removed)
-function buildFiltersPanel() {
-    const menu = document.getElementById('menu');
-    if (!menu) return;
+function buildFiltersPanel(container) {
+    const target = container || document.getElementById('filtersPanelContent');
+    if (!target) return;
 
-    // Hide old toggle button if present
     const oldToggle = document.getElementById('toggleActivations');
     if (oldToggle) oldToggle.style.display = 'none';
 
-    // Remove any previously-inserted filters panel or legacy copies
-    const oldPanels = menu.querySelectorAll('.filters-panel');
-    oldPanels.forEach(p => p.parentElement && p.parentElement.remove());
-
-    // Build the minimal panel (no threshold UI)
-    const li = document.createElement('li');
-    li.id = 'filtersPanelContainer';
-    li.innerHTML = `
+    target.innerHTML = `
     <div class="filters-panel">
-      <div class="filters-title">Filters</div>
       <div class="filters-grid">
         <button class="filter-chip" id="chipMyActs"   type="button" aria-pressed="false">My</button>
         <button class="filter-chip" id="chipOnAir"    type="button" aria-pressed="false">Active</button>
@@ -1267,28 +1258,14 @@ function buildFiltersPanel() {
       </div>
     </div>
   `;
-
-    // Insert at top of menu
-    menu.insertBefore(li, menu.firstChild || null);
-
-    // Nothing else to initialize here — threshold UI is retired.
 }
 
 
-function buildModeFilterPanel() {
-    const menu = document.getElementById('menu');
-    if (!menu) return;
+function buildModeFilterPanel(container) {
+    const target = container || document.getElementById('modeFilterPanelContent');
+    if (!target) return;
 
-    // nuke old copy if present
-    const old = document.getElementById('modeFilterPanelContainer');
-    if (old) old.remove();
-
-    // find the Filters panel <li> so we can insert right after it
-    const anchor = document.getElementById('filtersPanelContainer');
-
-    const li = document.createElement('li');
-    li.id = 'modeFilterPanelContainer';
-    li.innerHTML = `
+    target.innerHTML = `
   <div class="mode-filter-panel" role="group" aria-label="Activation mode filters">
     <div class="mode-dots-row">
       <button class="mode-dot dot-new"  data-mode="new"  aria-pressed="${modeFilters.new}">
@@ -1313,13 +1290,8 @@ function buildModeFilterPanel() {
   </div>
 `;
 
-
-    // insert right after Filters panel; if not found, put at top
-    if (anchor?.nextSibling) menu.insertBefore(li, anchor.nextSibling);
-    else menu.insertBefore(li, menu.firstChild || null);
-
     // initialize visual "off" state + interactions
-    li.querySelectorAll('.mode-dot').forEach(btn => {
+    target.querySelectorAll('.mode-dot').forEach(btn => {
         const mode = btn.dataset.mode;
         const isOn = !!modeFilters[mode];
         btn.classList.toggle('off', !isOn);
@@ -1331,10 +1303,8 @@ function buildModeFilterPanel() {
             btn.classList.toggle('off', !next);
             btn.setAttribute('aria-pressed', String(next));
             saveModeFilters();
-            // redraw (uses shouldDisplayByMode)
             if (typeof refreshMarkers === 'function') refreshMarkers();
             else if (typeof redrawMarkersWithFilters === 'function') redrawMarkersWithFilters();
-
         });
     });
 }
@@ -1735,104 +1705,61 @@ function initializeMenu() {
             </label>
             <ul id="menu">
                 <li>
-                    <button id="uploadActivations" title="Download your activations from your POTA.app Stats page, upper right corner, then upload it here.">Upload Activations File</button>
-                    <input type="file" id="fileUpload" accept=".csv, text/csv" style="display:none;" />
+                    <details class="menu-panel" open>
+                        <summary>Search</summary>
+                        <div class="panel-content">
+                            <div id="searchBoxContainer">
+                                <input type="text" id="searchBox" placeholder="Search name, ID, location..." />
+                                <button id="clearSearch" title="Clear Search" aria-label="Clear Search">Clear Search</button>
+                                <button id="goToParkButton" title="Expand search to the full dataset and zoom to a park">Go To Park</button>
+                                <button id="centerOnGeolocation" title="Center the map based on your current location.">Center on My Location</button>
+                            </div>
+                            <details class="menu-subpanel">
+                                <summary>Saved Searches</summary>
+                                <div class="panel-content" id="savedSearchesContainer"></div>
+                            </details>
+                        </div>
+                    </details>
                 </li>
                 <li>
-                    <button id="toggleActivations" class="toggle-button">Show My Activations</button>
-                </li>
-                <li id="searchBoxContainer">
-                    <!-- <label for="searchBox">Search Parks:</label> -->
-                    <input type="text" id="searchBox" placeholder="Search name, ID, location..." />
-                    <br/>
-                    <button id="clearSearch" title="Clear Search" aria-label="Clear Search">Clear Search</button>
+                    <details class="menu-panel">
+                        <summary>Filters</summary>
+                        <div class="panel-content">
+                            <div id="filtersPanelContent"></div>
+                            <div id="modeFilterPanelContent"></div>
+                        </div>
+                    </details>
                 </li>
                 <li>
-                    <button id="centerOnGeolocation" title="Center the map based on your current location.">Center on My Location</button>
+                    <details class="menu-panel">
+                        <summary>Info</summary>
+                        <div class="panel-content">
+                            <button id="mapHelpButton" onclick="window.open('https://pota.review/howto/how-to-use-the-potamap/', '_blank')">How to Use This Map</button>
+                            <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Reviews</button>
+                            <div id="callsignDisplay" style="text-align: center; font-weight: bold; padding: 0.5em; font-size: 0.75em; background: #f0f0f0; margin-top: 0.5em;">
+                                Callsign: <span id="callsignText">please set</span>
+                            </div>
+                            <div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
+                        </div>
+                    </details>
                 </li>
-
-                <li>
-                <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Review</button>
-            </li>
-                <li>
-                <button id="mapHelpButton" onclick="window.open('https://pota.review/howto/how-to-use-the-potamap/', '_blank')">How to Use this Map</button>
-            </li>
-            <!-- Removing slider functionality for now, it doesn't seem useful (also listener))
-<div id="activationSliderContainer">
-    <label for="activationSlider">Maximum Activations to Display:</label>
-    <input
-        type="range"
-        id="activationSlider"
-        min="0"
-        max="100"
-        value="10"
-        data-value="10"
-    />
-</div>
--->
-<li id="callsignDisplay" style="
-    text-align: center;
-    font-weight: bold;
-    padding: 0.5em;
-    font-size: 0.75em;
-    background: #f0f0f0;
-    margin-top: 0.5em;
-">
-    Callsign: <span id="callsignText">please set</span>
-</li>
-
-<li>
-    <div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
-</li>
-
-<li>
-<div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
-</li>
             </ul>
         </div>
     `;
     document.body.appendChild(menu);
 
-    // Add event listeners for the menu options
-    document.getElementById('uploadActivations').addEventListener('click', () => {
-        document.getElementById('fileUpload').click();
-    });
-    document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
-
-    // Add event listeners for the search box
     document.getElementById('searchBox').addEventListener('input', debounce(handleSearchInput, 300));
     document.getElementById('clearSearch').addEventListener('click', clearSearchInput);
-
-    // Add event listener for 'Enter' key in the search box
     document.getElementById('searchBox').addEventListener('keydown', handleSearchEnter);
-
-    //Removing slider functionality for now, it doesn't seem useful
-    // Add event listener for the activation slider
-    //document.getElementById('activationSlider').addEventListener('input', handleSliderChange);
-    // document.getElementById('activationSlider').addEventListener('input', (event) => {
-    //     const slider = event.target;
-    //     const sliderValue = slider.value === "51" ? "All" : slider.value;
-    //     slider.setAttribute('data-value', sliderValue);
-    // });
-    //Listener for Activations button
-    document.getElementById('toggleActivations').addEventListener('click', toggleActivations);
-    try {
-        refreshMarkers({full: true});
-    } catch (e) {
-    }
-
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
 
-    buildFiltersPanel();
-    buildModeFilterPanel();
+    buildFiltersPanel(document.getElementById('filtersPanelContent'));
+    buildModeFilterPanel(document.getElementById('modeFilterPanelContent'));
     initializeFilterChips && initializeFilterChips();
-    console.log("Hamburger menu initialized."); // Debugging
+    console.log("Hamburger menu initialized.");
 
-    // Add enhanced hamburger menu styles for mobile
     enhanceHamburgerMenuForMobile();
-
     displayVersionInfo();
-
 }
 
 async function displayVersionInfo() {
@@ -5350,59 +5277,28 @@ function refreshMapActivations() {
  * Adds a "Go To Park" button below the search box for global dataset search.
  */
 function addGoToParkButton() {
-    const searchBoxContainer = document.getElementById('searchBoxContainer');
+    const goToParkButton = document.getElementById('goToParkButton');
+    const searchBox = document.getElementById('searchBox');
 
-    if (!searchBoxContainer) {
-        console.error("SearchBoxContainer not found.");
+    if (!goToParkButton || !searchBox) {
+        console.error("Go To Park initialization elements missing.");
         return;
     }
 
-    // Create Go To Park button
-    const goToParkButton = document.createElement('button');
-    goToParkButton.id = 'goToParkButton';
-    goToParkButton.innerText = 'Go To Park';
-    goToParkButton.title = 'Expand search to the full dataset and zoom to a park';
-    goToParkButton.style.marginTop = '10px';
-
-    // Add event listener for Go To Park button
     goToParkButton.addEventListener('click', () => {
         triggerGoToPark();
     });
 
-    // Add Clear Search button if not already present
-    const clearButton = document.getElementById('clearSearch');
-    if (!clearButton) {
-        const clearSearchButton = document.createElement('button');
-        clearSearchButton.id = 'clearSearch';
-        clearSearchButton.innerText = 'Clear Search';
-        clearSearchButton.title = 'Clear Search';
-        clearSearchButton.style.marginTop = '10px';
-
-        clearSearchButton.addEventListener('click', clearSearchInput);
-        searchBoxContainer.appendChild(clearSearchButton);
-        console.log("Clear Search button added.");
-    }
-
-    // Append Go To Park button after the Clear Search button
-    searchBoxContainer.appendChild(goToParkButton);
-    console.log("Go To Park button added.");
-
-    // Bind Enter key to Go To Park functionality
-    const searchBox = document.getElementById('searchBox');
-    if (searchBox) {
-        searchBox.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                const raw = searchBox.value.trim();
-                if (raw.startsWith('?')) {
-                    // Let handleSearchEnter manage PQL Enter
-                    return;
-                }
-                event.preventDefault();
-                triggerGoToPark(true);
+    searchBox.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            const raw = searchBox.value.trim();
+            if (raw.startsWith('?')) {
+                return; // Let PQL handler manage
             }
-        });
-        console.log("Enter key bound to Go To Park functionality (non-PQL only).");
-    }
+            event.preventDefault();
+            triggerGoToPark(true);
+        }
+    });
 }
 
 /**
@@ -5743,44 +5639,27 @@ function initializeFilterChips() {
     }
 
     function buildSavedSearchesPanel() {
-        const menu = document.getElementById('menu');
-        if (!menu) return;
+        const container = document.getElementById('savedSearchesContainer');
+        if (!container) return;
 
-        document.getElementById('savedSearchesPanelContainer')?.remove();
-
-        const li = document.createElement('li');
-        li.id = 'savedSearchesPanelContainer';
-        li.innerHTML = `
+        container.innerHTML = `
       <div class="saved-searches-panel">
-        <div class="ssp-title">Saved Searches</div>
         <div class="ssp-row">
           <input id="ssp-name" class="ssp-input" placeholder="Name this search…" />
-<!--
-          <label class="ssp-check">
-            <input type="checkbox" id="ssp-include-view" checked />
-            Include map view
-          </label>
-          -->
-          
           <button id="ssp-save" class="ssp-btn">Save Current</button>
-        </div>         
+        </div>
         <ul id="ssp-list" class="ssp-list"></ul>
       </div>
     `;
 
-        // Insert near the top, just after Filters panel if present
-        const filtersPanel = document.getElementById('filtersPanelContainer') || document.getElementById('modeFilterPanelContainer');
-        if (filtersPanel?.nextSibling) menu.insertBefore(li, filtersPanel.nextSibling);
-        else menu.appendChild(li);
-
-        li.querySelector('#ssp-save')?.addEventListener('click', () => {
-            const name = li.querySelector('#ssp-name')?.value || '';
-            const includeEl = li.querySelector('#ssp-include-view');
-            const includeView = includeEl ? !!includeEl.checked : true; // default to true when control is absent
+        container.querySelector('#ssp-save')?.addEventListener('click', () => {
+            const name = container.querySelector('#ssp-name')?.value || '';
+            const includeEl = container.querySelector('#ssp-include-view');
+            const includeView = includeEl ? !!includeEl.checked : true;
             const pql = getCurrentPqlFromUI();
             const saved = saveCurrentSearch({name, pql, includeView});
             if (saved) {
-                const nameEl = li.querySelector('#ssp-name');
+                const nameEl = container.querySelector('#ssp-name');
                 if (nameEl) nameEl.value = '';
                 renderSavedList();
             } else {
@@ -5830,7 +5709,7 @@ function initializeFilterChips() {
 
     function ensurePanelWhenMenuExists() {
         const attempt = () => {
-            if (document.getElementById('menu')) {
+            if (document.getElementById('savedSearchesContainer')) {
                 buildSavedSearchesPanel();
                 return true;
             }
