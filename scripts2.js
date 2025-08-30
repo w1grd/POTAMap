@@ -5641,7 +5641,7 @@ function initializeFilterChips() {
       <div class="saved-searches-panel">
         <div class="ssp-row">
           <input id="ssp-name" class="ssp-input" placeholder="Name this search…" />
-          <button id="ssp-save" class="ssp-btn">Save Current</button>
+          <button id="ssp-save" class="ssp-btn" type="button">Save Current</button>
         </div>
         <ul id="ssp-list" class="ssp-list"></ul>
       </div>
