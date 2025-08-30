@@ -930,17 +930,9 @@ async function healParksIfCorrupted() {
 }
 
 function updateVisibleModeCounts() {
-    if (!map || !parks || parks.length === 0) return;
-    if (!MODE_CHANGES_AVAILABLE || !(MODE_CHANGE_REFS instanceof Set)) return; // nothing to do
-    const b = map.getBounds();
-    const refs = [];
-    for (const park of parks) {
-        const {latitude, longitude, reference} = park || {};
-        if (latitude == null || longitude == null || !reference) continue;
-        if (!MODE_CHANGE_REFS.has(reference)) continue; // Only compute where changes exist
-        if (b.contains([latitude, longitude])) refs.push(reference);
+    if (typeof window.updateVisibleModeCountsInner === 'function') {
+        return window.updateVisibleModeCountsInner();
     }
-    enqueueVisibleReferences(refs);
 }
 
 function modeCountsForParkRef(reference) {
