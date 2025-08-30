@@ -3429,7 +3429,7 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
     const {bounds} = ctx || {};
 
     // 1) Proximity or in-view constraint
-    const hasDistConstraint = (parsed.minDist !== null) || (parsed.maxDist !== null);
+    const hasDistConstraint = (parsed.minDist != null) || (parsed.maxDist != null);
     const hasStateConstraint = !!parsed.state;
     const hasNferConstraint = Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length > 0;
     const hasCountryConstraint = !!parsed.country;
@@ -3444,8 +3444,8 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         if (hasDistConstraint) {
             if (typeof ctx?.userLat !== 'number' || typeof ctx?.userLng !== 'number') return false;
             const dMiles = haversineMiles(ctx.userLat, ctx.userLng, park.latitude, park.longitude);
-            if (parsed.minDist !== null && dMiles < parsed.minDist) return false;
-            if (parsed.maxDist !== null && dMiles > parsed.maxDist) return false;
+            if (parsed.minDist != null && dMiles < parsed.minDist) return false;
+            if (parsed.maxDist != null && dMiles > parsed.maxDist) return false;
             park._distMiles = dMiles;
         }
     } else {
@@ -3837,7 +3837,7 @@ function __pqlWantsGlobalScope(parsed) {
         parsed.country ||
         parsed.callsign ||
         (Array.isArray(parsed.refs) && parsed.refs.length) ||
-        parsed.minDist !== null || parsed.maxDist !== null ||
+        parsed.minDist != null || parsed.maxDist != null ||
         (Array.isArray(parsed.nferWithRefs) && parsed.nferWithRefs.length)
     ));
 }
@@ -3890,17 +3890,47 @@ function clearSearchInput() {
 // Exposed as window.runPQL for saved searches and Enter key
 async function runPQL(raw, ctx = {}) {
     try {
-        // 1) Parse PQL
         const parsed = parsePQL(raw);
 
-        // 2) Choose candidate set (global vs in-view)
+        const bounds = getCurrentMapBounds();
+
+        // Build context for matchers
+        const spotByRef = {};
+        const spotByCall = {};
+        if (Array.isArray(spots)) {
+            for (const s of spots) {
+                if (s && s.reference) {
+                    spotByRef[s.reference] = s;
+                    const call = (s.activator || s.callsign || '').trim().toUpperCase();
+                    if (call) {
+                        if (!spotByCall[call]) spotByCall[call] = [];
+                        spotByCall[call].push(s);
+                    }
+                }
+            }
+        }
+        const userActivatedRefs = (activations || []).map(a => a.reference);
+        const now = Date.now();
+        const nferByRef = buildNferByRef(parks);
+
+        const fullCtx = {
+            bounds,
+            spotByRef,
+            spotByCall,
+            userActivatedRefs,
+            now,
+            userLat,
+            userLng,
+            nferByRef,
+            ...ctx
+        };
+
         const useGlobal = __pqlWantsGlobalScope(parsed);
         const candidates = useGlobal ? parks : getParksInBounds(parks);
 
-        // 3) Filter
-        const matched = candidates.filter(p => parkMatchesParsedPQL(p, parsed, ctx));
+        const matched = candidates.filter(p => parkMatchesStructuredQuery(p, parsed, fullCtx));
+        currentSearchResults = matched;
 
-        // 4) No matches (scope-aware text)
         if (!matched.length) {
             const scopeMsg = useGlobal ? '' : ' in the current view';
             if (typeof showNoMatchModal === 'function') {
@@ -3911,8 +3941,7 @@ async function runPQL(raw, ctx = {}) {
             return [];
         }
 
-        // 5) Center/fit on results + render only the matches
-        try { fitToMatchesIfGlobalScope(parsed, matched); } catch {}
+        fitToMatchesIfGlobalScope(parsed, matched);
         updateMapWithFilteredParks(matched);
 
         return matched;
