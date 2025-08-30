@@ -261,7 +261,7 @@ function openPopupWithAutoPan(marker) {
 function ensureToastCss() {
     if (document.getElementById('pql-toast-css')) return;
     const css = `
-  .toast-container{position:fixed;right:14px;top:14px;z-index:10000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  .toast-container{position:fixed;right:14px;bottom:14px;z-index:10000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
   .toast{min-width:260px;max-width:360px;background:rgba(24,24,24,.92);color:#fff;border-radius:10px;padding:10px 12px;box-shadow:0 8px 20px rgba(0,0,0,.25);display:flex;align-items:flex-start;gap:10px;font:14px/1.35 system-ui,Segoe UI,Roboto,Helvetica,Arial}
   .toast .icon{flex:0 0 auto;margin-top:1px}
   .toast .msg{flex:1 1 auto;white-space:pre-wrap}
@@ -5602,18 +5602,18 @@ function initializeFilterChips() {
             runBtn.classList.add('ssp-playbtn');
             runBtn.addEventListener('click', () => window.runSavedEntry(e));
 
-            // Share button (copy URL)
-            const shareBtn = makeIconBtn('Copy shareable link',
-                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 9V5l7 7-7 7v-4H6V9h8z" fill="currentColor"></path></svg>'
-            );
-            shareBtn.addEventListener('click', async () => {
-                const url = buildShareUrl(e);
-                try {
-                    await navigator.clipboard.writeText(url);
-                } catch {
-                }
-                console.log('Copied:', url);
-            });
+            // Share button (copy URL) — temporarily disabled
+            // const shareBtn = makeIconBtn('Copy shareable link',
+            //     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 9V5l7 7-7 7v-4H6V9h8z" fill="currentColor"></path></svg>'
+            // );
+            // shareBtn.addEventListener('click', async () => {
+            //     const url = buildShareUrl(e);
+            //     try {
+            //         await navigator.clipboard.writeText(url);
+            //     } catch {
+            //     }
+            //     console.log('Copied:', url);
+            // });
 
             // Delete button
             const delBtn = makeIconBtn('Delete saved search',
@@ -5624,7 +5624,8 @@ function initializeFilterChips() {
                 renderSavedList();
             });
 
-            actions.append(runBtn, shareBtn, delBtn);
+            // actions.append(runBtn, shareBtn, delBtn);
+            actions.append(runBtn, delBtn);
             li.append(name, actions);
             ul.appendChild(li);
         }
