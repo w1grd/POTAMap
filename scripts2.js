@@ -5637,7 +5637,7 @@ function initializeFilterChips() {
                 return;
             }
         } catch (e) {
-            console.warn('runSavedEntry direct call failed, falling back to Enter-dispatch', e);
+            console.warn('runSavedEntry runPQL failed', e);
         }
 
         try {
