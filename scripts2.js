@@ -254,9 +254,10 @@ let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
 function openPopupWithAutoPan(marker) {
     if (!map || !marker) return;
 
-    // Refresh markers first so newly visible areas aren't empty after the map pans.
+    // After Leaflet auto-pans for the popup, refresh markers so newly revealed
+    // areas populate with spots.
     if (typeof refreshMarkers === 'function') {
-        refreshMarkers();
+        map.once('moveend', () => refreshMarkers());
     }
 
     __skipNextMarkerRefresh = true;
