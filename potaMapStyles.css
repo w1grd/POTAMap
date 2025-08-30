@@ -588,6 +588,7 @@
     border-radius:6px;
     cursor:pointer;
     color:#1f4d2f;
+    user-select:none;
 }
 .ssp-actions button{ width:auto !important; }  /* belt & suspenders */
 .ssp-iconbtn:hover{ background:rgba(0,0,0,0.06); }
