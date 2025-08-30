@@ -253,6 +253,12 @@ let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
  */
 function openPopupWithAutoPan(marker) {
     if (!map || !marker) return;
+
+    // Refresh markers first so newly visible areas aren't empty after the map pans.
+    if (typeof refreshMarkers === 'function') {
+        refreshMarkers();
+    }
+
     __skipNextMarkerRefresh = true;
     marker.openPopup();
 }
