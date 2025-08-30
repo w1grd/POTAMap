@@ -3401,6 +3401,13 @@ function parseStructuredQuery(raw) {
     return result;
 }
 
+// Alias for compatibility with older code that expects `parsePQL`
+// This keeps existing calls to `parseStructuredQuery` working while
+// ensuring `runPQL` can locate the parser.
+function parsePQL(raw) {
+    return parseStructuredQuery(raw);
+}
+
 function buildNferByRef(parks) {
     // Map<REF, Set<REF>>
     const map = new Map();
@@ -3944,6 +3951,13 @@ async function runPQL(raw, ctx = {}) {
 
         fitToMatchesIfGlobalScope(parsed, matched);
         updateMapWithFilteredParks(matched);
+
+        // Ensure matched parks are visibly highlighted
+        try {
+            applyPqlFilterDisplay(matched);
+        } catch (e) {
+            console.warn('applyPqlFilterDisplay failed', e);
+        }
 
         return matched;
     } catch (e) {
@@ -5617,7 +5631,10 @@ function initializeFilterChips() {
             }
         }
         const box = getSearchBoxEl();
-        if (box) box.value = entry.pql;
+        if (box) {
+            box.value = entry.pql;
+            box.focus();
+        }
         window.__pqlCurrent = entry.pql;
 
         try {
@@ -5625,19 +5642,8 @@ function initializeFilterChips() {
                 await window.runPQL(entry.pql);
                 return;
             }
-            if (typeof window.handleSearchEnter === 'function') {
-                window.handleSearchEnter({
-                    key: 'Enter', preventDefault: () => {
-                    }
-                });
-                return;
-            }
-            if (typeof window.redrawMarkersWithFilters === 'function') {
-                await window.redrawMarkersWithFilters();
-                return;
-            }
         } catch (e) {
-            console.warn('runSavedEntry direct call failed, falling back to Enter-dispatch', e);
+            console.warn('runSavedEntry runPQL failed', e);
         }
 
         try {
@@ -5697,6 +5703,7 @@ function initializeFilterChips() {
             const runBtn = makeIconBtn('Run saved search',
                 '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"></path></svg>'
             );
+            runBtn.classList.add('ssp-playbtn');
             runBtn.addEventListener('click', () => window.runSavedEntry(e));
 
             // Share button (copy URL)
