@@ -3844,11 +3844,9 @@ function updateMapWithFilteredParks(filteredParks) {
             const z = map.getZoom();
             map.flyTo(pts[0], z);
         } else if (pts.length > 1) {
-            // Multiple results: compute bounds, center on them, and zoom to fit
+            // Multiple results: always fit bounds with padding, and do nothing else after
             const b = L.latLngBounds(pts);
-            const targetZoom = map.getBoundsZoom(b, true); // respect padding when fitting
-            const targetCenter = b.getCenter();
-            map.flyTo(targetCenter, targetZoom, {animate: true});
+            map.fitBounds(b, { padding: [50, 50], animate: true });
         }
     } catch (e) {
         console.warn('updateMapWithFilteredParks: view adjust failed', e);
@@ -5835,3 +5833,32 @@ function initializeFilterChips() {
         }
     });
 })();
+
+// ---- Saved Searches: runSavedEntry helper ----
+/**
+ * Restores a saved search entry (view + PQL), updates the search box, and executes the query.
+ * @param {Object} entry - The saved search entry, e.g. {view: {lat,lng,z}, pql: "..."}
+ */
+function runSavedEntry(entry){
+    try{
+        // 1) Restore saved map view first (if it exists)
+        if (entry && entry.view && map) {
+            const {lat, lng, z} = entry.view;
+            if (typeof lat === 'number' && typeof lng === 'number' && typeof z === 'number'){
+                try { map.setView([lat, lng], z, {animate:false}); } catch {}
+            }
+        }
+        // 2) Reflect the PQL in the search box (optional but nice)
+        const box = document.getElementById('searchBox');
+        if (box) box.value = entry.pql || '';
+        // 3) Execute the search (this is the important bit)
+        if (typeof window.runPQL === 'function') {
+            window.runPQL(entry.pql);
+        } else if (typeof window.handleSearchEnter === 'function') {
+            // Fallback path: simulate Enter
+            window.handleSearchEnter({ key:'Enter', preventDefault: ()=>{} });
+        }
+    } catch(e){
+        console.warn('runSavedEntry failed', e);
+    }
+}
