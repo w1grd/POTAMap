@@ -19,7 +19,8 @@
 
 /* Highlight used when "Go To Park" centers a search result */
 .goto-park-highlight {
-    pointer-events: none;
+    /* Ensure search highlights never intercept taps/clicks */
+    pointer-events: none !important;
 }
 
 .pulse-marker {
