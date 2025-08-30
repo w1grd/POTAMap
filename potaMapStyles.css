@@ -662,3 +662,22 @@
 .ssp-iconbtn:focus-visible{ outline:2px solid #1f4d2f; outline-offset:2px; }
 .ssp-iconbtn svg{ width:18px; height:18px; display:block; }
 .ssp-empty{ color:#64748b; padding:6px 0; }
+
+/* --- PQL/Search overlay safety: never block taps/clicks --- */
+#pqlOverlayPane,
+#searchHighlightPane {
+    pointer-events: none !important;
+    z-index: 450 !important; /* below Leaflet's marker pane (600) */
+}
+
+/* Any ad-hoc highlight circles/paths should never eat events */
+.goto-park-highlight,
+.goto-park-highlight * {
+    pointer-events: none !important;
+}
+
+/* If any PQL decorations render as SVGs without a custom pane, disable their events too */
+.pql-overlay,
+.pql-overlay * {
+    pointer-events: none !important;
+}

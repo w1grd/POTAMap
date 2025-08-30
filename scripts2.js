@@ -1,3 +1,6 @@
+// Ensure PQL overlay API (if implemented elsewhere) draws on our safe pane by default
+const __PQL_SAFE_PANE__ = 'pqlOverlayPane';
+
 /** Run a callback once the Leaflet map exists and is fully ready. */
 function whenMapReady(cb) {
     if (typeof cb !== 'function') return;
@@ -2753,6 +2756,25 @@ function ensureSearchHighlightLayer() {
         pane.style.zIndex = 450; // below default marker pane (600)
         pane.style.pointerEvents = 'none';
     }
+
+
+// Dedicated non-interactive pane/layer for PQL visuals so they never block taps
+    function ensurePqlOverlayLayer() {
+        if (!window.map) return null;
+        if (!map.getPane('pqlOverlayPane')) {
+            const pane = map.createPane('pqlOverlayPane');
+            // Below marker pane (600) and above tiles (200) / other overlays
+            pane.style.zIndex = 450;
+            // Critically: no pointer events so underlying markers remain clickable
+            pane.style.pointerEvents = 'none';
+            // Give the pane an id for CSS targeting
+            pane.setAttribute('id', 'pqlOverlayPane');
+        }
+        if (!map.pqlOverlayLayer) {
+            map.pqlOverlayLayer = L.layerGroup([], { pane: 'pqlOverlayPane' }).addTo(map);
+        }
+        return map.pqlOverlayLayer;
+    }
     if (!map.highlightLayer) {
         map.highlightLayer = L.layerGroup([], { pane: 'searchHighlightPane' }).addTo(map);
     }
@@ -2796,7 +2818,7 @@ function handleSearchInput(event) {
 
     filteredParks.forEach((park) => {
         const marker = L.circleMarker([park.latitude, park.longitude], {
-            className: 'goto-park-highlight',
+            pane: 'pqlOverlayPane', className: 'goto-park-highlight',
             radius: 8,
             fillColor: '#ffff00',
             color: '#000',
@@ -2984,13 +3006,16 @@ async function zoomToPark(park) {
         layer.clearLayers();
 
         const highlight = L.circleMarker([latitude, longitude], {
+            pane: 'pqlOverlayPane',
             className: 'goto-park-highlight',
             radius: 8,
             fillColor: '#ffff00',
             color: '#000',
             weight: 2,
             opacity: 1,
-            fillOpacity: 0.8
+            fillOpacity: 0.8,
+            interactive: false,
+            bubblingMouseEvents: false
         }).addTo(layer);
 
         try {
@@ -3782,9 +3807,24 @@ function __pqlWantsGlobalScope(parsed) {
 
 function clearSearchInput() {
     // 1) Clear pulsing PQL overlay (if any)
-    try { clearPqlFilterDisplay(); } catch (e) {}
+    try {
+        if (typeof clearPqlFilterDisplay === 'function') {
+            clearPqlFilterDisplay();
+        }
+    } catch (e) {}
 
-    // 2) Clear legacy highlight layer (non-PQL incremental search)
+// Hard cleanup: remove our dedicated PQL layer & pane if present
+    if (map && map.pqlOverlayLayer) {
+        try { map.pqlOverlayLayer.clearLayers(); } catch (e) {}
+        try { map.removeLayer(map.pqlOverlayLayer); } catch (e) {}
+        map.pqlOverlayLayer = null;
+    }
+    try {
+        const pane = map && map.getPane('pqlOverlayPane');
+        if (pane && pane.parentNode) pane.parentNode.removeChild(pane);
+    } catch (e) {}
+
+// 2) Clear legacy highlight layer (non-PQL incremental search)
     if (map && map.highlightLayer) {
         try {
             map.highlightLayer.clearLayers();
@@ -3890,6 +3930,7 @@ async function runPQL(raw, ctx = {}) {
 
         // Ensure matched parks are visibly highlighted
         try {
+            ensurePqlOverlayLayer();
             applyPqlFilterDisplay(matched);
         } catch (e) {
             console.warn('applyPqlFilterDisplay failed', e);
