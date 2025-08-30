@@ -670,6 +670,11 @@
     z-index: 450 !important; /* below Leaflet's marker pane (600) */
 }
 
+#pqlOverlayPane *,
+#searchHighlightPane * {
+    pointer-events: none !important;
+}
+
 /* Any ad-hoc highlight circles/paths should never eat events */
 .goto-park-highlight,
 .goto-park-highlight * {
