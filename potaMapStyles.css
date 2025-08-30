@@ -156,6 +156,43 @@
     max-width: 100%;
 }
 
+/* Collapsible panels in hamburger menu */
+.menu-panel, .menu-subpanel {
+    border:1px solid rgba(0,0,0,0.12);
+    border-radius:8px;
+    background:#fff;
+    margin:8px 0;
+}
+
+.menu-panel > summary, .menu-subpanel > summary {
+    list-style: none;
+    cursor: pointer;
+    font-weight: 600;
+    padding: 8px;
+    background-color: #336633;
+    color: #fff;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    text-align: center;
+    border-radius: 8px;
+}
+
+.menu-panel[open] > summary, .menu-subpanel[open] > summary {
+    border-bottom: 1px solid rgba(0,0,0,0.12);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.menu-panel .panel-content, .menu-subpanel .panel-content {
+    padding:8px;
+}
+
+.menu-panel > summary::marker,
+.menu-subpanel > summary::marker,
+.menu-panel > summary::-webkit-details-marker,
+.menu-subpanel > summary::-webkit-details-marker {
+    color: #fff;
+}
+
 /* Tooltips */
 .custom-tooltip {
     font-size: 0.85em;
@@ -455,6 +492,15 @@
     font-size: 16px;
 }
 
+#goToParkButton,
+#centerOnGeolocation {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    margin-top: 10px;
+}
+
 #clearSearch i {
     pointer-events: none;
     color: inherit;
@@ -499,11 +545,7 @@
 
 /* ===== Saved Searches Panel (MVP) ===== */
 .saved-searches-panel{
-    padding:12px;
-    border:1px solid rgba(0,0,0,0.12);
-    border-radius:12px;
-    background:#fff;
-    box-shadow:0 1px 6px rgba(0,0,0,0.04);
+    padding:12px 0;
 }
 .saved-searches-panel .ssp-title{
     font-weight:700;
@@ -528,17 +570,15 @@
     font-size:0.95em; color:#334155;
 }
 .ssp-btn{
-    padding:6px 10px;
-    border:1px solid #334155;
-    border-radius:8px;
-    background:#ffffff;
-    color:#0f172a;
-    font-weight:600;
+    padding:10px;
+    font-size:16px;
+    border:1px solid #ccc;
+    border-radius:4px;
+    background:#fff;
     cursor:pointer;
 }
 .ssp-btn:hover{
     background:#f1f5f9;
-    border-color:#0f172a;
 }
 .ssp-list{ list-style:none; margin:0; padding:0; }
 
