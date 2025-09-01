@@ -2855,7 +2855,8 @@ function handleSearchEnter(event) {
             if (Array.isArray(spots)) {
                 for (const s of spots) {
                     if (s && s.reference) {
-                        spotByRef[s.reference] = s;
+                        if (!spotByRef[s.reference]) spotByRef[s.reference] = [];
+                        spotByRef[s.reference].push(s);
                         const call = (s.activator || s.callsign || '').trim().toUpperCase();
                         if (call) {
                             if (!spotByCall[call]) spotByCall[call] = [];
@@ -3510,9 +3511,24 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 
     // 9) ACTIVE (live)
     if (parsed.active !== null && ctx && ctx.spotByRef) {
-        const active = !!ctx.spotByRef[park.reference];
-        if (parsed.active && !active) return false;
-        if (!parsed.active && active) return false;
+        const entry = ctx.spotByRef[park.reference];
+        const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+        const active = arr.length > 0;
+        if (parsed.active) {
+            if (!active) return false;
+            if (parsed.mode) {
+                const norm = (m) => {
+                    const u = String(m || '').toUpperCase();
+                    if (u === 'CW') return 'CW';
+                    if (u === 'SSB' || u === 'PHONE' || u === 'AM' || u === 'FM') return 'SSB';
+                    if (u === 'DATA' || u === 'DIGI' || u === 'DIGITAL' || u === 'FT8' || u === 'FT4') return 'DATA';
+                    return u;
+                };
+                if (!arr.some(s => norm(s.mode) === parsed.mode)) return false;
+            }
+        } else {
+            if (active) return false;
+        }
     }
 
     // 9.5) CALLSIGN filter (requires ACTIVE)
@@ -3855,7 +3871,8 @@ async function runPQL(raw, ctx = {}) {
         if (Array.isArray(spots)) {
             for (const s of spots) {
                 if (s && s.reference) {
-                    spotByRef[s.reference] = s;
+                    if (!spotByRef[s.reference]) spotByRef[s.reference] = [];
+                    spotByRef[s.reference].push(s);
                     const call = (s.activator || s.callsign || '').trim().toUpperCase();
                     if (call) {
                         if (!spotByCall[call]) spotByCall[call] = [];
