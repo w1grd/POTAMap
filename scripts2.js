@@ -1737,6 +1737,8 @@ function initializeMenu() {
                         <div class="panel-content">
                             <button id="mapHelpButton" onclick="window.open('https://pota.review/howto/how-to-use-the-potamap/', '_blank')">How to Use This Map</button>
                             <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Reviews</button>
+                            <button id="uploadActivations">Upload Activations File</button>
+                            <input type="file" id="uploadActivationsInput" accept=".csv" style="display:none" />
                             <div id="callsignDisplay" style="text-align: center; font-weight: bold; padding: 0.5em; font-size: 0.75em; background: #f0f0f0; margin-top: 0.5em;">
                                 Callsign: <span id="callsignText">please set</span>
                             </div>
@@ -1753,6 +1755,8 @@ function initializeMenu() {
     document.getElementById('clearSearch').addEventListener('click', clearSearchInput);
     document.getElementById('searchBox').addEventListener('keydown', handleSearchEnter);
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
+    document.getElementById('uploadActivations').addEventListener('click', () => document.getElementById('uploadActivationsInput').click());
+    document.getElementById('uploadActivationsInput').addEventListener('change', handleFileUpload);
 
     buildFiltersPanel(document.getElementById('filtersPanelContent'));
     buildModeFilterPanel(document.getElementById('modeFilterPanelContent'));
@@ -2851,7 +2855,8 @@ function handleSearchEnter(event) {
             if (Array.isArray(spots)) {
                 for (const s of spots) {
                     if (s && s.reference) {
-                        spotByRef[s.reference] = s;
+                        if (!spotByRef[s.reference]) spotByRef[s.reference] = [];
+                        spotByRef[s.reference].push(s);
                         const call = (s.activator || s.callsign || '').trim().toUpperCase();
                         if (call) {
                             if (!spotByCall[call]) spotByCall[call] = [];
@@ -3506,9 +3511,24 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
 
     // 9) ACTIVE (live)
     if (parsed.active !== null && ctx && ctx.spotByRef) {
-        const active = !!ctx.spotByRef[park.reference];
-        if (parsed.active && !active) return false;
-        if (!parsed.active && active) return false;
+        const entry = ctx.spotByRef[park.reference];
+        const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+        const active = arr.length > 0;
+        if (parsed.active) {
+            if (!active) return false;
+            if (parsed.mode) {
+                const norm = (m) => {
+                    const u = String(m || '').toUpperCase();
+                    if (u === 'CW') return 'CW';
+                    if (u === 'SSB' || u === 'PHONE' || u === 'AM' || u === 'FM') return 'SSB';
+                    if (u === 'DATA' || u === 'DIGI' || u === 'DIGITAL' || u === 'FT8' || u === 'FT4') return 'DATA';
+                    return u;
+                };
+                if (!arr.some(s => norm(s.mode) === parsed.mode)) return false;
+            }
+        } else {
+            if (active) return false;
+        }
     }
 
     // 9.5) CALLSIGN filter (requires ACTIVE)
@@ -3851,7 +3871,8 @@ async function runPQL(raw, ctx = {}) {
         if (Array.isArray(spots)) {
             for (const s of spots) {
                 if (s && s.reference) {
-                    spotByRef[s.reference] = s;
+                    if (!spotByRef[s.reference]) spotByRef[s.reference] = [];
+                    spotByRef[s.reference].push(s);
                     const call = (s.activator || s.callsign || '').trim().toUpperCase();
                     if (call) {
                         if (!spotByCall[call]) spotByCall[call] = [];
