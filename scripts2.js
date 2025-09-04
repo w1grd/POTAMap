@@ -245,11 +245,6 @@ let __canvasRenderer = null; // initialized after map setup
 let __panInProgress = false; // suppress redraws while panning
 let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
 
-// === Popup stability lock: defer refresh while a popup auto-pans ===
-let __popupLockUntil = 0;
-function lockPopupRefresh(ms = 900) { __popupLockUntil = Date.now() + ms; }
-function shouldDeferRefresh() { return Date.now() < __popupLockUntil; }
-
 /**
  * Opens a marker's popup and lets Leaflet auto-pan the map so the popup
  * remains fully visible. Skips the next marker refresh so the popup isn't
@@ -257,11 +252,28 @@ function shouldDeferRefresh() { return Date.now() < __popupLockUntil; }
  * @param {L.Marker} marker - Leaflet marker with a bound popup
  */
 function openPopupWithAutoPan(marker) {
-// Stabilize: avoid refresh-induced popup closes while the map pans
-    lockPopupRefresh(900);
     if (!map || !marker) return;
-    __skipNextMarkerRefresh = true;
-    marker.openPopup();
+    const latlng = marker.getLatLng ? marker.getLatLng() : null;
+    if (!latlng) {
+        marker.openPopup && marker.openPopup();
+        return;
+    }
+
+    const openAfterPan = () => {
+        if (typeof refreshMarkers === 'function') refreshMarkers();
+        __skipNextMarkerRefresh = true;
+        marker.openPopup();
+    };
+
+    const center = map.getCenter && map.getCenter();
+    const needsMove = !center || center.lat !== latlng.lat || center.lng !== latlng.lng;
+    if (needsMove) {
+        __skipNextMarkerRefresh = true;
+        map.once('moveend', openAfterPan);
+        map.panTo(latlng, {animate: true});
+    } else {
+        openAfterPan();
+    }
 }
 
 // Ensure popup-collapsible styles are present (runtime injector as a safety net)
@@ -478,46 +490,11 @@ function setUserLocationMarker(lat, lng) {
  * Keeps the current zoom level.
  */
 function centerMapOnGeolocation() {
-    const currentZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : undefined;
+    whenMapReady(() => {
+        const currentZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : undefined;
 
-    if (!navigator.geolocation) {
-        console.warn('Geolocation not supported; falling back.');
-        const saved = localStorage.getItem('mapCenter');
-        if (saved) {
-            try {
-                const [lat, lng] = JSON.parse(saved);
-                map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
-            } catch (e) {
-                // ignore parse error
-            }
-        } else if (typeof fallbackToDefaultLocation === 'function') {
-            fallbackToDefaultLocation();
-        }
-        return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-        (position) => {
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-
-            // Update globals if you rely on them elsewhere
-            try {
-                window.userLat = lat;
-                window.userLng = lng;
-            } catch (e) {
-            }
-
-            if (typeof setUserLocationMarker === 'function') {
-                setUserLocationMarker(lat, lng);
-            }
-
-            if (map) {
-                map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
-            }
-        },
-        (error) => {
-            console.warn('Geolocation error:', error && error.message);
+        if (!navigator.geolocation) {
+            console.warn('Geolocation not supported; falling back.');
             const saved = localStorage.getItem('mapCenter');
             if (saved) {
                 try {
@@ -529,9 +506,45 @@ function centerMapOnGeolocation() {
             } else if (typeof fallbackToDefaultLocation === 'function') {
                 fallbackToDefaultLocation();
             }
-        },
-        {enableHighAccuracy: true, maximumAge: 30000, timeout: 15000}
-    );
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+
+                try {
+                    window.userLat = lat;
+                    window.userLng = lng;
+                } catch (e) {
+                }
+
+                if (typeof setUserLocationMarker === 'function') {
+                    setUserLocationMarker(lat, lng);
+                }
+
+                if (map) {
+                    map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
+                }
+            },
+            (error) => {
+                console.warn('Geolocation error:', error && error.message);
+                const saved = localStorage.getItem('mapCenter');
+                if (saved) {
+                    try {
+                        const [lat, lng] = JSON.parse(saved);
+                        map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
+                    } catch (e) {
+                        // ignore parse error
+                    }
+                } else if (typeof fallbackToDefaultLocation === 'function') {
+                    fallbackToDefaultLocation();
+                }
+            },
+            {enableHighAccuracy: true, maximumAge: 30000, timeout: 15000}
+        );
+    });
 }
 
 /** Bind an existing “Center On My Location” button if present */
@@ -1215,7 +1228,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Map-level safety: fold popup sections even for pre-existing markers/popups.
         if (map && typeof map.on === 'function') {
             map.on('popupopen', function (ev) {
-                lockPopupRefresh(900);
                 try {
                     const popup = ev && ev.popup;
                     if (!popup || typeof popup.getContent !== 'function') return;
@@ -1258,29 +1270,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             });
         }
-
-        // Defer common refreshers during popup stability window
-        (function () {
-            function wrapIfNeeded(obj, key) {
-                const fn = obj && obj[key];
-                if (typeof fn !== 'function' || fn.__wrappedForPopup) return;
-                const original = fn;
-                const wrapped = async function (...args) {
-                    if (shouldDeferRefresh()) {
-                        const delay = Math.max(0, __popupLockUntil - Date.now());
-                        return new Promise(resolve => setTimeout(() => resolve(wrapped.apply(this, args)), delay));
-                    }
-                    return original.apply(this, args);
-                };
-                wrapped.__wrappedForPopup = true;
-                obj[key] = wrapped;
-            }
-            // Known refreshers that can clear/redraw layers and inadvertently close popups
-            wrapIfNeeded(window, 'fetchAndDisplaySpotsInCurrentBounds');
-            wrapIfNeeded(window, 'applyActivationToggleState');
-            wrapIfNeeded(window, 'refreshMarkers');
-            wrapIfNeeded(window, 'updateActivationsInView');
-        })();
 
         // Use a shared Canvas renderer for circle markers (significantly faster than default SVG)
         try {
@@ -1717,7 +1706,6 @@ async function redrawMarkersWithFilters() {
                 });
 
             marker.on('popupopen', async function () {
-                lockPopupRefresh(900);
                 try {
                     const parkActivations = await fetchParkActivations(reference);
                     await saveParkActivationsToIndexedDB(reference, parkActivations);
