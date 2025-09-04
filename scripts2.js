@@ -1201,15 +1201,43 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Map-level safety: fold popup sections even for pre-existing markers/popups.
         if (map && typeof map.on === 'function') {
-            map.on('popupopen', function(ev) {
+            map.on('popupopen', function (ev) {
                 try {
                     const popup = ev && ev.popup;
                     if (!popup || typeof popup.getContent !== 'function') return;
                     const cur = popup.getContent();
-                    if (typeof cur === 'string' &&
-                        (cur.indexOf('Recent Activations:') >= 0 || cur.indexOf('Current Activation:') >= 0)) {
-                        const folded = foldPopupSections(cur);
-                        if (folded && folded !== cur) popup.setContent(folded);
+
+                    // Helper to test for headings
+                    const hasTargets = (s) => /(Recent Activations:|Current Activation:)/i.test(s || '');
+
+                    if (typeof cur === 'string') {
+                        if (hasTargets(cur)) {
+                            const folded = foldPopupSections(cur);
+                            if (folded && folded !== cur) popup.setContent(folded);
+                        }
+                        return;
+                    }
+
+                    // If Leaflet gave us a DOM node (Element), mutate in place
+                    if (cur && cur.nodeType === 1) { // ELEMENT_NODE
+                        // Skip if already folded
+                        if (cur.querySelector && cur.querySelector('details.popup-collapsible')) return;
+
+                        const html = cur.innerHTML || '';
+                        if (!hasTargets(html)) return;
+
+                        const folded = foldPopupSections(html);
+                        if (folded && folded !== html) {
+                            cur.innerHTML = folded; // update in place to preserve the node
+                        }
+                        return;
+                    }
+
+                    // Fallback: convert anything else to string and try
+                    const asText = String(cur || '');
+                    if (hasTargets(asText)) {
+                        const folded = foldPopupSections(asText);
+                        if (folded && folded !== asText) popup.setContent(folded);
                     }
                 } catch (e) {
                     console.warn('map-level foldPopupSections failed:', e);
