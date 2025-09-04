@@ -245,6 +245,11 @@ let __canvasRenderer = null; // initialized after map setup
 let __panInProgress = false; // suppress redraws while panning
 let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
 
+// === Popup stability lock: defer refresh while a popup auto-pans ===
+let __popupLockUntil = 0;
+function lockPopupRefresh(ms = 900) { __popupLockUntil = Date.now() + ms; }
+function shouldDeferRefresh() { return Date.now() < __popupLockUntil; }
+
 /**
  * Opens a marker's popup and lets Leaflet auto-pan the map so the popup
  * remains fully visible. Skips the next marker refresh so the popup isn't
@@ -252,9 +257,141 @@ let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
  * @param {L.Marker} marker - Leaflet marker with a bound popup
  */
 function openPopupWithAutoPan(marker) {
+// Stabilize: avoid refresh-induced popup closes while the map pans
+    lockPopupRefresh(900);
     if (!map || !marker) return;
     __skipNextMarkerRefresh = true;
     marker.openPopup();
+}
+
+// Ensure popup-collapsible styles are present (runtime injector as a safety net)
+function ensurePopupCollapsibleCss() {
+    if (document.getElementById('popup-collapsible-css')) return;
+    const css = `
+.leaflet-popup-content details.popup-collapsible {
+  margin: 6px 0 6px;
+  padding: 0;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 6px;
+  background: #fafafa;
+  overflow: hidden;
+}
+.leaflet-popup-content details.popup-collapsible:first-of-type { margin-top: 4px; }
+.leaflet-popup-content details.popup-collapsible:last-of-type  { margin-bottom: 4px; }
+.leaflet-popup-content details.popup-collapsible > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 10px;
+  font-weight: 600;
+  outline: none;
+  user-select: none;
+}
+.leaflet-popup-content details.popup-collapsible > summary::-webkit-details-marker { display: none; }
+.leaflet-popup-content details.popup-collapsible > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transform: translateY(-1px);
+}
+.leaflet-popup-content details.popup-collapsible[open] > summary::before { content: "▾"; }
+.leaflet-popup-content .popup-collapsible-body {
+  padding: 8px 10px 10px;
+  border-top: 1px solid rgba(0,0,0,0.08);
+  background: #fff;
+}
+@media (max-width: 480px) {
+  .leaflet-popup-content details.popup-collapsible { margin: 6px 0 10px; }
+  .leaflet-popup-content details.popup-collapsible > summary { padding: 8px 9px; }
+  .leaflet-popup-content .popup-collapsible-body { padding: 8px 9px 9px; }
+}`;
+    const style = document.createElement('style');
+    style.id = 'popup-collapsible-css';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
+
+/**
+ * Fold specific sections of a park popup into collapsible panels (closed by default).
+ * We look for headings rendered as <b>Recent Activations:</b> and <b>Current Activation:</b>
+ * and move their following content into <details> blocks until the next bold heading or the end.
+ * If nothing matches, the original HTML is returned.
+ */
+function foldPopupSections(html) {
+    try {
+        ensurePopupCollapsibleCss();
+        if (!html || typeof html !== 'string') return html;
+
+        // Stage the HTML so we can manipulate nodes safely
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = html;
+
+        // Helper: turn a heading node (the <b>...</b>) into a <details> with a <summary>
+        function makeDetailsFromBold(boldEl, titleText) {
+            const details = document.createElement('details'); // closed by default
+            details.className = 'popup-collapsible';
+            if (titleText === 'Recent Activations') {
+                details.classList.add('recent-activations');
+            } else if (titleText === 'Current Activation') {
+                details.classList.add('current-activation');
+            }
+
+            const summary = document.createElement('summary');
+            summary.textContent = titleText;
+            details.appendChild(summary);
+
+            // Move following siblings (until next <b>...</b> heading or end) into the details body
+            const body = document.createElement('div');
+            body.className = 'popup-collapsible-body';
+
+            // Start immediately after the section heading and trim only whitespace/colon breaks.
+            // Do NOT skip the next <b>...> label (e.g., "Activator:"), or it will end up outside the panel.
+            let node = boldEl.nextSibling;
+            while (node && ((node.nodeType === 3 && /^[\s:|]+$/.test(node.textContent)) || node.nodeName === 'BR')) {
+                const nextAfter = node.nextSibling;
+                node.remove(); // tighten vertical spacing and remove stray colon text nodes
+                node = nextAfter;
+            }
+
+            // Collect until we hit the next bold heading that looks like a section title
+            while (node) {
+                const isNextSectionHeader =
+                    node.nodeName === 'B' &&
+                    /Recent Activations:|Current Activation:/i.test(node.textContent || '');
+                if (isNextSectionHeader) break;
+
+                const next = node.nextSibling;
+                body.appendChild(node); // this moves the node
+                node = next;
+            }
+
+            details.appendChild(body);
+
+            // Replace the original bold heading with our details panel
+            if (boldEl.parentNode) {
+                boldEl.replaceWith(details);
+            }
+        }
+
+        // Find bold headings that we want to fold
+        const bolds = Array.from(wrapper.querySelectorAll('b'));
+        // Idempotency: do not double-wrap if already wrapped (look for parent details.popup-collapsible)
+        for (const b of bolds) {
+            const t = (b.textContent || '').trim();
+            if ((/^Recent Activations:\s*$/i.test(t) || /^Current Activation:\s*$/i.test(t)) &&
+                !(b.parentElement && b.parentElement.classList && b.parentElement.classList.contains('popup-collapsible'))) {
+                if (/^Recent Activations:\s*$/i.test(t)) {
+                    makeDetailsFromBold(b, 'Recent Activations');
+                } else if (/^Current Activation:\s*$/i.test(t)) {
+                    makeDetailsFromBold(b, 'Current Activation');
+                }
+            }
+        }
+
+        return wrapper.innerHTML;
+    } catch (e) {
+        console.warn('foldPopupSections failed:', e);
+        return html;
+    }
 }
 
 // --- Lightweight Toast UI -------------------------------------------------
@@ -335,7 +472,6 @@ function setUserLocationMarker(lat, lng) {
         }).addTo(map);
     }
 }
-
 /**
  * Centers the map on the user's current geolocation and drops/updates a pin.
  * Keeps the current zoom level.
@@ -395,6 +531,23 @@ function centerMapOnGeolocation() {
         },
         {enableHighAccuracy: true, maximumAge: 30000, timeout: 15000}
     );
+}
+
+// Helper for console diagnosis
+async function diagnoseGeolocation() {
+    const findings = {};
+    findings.secureContext = window.isSecureContext;
+    findings.inIframe = (function(){ try { return window !== window.top; } catch(_){ return true; } })();
+    findings.permissionsPolicyHint = 'Check server header: Permissions-Policy: geolocation=(self "https://pota.review")';
+    try {
+        if ('permissions' in navigator && navigator.permissions.query) {
+            findings.permissionState = (await navigator.permissions.query({ name: 'geolocation' })).state;
+        } else {
+            findings.permissionState = 'unknown (Permissions API not available)';
+        }
+    } catch { findings.permissionState = 'unknown (query failed)'; }
+    try { console.table(findings); } catch(_) { console.log(findings); }
+    return findings;
 }
 
 /** Bind an existing “Center On My Location” button if present */
@@ -1074,6 +1227,77 @@ document.addEventListener('DOMContentLoaded', async () => {
         await nextFrame();
         await setupPOTAMap();
 
+
+        // Map-level safety: fold popup sections even for pre-existing markers/popups.
+        if (map && typeof map.on === 'function') {
+            map.on('popupopen', function (ev) {
+                lockPopupRefresh(900);
+                try {
+                    const popup = ev && ev.popup;
+                    if (!popup || typeof popup.getContent !== 'function') return;
+                    const cur = popup.getContent();
+
+                    // Helper to test for headings
+                    const hasTargets = (s) => /(Recent Activations:|Current Activation:)/i.test(s || '');
+
+                    if (typeof cur === 'string') {
+                        if (hasTargets(cur)) {
+                            const folded = foldPopupSections(cur);
+                            if (folded && folded !== cur) popup.setContent(folded);
+                        }
+                        return;
+                    }
+
+                    // If Leaflet gave us a DOM node (Element), mutate in place
+                    if (cur && cur.nodeType === 1) { // ELEMENT_NODE
+                        // Skip if already folded
+                        if (cur.querySelector && cur.querySelector('details.popup-collapsible')) return;
+
+                        const html = cur.innerHTML || '';
+                        if (!hasTargets(html)) return;
+
+                        const folded = foldPopupSections(html);
+                        if (folded && folded !== html) {
+                            cur.innerHTML = folded; // update in place to preserve the node
+                        }
+                        return;
+                    }
+
+                    // Fallback: convert anything else to string and try
+                    const asText = String(cur || '');
+                    if (hasTargets(asText)) {
+                        const folded = foldPopupSections(asText);
+                        if (folded && folded !== asText) popup.setContent(folded);
+                    }
+                } catch (e) {
+                    console.warn('map-level foldPopupSections failed:', e);
+                }
+            });
+        }
+
+        // Defer common refreshers during popup stability window
+        (function () {
+            function wrapIfNeeded(obj, key) {
+                const fn = obj && obj[key];
+                if (typeof fn !== 'function' || fn.__wrappedForPopup) return;
+                const original = fn;
+                const wrapped = async function (...args) {
+                    if (shouldDeferRefresh()) {
+                        const delay = Math.max(0, __popupLockUntil - Date.now());
+                        return new Promise(resolve => setTimeout(() => resolve(wrapped.apply(this, args)), delay));
+                    }
+                    return original.apply(this, args);
+                };
+                wrapped.__wrappedForPopup = true;
+                obj[key] = wrapped;
+            }
+            // Known refreshers that can clear/redraw layers and inadvertently close popups
+            wrapIfNeeded(window, 'fetchAndDisplaySpotsInCurrentBounds');
+            wrapIfNeeded(window, 'applyActivationToggleState');
+            wrapIfNeeded(window, 'refreshMarkers');
+            wrapIfNeeded(window, 'updateActivationsInView');
+        })();
+
         // Use a shared Canvas renderer for circle markers (significantly faster than default SVG)
         try {
             __canvasRenderer = L.canvas({padding: 0.5});
@@ -1502,13 +1726,14 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40]})
+                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40], autoClose: false})
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
                 .on('click touchend', function () {
                     this.closeTooltip();
                 });
 
             marker.on('popupopen', async function () {
+                lockPopupRefresh(900);
                 try {
                     const parkActivations = await fetchParkActivations(reference);
                     await saveParkActivationsToIndexedDB(reference, parkActivations);
@@ -1556,6 +1781,8 @@ async function redrawMarkersWithFilters() {
                     }
 
                     let popupContent = await fetchFullPopupContent(displayPark, currentActivation, parkActivations);
+                    // Wrap "Recent Activations" and "Current Activation" in collapsible panels (closed by default)
+                    popupContent = foldPopupSections(popupContent);
                     this.setPopupContent(popupContent);
                 } catch (err) {
                     this.setPopupContent("<b>Error loading park info.</b>");
@@ -1573,6 +1800,9 @@ function refreshMarkers() {
 
     // Skip marker redraws while Leaflet is auto-panning a freshly opened popup (mobile tap stability).
     if (typeof suppressRedrawUntil !== 'undefined' && Date.now() < suppressRedrawUntil) {
+        return;
+    }
+    if (__skipNextMarkerRefresh) {
         return;
     }
 
@@ -1664,11 +1894,6 @@ function refreshMarkers() {
         } else {
             console.warn("openParkPopupByRef: marker not found for", reference);
         }
-    }
-
-// Avoid redraws while a popup is open (prevents immediate close after auto-pan)
-    if (typeof isPopupOpen !== 'undefined' && isPopupOpen) {
-        return;
     }
     if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
         updateVisibleModeCounts();
@@ -2443,10 +2668,10 @@ function formatQsoDate(qsoDate) {
         const day = qsoDate.substring(6, 8);
         date = new Date(`${year}-${month}-${day}`);
     }
-    return date.toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
+    return date.toLocaleDateString('en-US', {
+        year: '2-digit',
+        month: '2-digit',
+        day: '2-digit'
     });
 }
 
@@ -3082,7 +3307,7 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
 
         popupContent += `
         <br><br><b>Total QSOs (All Activations):</b><br>
-        CW: ${cwTotal} &nbsp;|&nbsp; PHONE: ${phoneTotal} &nbsp;|&nbsp; DATA: ${dataTotal}
+        CW: ${cwTotal} &nbsp;|&nbsp; PHONE: ${phoneTotal} <br>DATA: ${dataTotal} 
         <br><br><b>Recent Activations:</b><br>${recentActivations}`;
     }
 
@@ -4286,26 +4511,29 @@ function initializeMap(lat, lng) {
 
     // Attach dynamic spot fetching to map movement
     let skipNextSpotFetch = false;
+    const debouncedSpotFetch = debounce(() => {
+        console.log("Map moved or zoomed. Updating spots...");
+        fetchAndDisplaySpotsInCurrentBounds(mapInstance)
+            .then(() => applyActivationToggleState());
+    }, 300);
     mapInstance.on("popupopen", () => {
         skipNextSpotFetch = true;
         isPopupOpen = true;
+        __skipNextMarkerRefresh = true;
     });
     mapInstance.on("popupclose", () => {
         isPopupOpen = false;
+        skipNextSpotFetch = false;
+        __skipNextMarkerRefresh = false;
     });
     if (!isDesktopMode) {
-        mapInstance.on(
-            "moveend",
-            debounce(() => {
-                if (skipNextSpotFetch) {
-                    skipNextSpotFetch = false;
-                    return;
-                }
-                console.log("Map moved or zoomed. Updating spots...");
-                fetchAndDisplaySpotsInCurrentBounds(mapInstance)
-                    .then(() => applyActivationToggleState());
-            }, 300)
-        );
+        mapInstance.on("moveend", () => {
+            if (skipNextSpotFetch) {
+                skipNextSpotFetch = false;
+                return;
+            }
+            debouncedSpotFetch();
+        });
     }
 
     return mapInstance;
@@ -4457,6 +4685,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 await saveParkActivationsToIndexedDB(reference, parkActivations);
 
                 let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                // Ensure the popup uses collapsible panels for activation sections
+                popupContent = foldPopupSections(popupContent);
 
                 if (park.change) {
                     popupContent += `
