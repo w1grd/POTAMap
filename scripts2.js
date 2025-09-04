@@ -1753,6 +1753,9 @@ function refreshMarkers() {
     if (typeof suppressRedrawUntil !== 'undefined' && Date.now() < suppressRedrawUntil) {
         return;
     }
+    if (__skipNextMarkerRefresh) {
+        return;
+    }
 
 
     /** Robustly find a park's marker by reference, searching common layer groups. */
@@ -1842,11 +1845,6 @@ function refreshMarkers() {
         } else {
             console.warn("openParkPopupByRef: marker not found for", reference);
         }
-    }
-
-// Avoid redraws while a popup is open (prevents immediate close after auto-pan)
-    if (typeof isPopupOpen !== 'undefined' && isPopupOpen) {
-        return;
     }
     if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
         updateVisibleModeCounts();
@@ -4464,26 +4462,28 @@ function initializeMap(lat, lng) {
 
     // Attach dynamic spot fetching to map movement
     let skipNextSpotFetch = false;
+    const debouncedSpotFetch = debounce(() => {
+        console.log("Map moved or zoomed. Updating spots...");
+        fetchAndDisplaySpotsInCurrentBounds(mapInstance)
+            .then(() => applyActivationToggleState());
+    }, 300);
     mapInstance.on("popupopen", () => {
         skipNextSpotFetch = true;
         isPopupOpen = true;
     });
     mapInstance.on("popupclose", () => {
         isPopupOpen = false;
+        skipNextSpotFetch = false;
+        __skipNextMarkerRefresh = false;
     });
     if (!isDesktopMode) {
-        mapInstance.on(
-            "moveend",
-            debounce(() => {
-                if (skipNextSpotFetch) {
-                    skipNextSpotFetch = false;
-                    return;
-                }
-                console.log("Map moved or zoomed. Updating spots...");
-                fetchAndDisplaySpotsInCurrentBounds(mapInstance)
-                    .then(() => applyActivationToggleState());
-            }, 300)
-        );
+        mapInstance.on("moveend", () => {
+            if (skipNextSpotFetch) {
+                skipNextSpotFetch = false;
+                return;
+            }
+            debouncedSpotFetch();
+        });
     }
 
     return mapInstance;
