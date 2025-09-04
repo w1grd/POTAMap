@@ -257,6 +257,128 @@ function openPopupWithAutoPan(marker) {
     marker.openPopup();
 }
 
+// Ensure popup-collapsible styles are present (runtime injector as a safety net)
+function ensurePopupCollapsibleCss() {
+    if (document.getElementById('popup-collapsible-css')) return;
+    const css = `
+.leaflet-popup-content details.popup-collapsible {
+  margin: 8px 0 12px;
+  padding: 0;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 6px;
+  background: #fafafa;
+  overflow: hidden;
+}
+.leaflet-popup-content details.popup-collapsible > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 10px;
+  font-weight: 600;
+  outline: none;
+  user-select: none;
+}
+.leaflet-popup-content details.popup-collapsible > summary::-webkit-details-marker { display: none; }
+.leaflet-popup-content details.popup-collapsible > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transform: translateY(-1px);
+}
+.leaflet-popup-content details.popup-collapsible[open] > summary::before { content: "▾"; }
+.leaflet-popup-content .popup-collapsible-body {
+  padding: 8px 10px 10px;
+  border-top: 1px solid rgba(0,0,0,0.08);
+  background: #fff;
+}
+@media (max-width: 480px) {
+  .leaflet-popup-content details.popup-collapsible { margin: 6px 0 10px; }
+  .leaflet-popup-content details.popup-collapsible > summary { padding: 8px 9px; }
+  .leaflet-popup-content .popup-collapsible-body { padding: 8px 9px 9px; }
+}`;
+    const style = document.createElement('style');
+    style.id = 'popup-collapsible-css';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
+
+/**
+ * Fold specific sections of a park popup into collapsible panels (closed by default).
+ * We look for headings rendered as <b>Recent Activations:</b> and <b>Current Activation:</b>
+ * and move their following content into <details> blocks until the next bold heading or the end.
+ * If nothing matches, the original HTML is returned.
+ */
+function foldPopupSections(html) {
+    try {
+        ensurePopupCollapsibleCss();
+        if (!html || typeof html !== 'string') return html;
+
+        // Stage the HTML so we can manipulate nodes safely
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = html;
+
+        // Helper: turn a heading node (the <b>...</b>) into a <details> with a <summary>
+        function makeDetailsFromBold(boldEl, titleText) {
+            const details = document.createElement('details'); // closed by default
+            details.className = 'popup-collapsible';
+
+            const summary = document.createElement('summary');
+            summary.textContent = titleText;
+            details.appendChild(summary);
+
+            // Move following siblings (until next <b>...</b> heading or end) into the details body
+            const body = document.createElement('div');
+            body.className = 'popup-collapsible-body';
+
+            // Everything is in wrapper; we start after the boldEl (and any trailing colon/space/br)
+            let node = boldEl;
+            // If there's a trailing colon in a separate text node, skip it here and let content start after
+            while (node && (node.nodeName === 'B' || (node.nodeType === 3 && /^[\s:|]+$/.test(node.textContent)) || (node.nodeName === 'BR'))) {
+                node = node.nextSibling;
+            }
+
+            // Collect until we hit the next bold heading that looks like a section title
+            while (node) {
+                const isNextSectionHeader =
+                    node.nodeName === 'B' &&
+                    /Recent Activations:|Current Activation:/i.test(node.textContent || '');
+                if (isNextSectionHeader) break;
+
+                const next = node.nextSibling;
+                body.appendChild(node); // this moves the node
+                node = next;
+            }
+
+            details.appendChild(body);
+
+            // Replace the original bold heading with our details block
+            if (boldEl.parentNode) {
+                // Remove any trailing colon text node immediately after the <b>…</b>
+                if (boldEl.nextSibling && boldEl.nextSibling.nodeType === 3 && /^[\s:|]+$/.test(boldEl.nextSibling.textContent)) {
+                    boldEl.nextSibling.remove();
+                }
+                boldEl.replaceWith(details);
+            }
+        }
+
+        // Find bold headings that we want to fold
+        const bolds = Array.from(wrapper.querySelectorAll('b'));
+        // Process in document order so ranges move correctly
+        for (const b of bolds) {
+            const t = (b.textContent || '').trim();
+            if (/^Recent Activations:\s*$/i.test(t)) {
+                makeDetailsFromBold(b, 'Recent Activations');
+            } else if (/^Current Activation:\s*$/i.test(t)) {
+                makeDetailsFromBold(b, 'Current Activation');
+            }
+        }
+
+        return wrapper.innerHTML;
+    } catch (e) {
+        console.warn('foldPopupSections failed:', e);
+        return html;
+    }
+}
+
 // --- Lightweight Toast UI -------------------------------------------------
 function ensureToastCss() {
     if (document.getElementById('pql-toast-css')) return;
@@ -1556,6 +1678,8 @@ async function redrawMarkersWithFilters() {
                     }
 
                     let popupContent = await fetchFullPopupContent(displayPark, currentActivation, parkActivations);
+                    // Wrap "Recent Activations" and "Current Activation" in collapsible panels (closed by default)
+                    popupContent = foldPopupSections(popupContent);
                     this.setPopupContent(popupContent);
                 } catch (err) {
                     this.setPopupContent("<b>Error loading park info.</b>");

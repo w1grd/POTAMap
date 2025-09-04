@@ -692,3 +692,47 @@
 .pql-overlay * {
     pointer-events: none !important;
 }
+/* === Popup collapsibles (Recent / Current Activation) === */
+.leaflet-popup-content details.popup-collapsible {
+    margin: 8px 0 12px;
+    padding: 0;
+    border: 1px solid rgba(0,0,0,0.15);
+    border-radius: 6px;
+    background: #fafafa;
+    overflow: hidden;
+}
+
+.leaflet-popup-content details.popup-collapsible > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 8px 10px;
+    font-weight: 600;
+    outline: none;
+    user-select: none;
+}
+
+.leaflet-popup-content details.popup-collapsible > summary::-webkit-details-marker {
+    display: none;
+}
+
+.leaflet-popup-content details.popup-collapsible > summary::before {
+    content: "▸";
+    display: inline-block;
+    margin-right: 6px;
+    transform: translateY(-1px);
+}
+
+.leaflet-popup-content details.popup-collapsible[open] > summary::before {
+    content: "▾";
+}
+
+.leaflet-popup-content .popup-collapsible-body {
+    padding: 8px 10px 10px;
+    border-top: 1px solid rgba(0,0,0,0.08);
+    background: #fff;
+}
+@media (max-width: 480px) {
+    .leaflet-popup-content details.popup-collapsible { margin: 6px 0 10px; }
+    .leaflet-popup-content details.popup-collapsible > summary { padding: 8px 9px; }
+    .leaflet-popup-content .popup-collapsible-body { padding: 8px 9px 9px; }
+}
