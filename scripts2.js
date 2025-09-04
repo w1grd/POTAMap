@@ -3255,7 +3255,7 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
 
         popupContent += `
         <br><br><b>Total QSOs (All Activations):</b><br>
-        CW: ${cwTotal} &nbsp;|&nbsp; PHONE: ${phoneTotal} &nbsp;|&nbsp; <br>DATA: ${dataTotal}
+        CW: ${cwTotal} &nbsp;|&nbsp; PHONE: ${phoneTotal} &nbsp;|&nbsp; <br>DATA: ${dataTotal} 
         <br><br><b>Recent Activations:</b><br>${recentActivations}`;
     }
 
