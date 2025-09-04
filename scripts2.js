@@ -262,13 +262,15 @@ function ensurePopupCollapsibleCss() {
     if (document.getElementById('popup-collapsible-css')) return;
     const css = `
 .leaflet-popup-content details.popup-collapsible {
-  margin: 8px 0 12px;
+  margin: 6px 0 6px;
   padding: 0;
   border: 1px solid rgba(0,0,0,0.15);
   border-radius: 6px;
   background: #fafafa;
   overflow: hidden;
 }
+.leaflet-popup-content details.popup-collapsible:first-of-type { margin-top: 4px; }
+.leaflet-popup-content details.popup-collapsible:last-of-type  { margin-bottom: 4px; }
 .leaflet-popup-content details.popup-collapsible > summary {
   cursor: pointer;
   list-style: none;
@@ -329,11 +331,13 @@ function foldPopupSections(html) {
             const body = document.createElement('div');
             body.className = 'popup-collapsible-body';
 
-            // Everything is in wrapper; we start after the boldEl (and any trailing colon/space/br)
-            let node = boldEl;
-            // If there's a trailing colon in a separate text node, skip it here and let content start after
-            while (node && (node.nodeName === 'B' || (node.nodeType === 3 && /^[\s:|]+$/.test(node.textContent)) || (node.nodeName === 'BR'))) {
-                node = node.nextSibling;
+            // Start immediately after the section heading and trim only whitespace/colon breaks.
+            // Do NOT skip the next <b>...> label (e.g., "Activator:"), or it will end up outside the panel.
+            let node = boldEl.nextSibling;
+            while (node && ((node.nodeType === 3 && /^[\s:|]+$/.test(node.textContent)) || node.nodeName === 'BR')) {
+                const nextAfter = node.nextSibling;
+                node.remove(); // tighten vertical spacing and remove stray colon text nodes
+                node = nextAfter;
             }
 
             // Collect until we hit the next bold heading that looks like a section title
@@ -350,25 +354,24 @@ function foldPopupSections(html) {
 
             details.appendChild(body);
 
-            // Replace the original bold heading with our details block
+            // Replace the original bold heading with our details panel
             if (boldEl.parentNode) {
-                // Remove any trailing colon text node immediately after the <b>…</b>
-                if (boldEl.nextSibling && boldEl.nextSibling.nodeType === 3 && /^[\s:|]+$/.test(boldEl.nextSibling.textContent)) {
-                    boldEl.nextSibling.remove();
-                }
                 boldEl.replaceWith(details);
             }
         }
 
         // Find bold headings that we want to fold
         const bolds = Array.from(wrapper.querySelectorAll('b'));
-        // Process in document order so ranges move correctly
+        // Idempotency: do not double-wrap if already wrapped (look for parent details.popup-collapsible)
         for (const b of bolds) {
             const t = (b.textContent || '').trim();
-            if (/^Recent Activations:\s*$/i.test(t)) {
-                makeDetailsFromBold(b, 'Recent Activations');
-            } else if (/^Current Activation:\s*$/i.test(t)) {
-                makeDetailsFromBold(b, 'Current Activation');
+            if ((/^Recent Activations:\s*$/i.test(t) || /^Current Activation:\s*$/i.test(t)) &&
+                !(b.parentElement && b.parentElement.classList && b.parentElement.classList.contains('popup-collapsible'))) {
+                if (/^Recent Activations:\s*$/i.test(t)) {
+                    makeDetailsFromBold(b, 'Recent Activations');
+                } else if (/^Current Activation:\s*$/i.test(t)) {
+                    makeDetailsFromBold(b, 'Current Activation');
+                }
             }
         }
 
@@ -1195,6 +1198,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Initialize the map, then kick off the mode check and worker if needed
         await nextFrame();
         await setupPOTAMap();
+
+        // Map-level safety: fold popup sections even for pre-existing markers/popups.
+        if (map && typeof map.on === 'function') {
+            map.on('popupopen', function(ev) {
+                try {
+                    const popup = ev && ev.popup;
+                    if (!popup || typeof popup.getContent !== 'function') return;
+                    const cur = popup.getContent();
+                    if (typeof cur === 'string' &&
+                        (cur.indexOf('Recent Activations:') >= 0 || cur.indexOf('Current Activation:') >= 0)) {
+                        const folded = foldPopupSections(cur);
+                        if (folded && folded !== cur) popup.setContent(folded);
+                    }
+                } catch (e) {
+                    console.warn('map-level foldPopupSections failed:', e);
+                }
+            });
+        }
 
         // Use a shared Canvas renderer for circle markers (significantly faster than default SVG)
         try {
