@@ -28,14 +28,15 @@
     pointer-events: none;
 }
 
+/* Purple highlight for newly added parks */
 .pulse-marker {
     pointer-events: none;
     width: 20px;
     height: 20px;
-    background-color: #800080;
+    background-color: #800080 !important;
     border-radius: 50%;
     border: 2px solid black;
-    box-shadow: 0 0 8px rgba(128, 0, 128, 0.7);
+    box-shadow: 0 0 8px rgba(128, 0, 128, 0.7) !important;
     opacity: 1;
     z-index: 1000;
     transform: translate(-10px, -10px);
