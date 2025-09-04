@@ -4630,6 +4630,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 await saveParkActivationsToIndexedDB(reference, parkActivations);
 
                 let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                // Ensure the popup uses collapsible panels for activation sections
+                popupContent = foldPopupSections(popupContent);
 
                 if (park.change) {
                     popupContent += `
