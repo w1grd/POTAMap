@@ -1644,8 +1644,8 @@ async function redrawMarkersWithFilters() {
             // Use recent-adds set instead of created timestamp
             const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
             const isNew = RECENT.has(reference);
-            // Gate the purple highlighting behind the New filter chip
-            const showNewColor = !!potaFilters?.newParks && isNew;
+            // Always show purple highlight for parks recently added to the system
+            const showNewColor = isNew;
             const currentActivation = spotByRef[reference];
             const isActive = !!currentActivation;
             const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
@@ -1695,7 +1695,7 @@ async function redrawMarkersWithFilters() {
                 }
             } else {
                 const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
-                const fillColor = showNewColor ? "#800080" : baseColor; // purple only when New filter ON and truly new
+                const fillColor = showNewColor ? "#800080" : baseColor; // purple for newly added parks
                 marker = L.circleMarker([latitude, longitude], {
                     renderer: __canvasRenderer || undefined,
                     radius: 6,
