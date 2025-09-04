@@ -322,6 +322,11 @@ function foldPopupSections(html) {
         function makeDetailsFromBold(boldEl, titleText) {
             const details = document.createElement('details'); // closed by default
             details.className = 'popup-collapsible';
+            if (titleText === 'Recent Activations') {
+                details.classList.add('recent-activations');
+            } else if (titleText === 'Current Activation') {
+                details.classList.add('current-activation');
+            }
 
             const summary = document.createElement('summary');
             summary.textContent = titleText;
@@ -2616,10 +2621,10 @@ function formatQsoDate(qsoDate) {
         const day = qsoDate.substring(6, 8);
         date = new Date(`${year}-${month}-${day}`);
     }
-    return date.toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
+    return date.toLocaleDateString('en-US', {
+        year: '2-digit',
+        month: '2-digit',
+        day: '2-digit'
     });
 }
 
@@ -4630,6 +4635,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 await saveParkActivationsToIndexedDB(reference, parkActivations);
 
                 let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                // Ensure the popup uses collapsible panels for activation sections
+                popupContent = foldPopupSections(popupContent);
 
                 if (park.change) {
                     popupContent += `
