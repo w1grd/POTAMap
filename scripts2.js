@@ -4470,6 +4470,7 @@ function initializeMap(lat, lng) {
     mapInstance.on("popupopen", () => {
         skipNextSpotFetch = true;
         isPopupOpen = true;
+        __skipNextMarkerRefresh = true;
     });
     mapInstance.on("popupclose", () => {
         isPopupOpen = false;
