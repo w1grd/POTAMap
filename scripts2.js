@@ -245,6 +245,11 @@ let __canvasRenderer = null; // initialized after map setup
 let __panInProgress = false; // suppress redraws while panning
 let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
 
+// === Popup stability lock: defer refresh while a popup auto-pans ===
+let __popupLockUntil = 0;
+function lockPopupRefresh(ms = 900) { __popupLockUntil = Date.now() + ms; }
+function shouldDeferRefresh() { return Date.now() < __popupLockUntil; }
+
 /**
  * Opens a marker's popup and lets Leaflet auto-pan the map so the popup
  * remains fully visible. Skips the next marker refresh so the popup isn't
@@ -252,6 +257,8 @@ let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
  * @param {L.Marker} marker - Leaflet marker with a bound popup
  */
 function openPopupWithAutoPan(marker) {
+// Stabilize: avoid refresh-induced popup closes while the map pans
+    lockPopupRefresh(900);
     if (!map || !marker) return;
     __skipNextMarkerRefresh = true;
     marker.openPopup();
@@ -1202,6 +1209,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Map-level safety: fold popup sections even for pre-existing markers/popups.
         if (map && typeof map.on === 'function') {
             map.on('popupopen', function (ev) {
+                lockPopupRefresh(900);
                 try {
                     const popup = ev && ev.popup;
                     if (!popup || typeof popup.getContent !== 'function') return;
@@ -1244,6 +1252,29 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             });
         }
+
+        // Defer common refreshers during popup stability window
+        (function () {
+            function wrapIfNeeded(obj, key) {
+                const fn = obj && obj[key];
+                if (typeof fn !== 'function' || fn.__wrappedForPopup) return;
+                const original = fn;
+                const wrapped = async function (...args) {
+                    if (shouldDeferRefresh()) {
+                        const delay = Math.max(0, __popupLockUntil - Date.now());
+                        return new Promise(resolve => setTimeout(() => resolve(wrapped.apply(this, args)), delay));
+                    }
+                    return original.apply(this, args);
+                };
+                wrapped.__wrappedForPopup = true;
+                obj[key] = wrapped;
+            }
+            // Known refreshers that can clear/redraw layers and inadvertently close popups
+            wrapIfNeeded(window, 'fetchAndDisplaySpotsInCurrentBounds');
+            wrapIfNeeded(window, 'applyActivationToggleState');
+            wrapIfNeeded(window, 'refreshMarkers');
+            wrapIfNeeded(window, 'updateActivationsInView');
+        })();
 
         // Use a shared Canvas renderer for circle markers (significantly faster than default SVG)
         try {
@@ -1673,13 +1704,14 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40]})
+                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40], autoClose: false})
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
                 .on('click touchend', function () {
                     this.closeTooltip();
                 });
 
             marker.on('popupopen', async function () {
+                lockPopupRefresh(900);
                 try {
                     const parkActivations = await fetchParkActivations(reference);
                     await saveParkActivationsToIndexedDB(reference, parkActivations);
