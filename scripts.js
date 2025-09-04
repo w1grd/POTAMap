@@ -5973,4 +5973,3 @@ function initializeFilterChips() {
         }
     });
 })();
-
