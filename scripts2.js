@@ -1641,11 +1641,13 @@ async function redrawMarkersWithFilters() {
             if (!bounds.contains(latLng)) return;
 
             const isUserActivated = userActivatedReferences.includes(reference);
-            // Use recent-adds set instead of created timestamp
             const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
-            const isNew = RECENT.has(reference);
-            // Gate the purple highlighting behind the New filter chip
-            const showNewColor = !!potaFilters?.newParks && isNew;
+            let createdTime = null;
+            if (created) {
+                createdTime = typeof created === 'number' ? created : new Date(created).getTime();
+            }
+            const isNew = RECENT.has(reference) || (createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000));
+            const showNewColor = isNew; // always highlight truly new parks
             const currentActivation = spotByRef[reference];
             const isActive = !!currentActivation;
             const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
@@ -1695,7 +1697,7 @@ async function redrawMarkersWithFilters() {
                 }
             } else {
                 const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
-                const fillColor = showNewColor ? "#800080" : baseColor; // purple only when New filter ON and truly new
+                const fillColor = showNewColor ? "#800080" : baseColor; // purple for newly added parks
                 marker = L.circleMarker([latitude, longitude], {
                     renderer: __canvasRenderer || undefined,
                     radius: 6,
@@ -4596,14 +4598,14 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 ? created
                 : new Date(created).getTime();
         }
-        const isNew = createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000);
-//        const isNew = (Date.now() - new Date(created).getTime()) <= (30 * 24 * 60 * 60 * 1000); // 30 days
+        const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
+        const isNew = RECENT.has(reference) || (createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000));
         const currentActivation = spots?.find(spot => spot.reference === reference);
         const isActive = !!currentActivation;
         const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
 
-        // Show pulsing active icon whenever the park is currently on-air, even if activations === 0 (first activation)
-        const useActiveDiv = !!isActive;
+        // Show pulsing div icons for active or newly added parks
+        const useDivIcon = isNew || isActive;
 
         // Apply Filters (OR semantics)
         if (!shouldDisplayParkFlags({isUserActivated, isActive, isNew})) return;
@@ -4636,16 +4638,17 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             }
         }
 
-        const marker = useActiveDiv
+        const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated, created);
+        const marker = useDivIcon
             ? L.marker([latitude, longitude], {
                 icon: L.divIcon({
-                    className: markerClassName,
+                    className: `leaflet-div-icon ${markerClassName}`.trim(),
                     iconSize: [20, 20],
                 })
             })
             : L.circleMarker([latitude, longitude], {
                 radius: 6,
-                fillColor: getMarkerColorConfigured(parkActivationCount, isUserActivated, created), // Blue
+                fillColor: baseColor,
                 color: "#000",
                 weight: 1,
                 opacity: 1,
