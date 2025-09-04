@@ -477,61 +477,112 @@ function setUserLocationMarker(lat, lng) {
  * Centers the map on the user's current geolocation and drops/updates a pin.
  * Keeps the current zoom level.
  */
-function centerMapOnGeolocation() {
+async function centerMapOnGeolocation() {
     const currentZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : undefined;
 
-    if (!navigator.geolocation) {
-        console.warn('Geolocation not supported; falling back.');
+    // Helper to try saved center or fallback
+    function fallbackToSavedOrDefault() {
         const saved = localStorage.getItem('mapCenter');
         if (saved) {
             try {
                 const [lat, lng] = JSON.parse(saved);
-                map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
-            } catch (e) {
-                // ignore parse error
-            }
-        } else if (typeof fallbackToDefaultLocation === 'function') {
-            fallbackToDefaultLocation();
+                if (map) map.setView([lat, lng], currentZoom, { animate: true, duration: 1.0 });
+                if (typeof showToast === 'function') {
+                    showToast("Using last saved map center (geolocation unavailable).", { sticky: false, kind: 'error', showSpinner: false });
+                }
+                return;
+            } catch (_e) {}
         }
+        if (typeof fallbackToDefaultLocation === 'function') {
+            fallbackToDefaultLocation();
+            if (typeof showToast === 'function') {
+                showToast("Using default US center (geolocation unavailable).", { sticky: false, kind: 'error', showSpinner: false });
+            }
+        }
+    }
+
+    // Preflight: Permissions API for clearer diagnostics
+    try {
+        if ('permissions' in navigator && navigator.permissions.query) {
+            const st = await navigator.permissions.query({ name: 'geolocation' });
+            if (st.state === 'denied') {
+                console.warn('Geolocation permission is denied at the browser/site level.');
+                if (typeof showToast === 'function') {
+                    showToast("Location permission is denied for this site. Enable it in your browser settings.", { kind: 'error', showSpinner: false });
+                }
+                fallbackToSavedOrDefault();
+                return;
+            }
+            if (st.state === 'prompt' && typeof showToast === 'function') {
+                showToast("Requesting your location… (check your browser’s prompt)", { sticky: false, showSpinner: true });
+            }
+        }
+    } catch (_e) {
+        // Permissions API not available – continue
+    }
+
+    if (!('geolocation' in navigator)) {
+        console.warn('Geolocation not supported; falling back.');
+        if (typeof showToast === 'function') {
+            showToast("This device/browser doesn’t support geolocation.", { kind: 'error', showSpinner: false });
+        }
+        fallbackToSavedOrDefault();
         return;
     }
+
+    const opts = {
+        enableHighAccuracy: true,
+        maximumAge: 5 * 60 * 1000, // accept a fix up to 5 minutes old
+        timeout: 60000            // allow up to 60s to get a fresh fix
+    };
 
     navigator.geolocation.getCurrentPosition(
         (position) => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
 
-            // Update globals if you rely on them elsewhere
-            try {
-                window.userLat = lat;
-                window.userLng = lng;
-            } catch (e) {
-            }
+            try { window.userLat = lat; window.userLng = lng; } catch (_e) {}
 
-            if (typeof setUserLocationMarker === 'function') {
-                setUserLocationMarker(lat, lng);
-            }
+            if (typeof setUserLocationMarker === 'function') setUserLocationMarker(lat, lng);
+            if (map) map.setView([lat, lng], currentZoom, { animate: true, duration: 1.0 });
 
-            if (map) {
-                map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
+            try { localStorage.setItem('mapCenter', JSON.stringify([lat, lng])); } catch (_e) {}
+            if (typeof showToast === 'function') {
+                showToast(`Centered on your location (${lat.toFixed(4)}, ${lng.toFixed(4)}).`, { sticky: false, kind: 'success', showSpinner: false });
             }
         },
         (error) => {
-            console.warn('Geolocation error:', error && error.message);
-            const saved = localStorage.getItem('mapCenter');
-            if (saved) {
-                try {
-                    const [lat, lng] = JSON.parse(saved);
-                    map.setView([lat, lng], currentZoom, {animate: true, duration: 1.0});
-                } catch (e) {
-                    // ignore parse error
-                }
-            } else if (typeof fallbackToDefaultLocation === 'function') {
-                fallbackToDefaultLocation();
+            let msg = 'Geolocation error.';
+            if (error && typeof error.code === 'number') {
+                if (error.code === 1) msg = 'Location permission was denied.';
+                else if (error.code === 2) msg = 'Location unavailable (try going outside or turning on Location Services).';
+                else if (error.code === 3) msg = 'Timed out while getting a location fix.';
             }
+            console.warn('Geolocation error:', error && error.message);
+            if (typeof showToast === 'function') {
+                showToast(msg, { kind: 'error', showSpinner: false });
+            }
+            fallbackToSavedOrDefault();
         },
-        {enableHighAccuracy: true, maximumAge: 30000, timeout: 15000}
+        opts
     );
+}
+
+// Helper for console diagnosis
+async function diagnoseGeolocation() {
+    const findings = {};
+    findings.secureContext = window.isSecureContext;
+    findings.inIframe = (function(){ try { return window !== window.top; } catch(_){ return true; } })();
+    findings.permissionsPolicyHint = 'Check server header: Permissions-Policy: geolocation=(self "https://pota.review")';
+    try {
+        if ('permissions' in navigator && navigator.permissions.query) {
+            findings.permissionState = (await navigator.permissions.query({ name: 'geolocation' })).state;
+        } else {
+            findings.permissionState = 'unknown (Permissions API not available)';
+        }
+    } catch { findings.permissionState = 'unknown (query failed)'; }
+    try { console.table(findings); } catch(_) { console.log(findings); }
+    return findings;
 }
 
 /** Bind an existing “Center On My Location” button if present */
