@@ -693,14 +693,17 @@
     pointer-events: none !important;
 }
 /* === Popup collapsibles (Recent / Current Activation) === */
+
 .leaflet-popup-content details.popup-collapsible {
-    margin: 8px 0 12px;
+    margin: 6px 0 6px;
     padding: 0;
     border: 1px solid rgba(0,0,0,0.15);
     border-radius: 6px;
     background: #fafafa;
     overflow: hidden;
 }
+.leaflet-popup-content details.popup-collapsible:first-of-type { margin-top: 4px; }
+.leaflet-popup-content details.popup-collapsible:last-of-type { margin-bottom: 4px; }
 
 .leaflet-popup-content details.popup-collapsible > summary {
     cursor: pointer;
