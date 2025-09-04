@@ -1206,6 +1206,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await nextFrame();
         await setupPOTAMap();
 
+
         // Map-level safety: fold popup sections even for pre-existing markers/popups.
         if (map && typeof map.on === 'function') {
             map.on('popupopen', function (ev) {
