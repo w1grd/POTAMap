@@ -538,6 +538,10 @@
     background: #0056b3;
 }
 
+#hamburgerMenu #menu #activationsFileInput {
+    display: none;
+}
+
 /* Mobile hamburger menu tweaks */
 #hamburgerMenu.mobile {
     top: 4px;

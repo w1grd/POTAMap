@@ -1955,6 +1955,8 @@ function initializeMenu() {
                         <div class="panel-content">
                             <button id="mapHelpButton" onclick="window.open('https://pota.review/howto/how-to-use-the-potamap/', '_blank')">How to Use This Map</button>
                             <button id="potaNewsButton" onclick="window.open('https://pota.review', '_blank')">Visit POTA News & Reviews</button>
+                            <button id="uploadActivations">Upload Activations File</button>
+                            <input type="file" id="activationsFileInput" accept=".csv" />
                             <div id="callsignDisplay" style="text-align: center; font-weight: bold; padding: 0.5em; font-size: 0.75em; background: #f0f0f0; margin-top: 0.5em;">
                                 Callsign: <span id="callsignText">please set</span>
                             </div>
@@ -1971,6 +1973,13 @@ function initializeMenu() {
     document.getElementById('clearSearch').addEventListener('click', clearSearchInput);
     document.getElementById('searchBox').addEventListener('keydown', handleSearchEnter);
     document.getElementById('centerOnGeolocation').addEventListener('click', centerMapOnGeolocation);
+
+    const uploadBtn = document.getElementById('uploadActivations');
+    const fileInput = document.getElementById('activationsFileInput');
+    if (uploadBtn && fileInput) {
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleFileUpload);
+    }
 
     buildFiltersPanel(document.getElementById('filtersPanelContent'));
     buildModeFilterPanel(document.getElementById('modeFilterPanelContent'));
