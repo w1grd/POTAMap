@@ -3971,11 +3971,31 @@ function renderCallsignControl(host) {
  * so it also works if the Info panel is rendered later.
  */
 function mountCallsignControlInInfoPanel() {
-  const SELECTORS = ['#infoPanel', '#info', '.info-panel', '.info', '[data-panel="info"]'];
+  const SELECTORS = [
+    '#infoPanel', '#info', '.info-panel', '.info', '[data-panel="info"]',
+    '#menu' // fallback to the right-side menu container
+  ];
   let host = null;
   for (const s of SELECTORS) {
-    host = document.querySelector(s);
-    if (host) break;
+    const cand = document.querySelector(s);
+    if (cand) { host = cand; break; }
+  }
+  // If we fell back to #menu, try to place the control just above the callsign display if present.
+  if (host && host.id === 'menu') {
+    // ensure we haven't already rendered
+    if (!host.querySelector('#callsignControl')) {
+      // Try to insert before the existing callsignDisplay block
+      const csEl = host.querySelector('#callsignDisplay');
+      if (csEl && csEl.parentNode) {
+        // Render into a temporary wrapper, then insert before callsignDisplay
+        const temp = document.createElement('div');
+        renderCallsignControl(temp);
+        csEl.parentNode.insertBefore(temp.firstElementChild, csEl);
+      } else {
+        renderCallsignControl(host);
+      }
+    }
+    return;
   }
   if (host) {
     renderCallsignControl(host);
@@ -3987,7 +4007,20 @@ function mountCallsignControlInInfoPanel() {
     for (const s of SELECTORS) {
       const el = document.querySelector(s);
       if (el) {
-        renderCallsignControl(el);
+        if (el.id === 'menu') {
+          if (!el.querySelector('#callsignControl')) {
+            const csEl = el.querySelector('#callsignDisplay');
+            if (csEl && csEl.parentNode) {
+              const temp = document.createElement('div');
+              renderCallsignControl(temp);
+              csEl.parentNode.insertBefore(temp.firstElementChild, csEl);
+            } else {
+              renderCallsignControl(el);
+            }
+          }
+        } else {
+          renderCallsignControl(el);
+        }
         obs.disconnect();
         return;
       }
