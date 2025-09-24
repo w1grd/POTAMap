@@ -4590,8 +4590,11 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         console.log("Using existing activations layer.");
     }
 
-    layerGroup.clearLayers(); // Clear existing markers before adding new ones
-
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+        console.log('[display] Skip layer clear while popup open/opening');
+    } else {
+        layerGroup.clearLayers(); // Clear existing markers before adding new ones
+    }
     parks.forEach((park) => {
         const {reference, name, latitude, longitude, activations: parkActivationCount, created} = park;
         const isUserActivated = userActivatedReferences.includes(reference);
@@ -4677,7 +4680,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 keepInView: true,
                 autoPan: true,
                 autoPanPadding: [30, 40],
-                keepInView: false
+                keepInView: false,
+                autoClose: false
             })
 
             .bindTooltip(tooltipText, {
@@ -4696,6 +4700,15 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         };
         // NOTE: On mobile, binding both click and touchend causes a double-fire.
         // Leaflet synthesizes click from touch; use click only to avoid open-then-close.
+
+        const prePress = (e) => {
+            window.__skipNextMarkerRefresh = true;   // cover the auto-pan period
+            if (e) L.DomEvent.stop(e);               // stop propagation to map (prevents stray close)
+        };
+        marker.on('mousedown', prePress);
+        marker.on('touchstart', prePress);
+
+// existing:
         marker.on('click', handleMarkerTap);
 
         marker.on('popupopen', async function () {
@@ -5267,7 +5280,10 @@ function applyActivationToggleState() {
         "Show Currently On Air",
         "Show All Spots",
     ];
-
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+        console.log('[applyToggle] Skipping applyActivationToggleState — popup open/opening');
+        return;
+    }
     if (toggleButton) {
         toggleButton.innerText = buttonTexts[activationToggleState];
     }
