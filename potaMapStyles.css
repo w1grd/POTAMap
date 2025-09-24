@@ -97,6 +97,23 @@
     -webkit-animation: none !important;
 }
 
+/* Ensure interactive park markers remain tappable even when pulsing */
+.leaflet-marker-icon.park-spot-icon {
+    pointer-events: auto;
+    touch-action: manipulation;
+    cursor: pointer;
+}
+
+.leaflet-marker-icon.park-spot-icon.pulse-marker,
+.leaflet-marker-icon.park-spot-icon.active-pulse-marker {
+    pointer-events: auto;
+}
+
+.desktop-mode .leaflet-marker-icon.park-spot-icon.pulse-marker,
+.desktop-mode .leaflet-marker-icon.park-spot-icon.active-pulse-marker {
+    pointer-events: auto;
+}
+
 /* Ensure PQL highlight pulses render behind standard markers */
 .pql-pulse-icon {
     pointer-events: none;
