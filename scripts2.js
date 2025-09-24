@@ -2,6 +2,35 @@
 if (typeof window.isPopupOpen === 'undefined') window.isPopupOpen = false;
 if (typeof window.__skipNextMarkerRefresh === 'undefined') window.__skipNextMarkerRefresh = false;
 
+// Open a popup without letting Leaflet's autoPan race with redraws
+function openPopupSafely(marker) {
+    try {
+        const ll = marker.getLatLng();
+        const inView = map.getBounds().pad(-0.05).contains(ll); // small inset so “edge” triggers a pan
+
+        // Pause dragging during tap→pan to avoid stray touch->drag events closing the popup
+        if (map.dragging && map.dragging.enabled()) map.dragging.disable();
+
+        const finish = () => {
+            try { marker.openPopup(); } catch {}
+            try { if (map.dragging && !map.dragging.enabled()) map.dragging.enable(); } catch {}
+            console.log('[safeOpen] popup opened');
+        };
+
+        if (!inView) {
+            console.log('[safeOpen] panTo before open');
+            map.once('moveend', finish);
+            map.panTo(ll, { animate: true });
+        } else {
+            finish();
+        }
+    } catch (e) {
+        console.warn('[safeOpen] failed', e);
+        try { marker.openPopup(); } catch {}
+        try { if (map.dragging && !map.dragging.enabled()) map.dragging.enable(); } catch {}
+    }
+}
+
 /** Run a callback once the Leaflet map exists and is fully ready. */
 function whenMapReady(cb) {
     if (typeof cb !== 'function') return;
@@ -260,7 +289,7 @@ function shouldDeferRefresh() { return Date.now() < __popupLockUntil; }
  * closed by the resulting map move.
  * @param {L.Marker} marker - Leaflet marker with a bound popup
  */
-function openPopupWithAutoPan(marker) {
+function openPopupSafely(marker) {
 // Stabilize: avoid refresh-induced popup closes while the map pans
     lockPopupRefresh(900);
     if (!map || !marker) return;
@@ -1735,7 +1764,10 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40], autoClose: false})
+                .bindPopup("<b>Loading park info...</b>", {
+                    keepInView: true, autoPan: false, autoPanPadding: [30, 40], autoClose: false,
+                    closeOnClick: false
+                })
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
                 .on('click touchend', function () {
                     this.closeTooltip();
@@ -4532,6 +4564,7 @@ function initializeMap(lat, lng) {
     let skipNextSpotFetch = false;
     const debouncedSpotFetch = debounce(() => {
         console.log("Map moved or zoomed. Updating spots...");
+        console.log('[moveend] guards:', { isPopupOpen, skipNext: __skipNextMarkerRefresh });
         fetchAndDisplaySpotsInCurrentBounds(mapInstance)
             .then(() => applyActivationToggleState());
     }, 300);
@@ -4714,7 +4747,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             window.__skipNextMarkerRefresh = true;
             console.log('[markerTap] Popup tap detected, skipNextMarkerRefresh set true');
             marker.closeTooltip();
-            openPopupWithAutoPan(marker);
+            openPopupSafely(marker);
         };
         // NOTE: On mobile, binding both click and touchend causes a double-fire.
         // Leaflet synthesizes click from touch; use click only to avoid open-then-close.
