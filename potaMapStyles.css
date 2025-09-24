@@ -1,5 +1,12 @@
 /* potaMapStyles.css */
 
+/* Ensure overlay panes never block marker taps */
+.leaflet-pane.searchHighlightPane,
+#pqlOverlayPane, #searchHighlightPane,
+#pqlOverlayPane *, #searchHighlightPane * {
+    pointer-events: none !important;
+}
+
 /* Indicator while mode data updates */
 #mode-loading {
     position: absolute;
