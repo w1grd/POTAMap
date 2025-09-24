@@ -1,36 +1,3 @@
-// --- Global popup/refresh coordination flags ---
-if (typeof window.isPopupOpen === 'undefined') window.isPopupOpen = false;
-if (typeof window.__skipNextMarkerRefresh === 'undefined') window.__skipNextMarkerRefresh = false;
-
-// Open a popup without letting Leaflet's autoPan race with redraws
-function openPopupSafely(marker) {
-    try {
-        const ll = marker.getLatLng();
-        const inView = map.getBounds().pad(-0.05).contains(ll); // small inset so “edge” triggers a pan
-
-        // Pause dragging during tap→pan to avoid stray touch->drag events closing the popup
-        if (map.dragging && map.dragging.enabled()) map.dragging.disable();
-
-        const finish = () => {
-            try { marker.openPopup(); } catch {}
-            try { if (map.dragging && !map.dragging.enabled()) map.dragging.enable(); } catch {}
-            console.log('[safeOpen] popup opened');
-        };
-
-        if (!inView) {
-            console.log('[safeOpen] panTo before open');
-            map.once('moveend', finish);
-            map.panTo(ll, { animate: true });
-        } else {
-            finish();
-        }
-    } catch (e) {
-        console.warn('[safeOpen] failed', e);
-        try { marker.openPopup(); } catch {}
-        try { if (map.dragging && !map.dragging.enabled()) map.dragging.enable(); } catch {}
-    }
-}
-
 /** Run a callback once the Leaflet map exists and is fully ready. */
 function whenMapReady(cb) {
     if (typeof cb !== 'function') return;
@@ -289,7 +256,7 @@ function shouldDeferRefresh() { return Date.now() < __popupLockUntil; }
  * closed by the resulting map move.
  * @param {L.Marker} marker - Leaflet marker with a bound popup
  */
-function openPopupSafely(marker) {
+function openPopupWithAutoPan(marker) {
 // Stabilize: avoid refresh-induced popup closes while the map pans
     lockPopupRefresh(900);
     if (!map || !marker) return;
@@ -1712,13 +1679,10 @@ async function redrawMarkersWithFilters() {
             let marker;
             const usingDivIcon = markerClasses.length > 0;
             if (usingDivIcon) {
-                const iconClasses = ['leaflet-div-icon', 'park-spot-icon'];
-                if (markerClassName) iconClasses.push(markerClassName);
                 marker = L.marker([latitude, longitude], {
-                    interactive: true,
                     icon: L.divIcon({
                         // include Leaflet's default class for compatibility with Leaflet styles
-                        className: iconClasses.join(' '),
+                        className: `leaflet-div-icon ${markerClassName}`.trim(),
                         iconSize: [20, 20],
                     })
                 });
@@ -1764,10 +1728,7 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {
-                    keepInView: true, autoPan: false, autoPanPadding: [30, 40], autoClose: false,
-                    closeOnClick: false
-                })
+                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40], autoClose: false})
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
                 .on('click touchend', function () {
                     this.closeTooltip();
@@ -4539,7 +4500,6 @@ function initializeMap(lat, lng) {
         zoom: savedZoom || (isMobile ? 12 : 10),
         zoomControl: !isMobile,
         attributionControl: true,
-        closePopupOnClick: false // keep popups open on incidental map clicks (mobile)
     });
 
     console.log("Initialized map at:", mapInstance.getCenter(), "zoom:", mapInstance.getZoom());
@@ -4564,29 +4524,18 @@ function initializeMap(lat, lng) {
     let skipNextSpotFetch = false;
     const debouncedSpotFetch = debounce(() => {
         console.log("Map moved or zoomed. Updating spots...");
-        console.log('[moveend] guards:', { isPopupOpen, skipNext: __skipNextMarkerRefresh });
         fetchAndDisplaySpotsInCurrentBounds(mapInstance)
             .then(() => applyActivationToggleState());
     }, 300);
-    mapInstance.on('popupopen', () => {
+    mapInstance.on("popupopen", () => {
+        skipNextSpotFetch = true;
         isPopupOpen = true;
         __skipNextMarkerRefresh = true;
-        console.log('[popupopen] armed guards: isPopupOpen=true, skipNextMarkerRefresh=true');
     });
-
-    mapInstance.on('popupclose', () => {
+    mapInstance.on("popupclose", () => {
         isPopupOpen = false;
+        skipNextSpotFetch = false;
         __skipNextMarkerRefresh = false;
-        console.log('[popupclose] isPopupOpen=false, skipNextMarkerRefresh=false');
-    });
-
-    // Prevent stray map clicks from closing the popup on mobile during pan/settle
-    mapInstance.on('click', (e) => {
-        if (isPopupOpen) {
-            const oe = e && e.originalEvent;
-            if (oe) L.DomEvent.stop(oe);
-            console.log('[mapClick] swallowed map click while popup open');
-        }
     });
     if (!isDesktopMode) {
         mapInstance.on("moveend", () => {
@@ -4638,12 +4587,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         console.log("Using existing activations layer.");
     }
 
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[display] Skip layer clear while popup open/opening');
-    } else {
-        layerGroup.clearLayers(); // Clear existing markers before adding new ones
-    }
-    console.log('[display] displayParksOnMap invoked, skipNextMarkerRefresh=', window.__skipNextMarkerRefresh, 'isPopupOpen=', window.isPopupOpen);
+    layerGroup.clearLayers(); // Clear existing markers before adding new ones
+
     parks.forEach((park) => {
         const {reference, name, latitude, longitude, activations: parkActivationCount, created} = park;
         const isUserActivated = userActivatedReferences.includes(reference);
@@ -4696,9 +4641,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated, created);
         const marker = useDivIcon
             ? L.marker([latitude, longitude], {
-                interactive: true,
                 icon: L.divIcon({
-                    className: ['leaflet-div-icon', 'park-spot-icon', markerClassName].filter(Boolean).join(' '),
+                    className: `leaflet-div-icon ${markerClassName}`.trim(),
                     iconSize: [20, 20],
                 })
             })
@@ -4729,9 +4673,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 keepInView: true,
                 autoPan: true,
                 autoPanPadding: [30, 40],
-                keepInView: false,
-                autoClose: false,
-                closeOnClick: false // do not let background clicks close the popup
+                keepInView: false
             })
 
             .bindTooltip(tooltipText, {
@@ -4743,27 +4685,11 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
         const handleMarkerTap = (e) => {
             if (e) L.DomEvent.stop(e);
-            // prevent the next moveend-triggered refresh from clearing layers
-            window.__skipNextMarkerRefresh = true;
-            console.log('[markerTap] Popup tap detected, skipNextMarkerRefresh set true');
             marker.closeTooltip();
-            openPopupSafely(marker);
+            openPopupWithAutoPan(marker);
         };
-        // NOTE: On mobile, binding both click and touchend causes a double-fire.
-        // Leaflet synthesizes click from touch; use click only to avoid open-then-close.
-
-        const prePress = (e) => {
-            window.__skipNextMarkerRefresh = true;  // cover the auto-pan period
-            window.isPopupOpen = true;              // arm guard BEFORE Leaflet fires popupopen
-            if (e) L.DomEvent.stop(e);
-            console.log('[prePress] set skipNextMarkerRefresh=true, isPopupOpen=true');
-        };
-
-        marker.on('mousedown', prePress);
-        marker.on('touchstart', prePress);
-
-// existing:
-        marker.on('click', handleMarkerTap);
+        marker.on('click touchend', handleMarkerTap);
+        marker.on('touchend', handleMarkerTap);
 
         marker.on('popupopen', async function () {
             try {
@@ -5334,11 +5260,7 @@ function applyActivationToggleState() {
         "Show Currently On Air",
         "Show All Spots",
     ];
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[applyToggle] Skipping applyActivationToggleState — popup open/opening');
-        return;
-    }
-    console.log('[applyToggle] applyActivationToggleState invoked, skipNextMarkerRefresh=', window.__skipNextMarkerRefresh, 'isPopupOpen=', window.isPopupOpen);
+
     if (toggleButton) {
         toggleButton.innerText = buttonTexts[activationToggleState];
     }
@@ -5378,11 +5300,6 @@ function applyActivationToggleState() {
  */
 async function fetchAndDisplaySpots() {
     const SPOT_API_URL = 'https://api.pota.app/v1/spots';
-    // If a popup is open/opening, skip this refresh to avoid clearing the layer
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[spots] Skipping refresh because a popup is open/opening');
-        return;
-    }
     try {
         const response = await fetch(SPOT_API_URL);
         if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
@@ -5423,10 +5340,6 @@ async function fetchAndDisplaySpots() {
  * Clicking on a spot now also closes any visible tooltip.
  */
 async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[spots-bounded] Skipping refresh because a popup is open/opening');
-        return;
-    }
     const SPOT_API_URL = "https://api.pota.app/v1/spots";
     try {
         const response = await fetch(SPOT_API_URL);
@@ -5584,10 +5497,6 @@ optimizeLeafletControlsAndPopups();
  * Refreshes the map activations based on the current state.
  */
 function refreshMapActivations() {
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[refresh] Skipping refresh because a popup is open/opening');
-        return;
-    }
     // Clear existing markers or layers if necessary
     if (map.activationsLayer) {
         if (!window.__nonDestructiveRedraw) {
