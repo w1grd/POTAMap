@@ -4595,6 +4595,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     } else {
         layerGroup.clearLayers(); // Clear existing markers before adding new ones
     }
+    console.log('[display] displayParksOnMap invoked, skipNextMarkerRefresh=', window.__skipNextMarkerRefresh, 'isPopupOpen=', window.isPopupOpen);
     parks.forEach((park) => {
         const {reference, name, latitude, longitude, activations: parkActivationCount, created} = park;
         const isUserActivated = userActivatedReferences.includes(reference);
@@ -4695,6 +4696,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             if (e) L.DomEvent.stop(e);
             // prevent the next moveend-triggered refresh from clearing layers
             window.__skipNextMarkerRefresh = true;
+            console.log('[markerTap] Popup tap detected, skipNextMarkerRefresh set true');
             marker.closeTooltip();
             openPopupWithAutoPan(marker);
         };
@@ -5284,6 +5286,7 @@ function applyActivationToggleState() {
         console.log('[applyToggle] Skipping applyActivationToggleState — popup open/opening');
         return;
     }
+    console.log('[applyToggle] applyActivationToggleState invoked, skipNextMarkerRefresh=', window.__skipNextMarkerRefresh, 'isPopupOpen=', window.isPopupOpen);
     if (toggleButton) {
         toggleButton.innerText = buttonTexts[activationToggleState];
     }
