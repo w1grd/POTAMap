@@ -4507,6 +4507,7 @@ function initializeMap(lat, lng) {
         zoom: savedZoom || (isMobile ? 12 : 10),
         zoomControl: !isMobile,
         attributionControl: true,
+        closePopupOnClick: false // keep popups open on incidental map clicks (mobile)
     });
 
     console.log("Initialized map at:", mapInstance.getCenter(), "zoom:", mapInstance.getZoom());
@@ -4544,6 +4545,15 @@ function initializeMap(lat, lng) {
         isPopupOpen = false;
         __skipNextMarkerRefresh = false;
         console.log('[popupclose] isPopupOpen=false, skipNextMarkerRefresh=false');
+    });
+
+    // Prevent stray map clicks from closing the popup on mobile during pan/settle
+    mapInstance.on('click', (e) => {
+        if (isPopupOpen) {
+            const oe = e && e.originalEvent;
+            if (oe) L.DomEvent.stop(oe);
+            console.log('[mapClick] swallowed map click while popup open');
+        }
     });
     if (!isDesktopMode) {
         mapInstance.on("moveend", () => {
@@ -4687,7 +4697,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 autoPan: true,
                 autoPanPadding: [30, 40],
                 keepInView: false,
-                autoClose: false
+                autoClose: false,
+                closeOnClick: false // do not let background clicks close the popup
             })
 
             .bindTooltip(tooltipText, {
