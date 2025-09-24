@@ -1,3 +1,7 @@
+// --- Global popup/refresh coordination flags ---
+if (typeof window.isPopupOpen === 'undefined') window.isPopupOpen = false;
+if (typeof window.__skipNextMarkerRefresh === 'undefined') window.__skipNextMarkerRefresh = false;
+
 /** Run a callback once the Leaflet map exists and is fully ready. */
 function whenMapReady(cb) {
     if (typeof cb !== 'function') return;
@@ -4530,15 +4534,16 @@ function initializeMap(lat, lng) {
         fetchAndDisplaySpotsInCurrentBounds(mapInstance)
             .then(() => applyActivationToggleState());
     }, 300);
-    mapInstance.on("popupopen", () => {
-        skipNextSpotFetch = true;
+    mapInstance.on('popupopen', () => {
         isPopupOpen = true;
         __skipNextMarkerRefresh = true;
+        console.log('[popupopen] armed guards: isPopupOpen=true, skipNextMarkerRefresh=true');
     });
-    mapInstance.on("popupclose", () => {
+
+    mapInstance.on('popupclose', () => {
         isPopupOpen = false;
-        skipNextSpotFetch = false;
         __skipNextMarkerRefresh = false;
+        console.log('[popupclose] isPopupOpen=false, skipNextMarkerRefresh=false');
     });
     if (!isDesktopMode) {
         mapInstance.on("moveend", () => {
@@ -4704,9 +4709,12 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         // Leaflet synthesizes click from touch; use click only to avoid open-then-close.
 
         const prePress = (e) => {
-            window.__skipNextMarkerRefresh = true;   // cover the auto-pan period
-            if (e) L.DomEvent.stop(e);               // stop propagation to map (prevents stray close)
+            window.__skipNextMarkerRefresh = true;  // cover the auto-pan period
+            window.isPopupOpen = true;              // arm guard BEFORE Leaflet fires popupopen
+            if (e) L.DomEvent.stop(e);
+            console.log('[prePress] set skipNextMarkerRefresh=true, isPopupOpen=true');
         };
+
         marker.on('mousedown', prePress);
         marker.on('touchstart', prePress);
 
@@ -5328,7 +5336,6 @@ async function fetchAndDisplaySpots() {
     const SPOT_API_URL = 'https://api.pota.app/v1/spots';
     // If a popup is open/opening, skip this refresh to avoid clearing the layer
     if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        window.__skipNextMarkerRefresh = false; // consume the flag
         console.log('[spots] Skipping refresh because a popup is open/opening');
         return;
     }
@@ -5373,7 +5380,6 @@ async function fetchAndDisplaySpots() {
  */
 async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
     if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        window.__skipNextMarkerRefresh = false;
         console.log('[spots-bounded] Skipping refresh because a popup is open/opening');
         return;
     }
@@ -5535,7 +5541,6 @@ optimizeLeafletControlsAndPopups();
  */
 function refreshMapActivations() {
     if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        window.__skipNextMarkerRefresh = false;
         console.log('[refresh] Skipping refresh because a popup is open/opening');
         return;
     }
