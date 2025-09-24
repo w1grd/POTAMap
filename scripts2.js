@@ -1679,10 +1679,13 @@ async function redrawMarkersWithFilters() {
             let marker;
             const usingDivIcon = markerClasses.length > 0;
             if (usingDivIcon) {
+                const iconClasses = ['leaflet-div-icon', 'park-spot-icon'];
+                if (markerClassName) iconClasses.push(markerClassName);
                 marker = L.marker([latitude, longitude], {
+                    interactive: true,
                     icon: L.divIcon({
                         // include Leaflet's default class for compatibility with Leaflet styles
-                        className: `leaflet-div-icon ${markerClassName}`.trim(),
+                        className: iconClasses.join(' '),
                         iconSize: [20, 20],
                     })
                 });
@@ -4641,8 +4644,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated, created);
         const marker = useDivIcon
             ? L.marker([latitude, longitude], {
+                interactive: true,
                 icon: L.divIcon({
-                    className: `leaflet-div-icon ${markerClassName}`.trim(),
+                    className: ['leaflet-div-icon', 'park-spot-icon', markerClassName].filter(Boolean).join(' '),
                     iconSize: [20, 20],
                 })
             })
