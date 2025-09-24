@@ -4689,11 +4689,14 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
         const handleMarkerTap = (e) => {
             if (e) L.DomEvent.stop(e);
+            // prevent the next moveend-triggered refresh from clearing layers
+            window.__skipNextMarkerRefresh = true;
             marker.closeTooltip();
             openPopupWithAutoPan(marker);
         };
-        marker.on('click touchend', handleMarkerTap);
-        marker.on('touchend', handleMarkerTap);
+        // NOTE: On mobile, binding both click and touchend causes a double-fire.
+        // Leaflet synthesizes click from touch; use click only to avoid open-then-close.
+        marker.on('click', handleMarkerTap);
 
         marker.on('popupopen', async function () {
             try {
@@ -5304,6 +5307,12 @@ function applyActivationToggleState() {
  */
 async function fetchAndDisplaySpots() {
     const SPOT_API_URL = 'https://api.pota.app/v1/spots';
+    // If a popup is open/opening, skip this refresh to avoid clearing the layer
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+        window.__skipNextMarkerRefresh = false; // consume the flag
+        console.log('[spots] Skipping refresh because a popup is open/opening');
+        return;
+    }
     try {
         const response = await fetch(SPOT_API_URL);
         if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
@@ -5344,6 +5353,11 @@ async function fetchAndDisplaySpots() {
  * Clicking on a spot now also closes any visible tooltip.
  */
 async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+        window.__skipNextMarkerRefresh = false;
+        console.log('[spots-bounded] Skipping refresh because a popup is open/opening');
+        return;
+    }
     const SPOT_API_URL = "https://api.pota.app/v1/spots";
     try {
         const response = await fetch(SPOT_API_URL);
@@ -5501,6 +5515,11 @@ optimizeLeafletControlsAndPopups();
  * Refreshes the map activations based on the current state.
  */
 function refreshMapActivations() {
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+        window.__skipNextMarkerRefresh = false;
+        console.log('[refresh] Skipping refresh because a popup is open/opening');
+        return;
+    }
     // Clear existing markers or layers if necessary
     if (map.activationsLayer) {
         if (!window.__nonDestructiveRedraw) {
