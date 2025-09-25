@@ -4586,6 +4586,20 @@ function initializeMap(lat, lng) {
 }
 
 
+// Find the current marker for a park reference in a LayerGroup
+function findMarkerByReference(ref, layerGroup) {
+    if (!layerGroup || typeof layerGroup.eachLayer !== 'function') return null;
+    let found = null;
+    layerGroup.eachLayer((l) => {
+        if (found) return;
+        const m = l;
+        if (m && m.park && m.park.reference === ref) {
+            found = m;
+        }
+    });
+    return found;
+}
+
 /**
  * Displays parks on the map.
  */
@@ -4704,11 +4718,10 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             .addTo(layerGroup)
             .bindPopup("<b>Loading park info...</b>", {
                 maxWidth: 280,
-                keepInView: true,
-                autoPan: true,
+                keepInView: false,
+                autoPan: false,
                 autoPanPadding: [30, 40]
             })
-
             .bindTooltip(tooltipText, {
                 direction: "top",
                 opacity: 0.9,
@@ -4718,12 +4731,47 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
         const handleMarkerTap = (e) => {
             if (e) L.DomEvent.stop(e);
-            // Guard BEFORE any autopan/move begins
-            window.__skipNextMarkerRefresh = true;
-            window.isPopupOpen = true; // “opening” intent, prevents clears on moveend path
             marker.closeTooltip();
-            openPopupWithAutoPan(marker);
-            setTimeout(() => { /* settle */ }, 0);
+
+            // We will open the popup AFTER panning and refreshing
+            const ref = reference;
+            const latlng = L.latLng(latitude, longitude);
+
+            // Do NOT set isPopupOpen here; we want refresh to proceed safely
+            window.__skipNextMarkerRefresh = false;
+
+            // Compute a target point slightly above the marker so popup has room near borders
+            const size = map.getSize();
+            const targetPoint = map.project(latlng).subtract([0, Math.round(size.y * 0.25)]);
+            const targetLatLng = map.unproject(targetPoint);
+
+            let done = false;
+            const onMoveEnd = async () => {
+                if (done) return; done = true;
+                map.off('moveend', onMoveEnd);
+
+                // Refresh spots & redraw BEFORE opening the popup
+                try {
+                    const result = await fetchAndDisplaySpotsInCurrentBounds(map);
+                    if (result !== 'deferred') {
+                        applyActivationToggleState();
+                    }
+                } catch (err) {
+                    console.warn('Refresh after pan failed:', err);
+                }
+
+                // Find the freshly re-rendered marker and open its popup
+                const fresh = findMarkerByReference(ref, map.activationsLayer);
+                if (fresh && typeof fresh.openPopup === 'function') {
+                    window.isPopupOpen = true;
+                    fresh.openPopup();
+                } else {
+                    console.warn('Marker not found after refresh for', ref);
+                }
+            };
+
+            map.on('moveend', onMoveEnd);
+            map.panTo(targetLatLng, { animate: true });
         };
         marker.on('click touchend', handleMarkerTap);
         marker.on('popupopen', async function () {
