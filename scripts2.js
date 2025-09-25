@@ -1728,7 +1728,12 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40], autoClose: false})
+                .bindPopup("<b>Loading park info...</b>", {
+                    maxWidth: 280,
+                    keepInView: true,
+                    autoPan: true,
+                    autoPanPadding: [30, 40]
+                })
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
                 .on('click touchend', function () {
                     this.closeTooltip();
@@ -4475,6 +4480,28 @@ async function updateActivationsFromScrape() {
  * @param {number} lng - Longitude for the map center.
  * @returns {L.Map} The initialized Leaflet map instance.
  */
+// ===== Popup-safe redraw guards =====
+window.isPopupOpen = window.isPopupOpen || false;
+window.__skipNextMarkerRefresh = window.__skipNextMarkerRefresh || false;
+window.__pendingMarkerRefresh = window.__pendingMarkerRefresh || false;
+
+function scheduleDeferredRefresh(reason = '') {
+    try { console.log('[defer] marker refresh scheduled', reason); } catch {}
+    window.__pendingMarkerRefresh = true;
+}
+
+function runDeferredRefresh() {
+    if (!window.__pendingMarkerRefresh) return;
+    window.__pendingMarkerRefresh = false;
+    try {
+        if (typeof applyActivationToggleState === 'function') {
+            applyActivationToggleState();
+        } else if (typeof refreshMapActivations === 'function') {
+            refreshMapActivations();
+        }
+    } catch (e) { console.warn('Deferred refresh failed:', e); }
+}
+
 function initializeMap(lat, lng) {
     // Determine if the device is mobile based on screen width
     const isMobile = window.innerWidth <= 600;
@@ -4529,13 +4556,14 @@ function initializeMap(lat, lng) {
     }, 300);
     mapInstance.on("popupopen", () => {
         skipNextSpotFetch = true;
-        isPopupOpen = true;
-        __skipNextMarkerRefresh = true;
+        window.isPopupOpen = true;
+        window.__skipNextMarkerRefresh = true;
     });
     mapInstance.on("popupclose", () => {
-        isPopupOpen = false;
+        window.isPopupOpen = false;
         skipNextSpotFetch = false;
-        __skipNextMarkerRefresh = false;
+        window.__skipNextMarkerRefresh = false;
+        setTimeout(runDeferredRefresh, 60);
     });
     if (!isDesktopMode) {
         mapInstance.on("moveend", () => {
@@ -4668,12 +4696,10 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         marker
             .addTo(layerGroup)
             .bindPopup("<b>Loading park info...</b>", {
-                // cap its width on small screens
                 maxWidth: 280,
                 keepInView: true,
                 autoPan: true,
-                autoPanPadding: [30, 40],
-                keepInView: false
+                autoPanPadding: [30, 40]
             })
 
             .bindTooltip(tooltipText, {
@@ -4689,8 +4715,6 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             openPopupWithAutoPan(marker);
         };
         marker.on('click touchend', handleMarkerTap);
-        marker.on('touchend', handleMarkerTap);
-
         marker.on('popupopen', async function () {
             try {
                 parkActivations = await fetchParkActivations(reference);
@@ -5251,6 +5275,7 @@ async function getOrPromptUserCallsign() {
 }
 
 function applyActivationToggleState() {
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) { scheduleDeferredRefresh('applyActivationToggleState'); return; }
     const toggleButton = document.getElementById('toggleActivations');
     const userActivatedReferences = activations.map((act) => act.reference);
 
@@ -5497,7 +5522,8 @@ optimizeLeafletControlsAndPopups();
  * Refreshes the map activations based on the current state.
  */
 function refreshMapActivations() {
-    // Clear existing markers or layers if necessary
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) { scheduleDeferredRefresh('refreshMapActivations'); return; }
+// Clear existing markers or layers if necessary
     if (map.activationsLayer) {
         if (!window.__nonDestructiveRedraw) {
             map.activationsLayer.clearLayers();
@@ -5985,3 +6011,19 @@ function initializeFilterChips() {
         }
     });
 })();
+
+
+if (typeof window !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.map && typeof window.map.on === 'function') {
+            map.on('movestart', () => {
+                if (window.isPopupOpen) window.__skipNextMarkerRefresh = true;
+            });
+            map.on('moveend', () => {
+                if (window.isPopupOpen) {
+                    setTimeout(() => { window.__skipNextMarkerRefresh = false; runDeferredRefresh(); }, 120);
+                }
+            });
+        }
+    });
+}
