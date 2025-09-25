@@ -4711,8 +4711,14 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
         const handleMarkerTap = (e) => {
             if (e) L.DomEvent.stop(e);
+            // Guard BEFORE any autopan/move begins
+            window.__skipNextMarkerRefresh = true;
+            window.isPopupOpen = true; // “opening” intent, prevents clears on moveend path
+            // optionally: window.__suppressNextMoveFetch = true;  // if you want a dedicated flag
             marker.closeTooltip();
             openPopupWithAutoPan(marker);
+            // allow a short settle window; moveend will fire soon
+            setTimeout(() => { /* we’ll release this in moveend/popupclose */ }, 0);
         };
         marker.on('click touchend', handleMarkerTap);
         marker.on('popupopen', async function () {
@@ -5366,6 +5372,11 @@ async function fetchAndDisplaySpots() {
  */
 async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
     const SPOT_API_URL = "https://api.pota.app/v1/spots";
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+        // Defer instead of clearing layers mid-autopan
+        scheduleDeferredRefresh('fetchAndDisplaySpotsInCurrentBounds');
+        return;
+    }
     try {
         const response = await fetch(SPOT_API_URL);
         if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
