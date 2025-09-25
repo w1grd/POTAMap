@@ -4469,10 +4469,6 @@ async function updateActivationsFromScrape() {
     }
 }
 
-// --- POTAmap: popup/refresh coordination flags (mobile fix) ---
-if (typeof window.isPopupOpen === 'undefined') window.isPopupOpen = false;
-if (typeof window.__skipNextMarkerRefresh === 'undefined') window.__skipNextMarkerRefresh = false;
-
 /**
  * Initializes the Leaflet map.
  * @param {number} lat - Latitude for the map center.
@@ -4504,7 +4500,6 @@ function initializeMap(lat, lng) {
         zoom: savedZoom || (isMobile ? 12 : 10),
         zoomControl: !isMobile,
         attributionControl: true,
-        closePopupOnClick: false
     });
 
     console.log("Initialized map at:", mapInstance.getCenter(), "zoom:", mapInstance.getZoom());
@@ -4533,12 +4528,14 @@ function initializeMap(lat, lng) {
             .then(() => applyActivationToggleState());
     }, 300);
     mapInstance.on("popupopen", () => {
-        window.isPopupOpen = true;
-        window.__skipNextMarkerRefresh = true; // cover auto-pan window
+        skipNextSpotFetch = true;
+        isPopupOpen = true;
+        __skipNextMarkerRefresh = true;
     });
     mapInstance.on("popupclose", () => {
-        window.isPopupOpen = false;
-        window.__skipNextMarkerRefresh = false;
+        isPopupOpen = false;
+        skipNextSpotFetch = false;
+        __skipNextMarkerRefresh = false;
     });
     if (!isDesktopMode) {
         mapInstance.on("moveend", () => {
@@ -4565,17 +4562,32 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
     if (!layerGroup) {
         map.activationsLayer = L.layerGroup().addTo(map);
+
+
+        // let userLocationMarker = null;
+        // function setUserLocationMarker(lat, lng) {
+        //     if (!map) return;
+        //     if (userLocationMarker) {
+        //         userLocationMarker.setLatLng([lat, lng]);
+        //     } else {
+        //         userLocationMarker = L.marker([lat, lng], {
+        //             icon: L.icon({
+        //                 iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+        //                 iconSize: [30, 30],
+        //                 iconAnchor: [15, 30],
+        //                 popupAnchor: [0, -30],
+        //             }),
+        //         }).addTo(map);
+        //     }
+        // }
+
         layerGroup = map.activationsLayer;
         console.log("Created a new activations layer.");
     } else {
         console.log("Using existing activations layer.");
     }
 
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[display] Skip layer clear — popup open/opening');
-    } else {
-        layerGroup.clearLayers(); // Clear existing markers before adding new ones
-    }
+    layerGroup.clearLayers(); // Clear existing markers before adding new ones
 
     parks.forEach((park) => {
         const {reference, name, latitude, longitude, activations: parkActivationCount, created} = park;
@@ -4656,14 +4668,14 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         marker
             .addTo(layerGroup)
             .bindPopup("<b>Loading park info...</b>", {
+                // cap its width on small screens
                 maxWidth: 280,
                 keepInView: true,
                 autoPan: true,
                 autoPanPadding: [30, 40],
-                keepInView: false,
-                autoClose: false,
-                closeOnClick: false
+                keepInView: false
             })
+
             .bindTooltip(tooltipText, {
                 direction: "top",
                 opacity: 0.9,
@@ -4671,20 +4683,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 className: "custom-tooltip",
             });
 
-        const prePress = (e) => {
-            window.__skipNextMarkerRefresh = true; // cover auto-pan window
-            if (e) L.DomEvent.stop(e);
-        };
-        marker.on('touchstart', prePress);
-        marker.on('mousedown', prePress);
-
         const handleMarkerTap = (e) => {
             if (e) L.DomEvent.stop(e);
             marker.closeTooltip();
             openPopupWithAutoPan(marker);
         };
-        // Use only 'click' — Leaflet synthesizes click from touch on mobile
-        marker.on('click', handleMarkerTap);
+        marker.on('click touchend', handleMarkerTap);
+        marker.on('touchend', handleMarkerTap);
 
         marker.on('popupopen', async function () {
             try {
@@ -5246,10 +5251,6 @@ async function getOrPromptUserCallsign() {
 }
 
 function applyActivationToggleState() {
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[applyToggle] Skipping — popup open/opening');
-        return;
-    }
     const toggleButton = document.getElementById('toggleActivations');
     const userActivatedReferences = activations.map((act) => act.reference);
 
@@ -5298,10 +5299,6 @@ function applyActivationToggleState() {
  * Fetches active POTA spots from the API and displays them on the map.
  */
 async function fetchAndDisplaySpots() {
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[spots] Skip refresh — popup open/opening');
-        return;
-    }
     const SPOT_API_URL = 'https://api.pota.app/v1/spots';
     try {
         const response = await fetch(SPOT_API_URL);
@@ -5343,10 +5340,6 @@ async function fetchAndDisplaySpots() {
  * Clicking on a spot now also closes any visible tooltip.
  */
 async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[spots-bounded] Skip refresh — popup open/opening');
-        return;
-    }
     const SPOT_API_URL = "https://api.pota.app/v1/spots";
     try {
         const response = await fetch(SPOT_API_URL);
@@ -5504,10 +5497,6 @@ optimizeLeafletControlsAndPopups();
  * Refreshes the map activations based on the current state.
  */
 function refreshMapActivations() {
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        console.log('[refresh] Skip redraw — popup open/opening');
-        return;
-    }
     // Clear existing markers or layers if necessary
     if (map.activationsLayer) {
         if (!window.__nonDestructiveRedraw) {
