@@ -4660,12 +4660,6 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         if (!shouldDisplayParkFlags({isUserActivated, isActive, isNew})) return;
         if (!shouldDisplayByMode(isActive, isNew, mode)) return;
 
-        // Debugging
-        // if (isNew) {
-        //     const delta = Date.now() - new Date(created).getTime();
-        //     console.log(`Park ${reference} created: ${created}, delta: ${delta}, isNew: true`);
-        // }
-
         // Determine marker class for animated divIcon
         const markerClasses = [];
         if (isNew) markerClasses.push('pulse-marker');
@@ -4709,7 +4703,6 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         marker.park = park;
         marker.currentActivation = currentActivation;
         //Set up data block
-        //
         const tooltipText = currentActivation
             ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
             : `${reference}: ${name} (${parkActivationCount} activations)`;
@@ -4729,18 +4722,26 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
                 className: "custom-tooltip",
             });
 
+        // --- Custom marker tap handler ---
         const handleMarkerTap = (e) => {
+            // Suppress default click-to-open behaviour so the popup does NOT open during the pan
+            if (e && e.originalEvent) {
+                e.originalEvent.preventDefault();
+                e.originalEvent.stopPropagation();
+            }
             if (e) L.DomEvent.stop(e);
-            marker.closeTooltip();
 
-            // We will open the popup AFTER panning and refreshing
+            // Make sure any popup is closed now; we will open it after pan + refresh
+            marker.closeTooltip();
+            marker.closePopup();
+
             const ref = reference;
             const latlng = L.latLng(latitude, longitude);
 
-            // Do NOT set isPopupOpen here; we want refresh to proceed safely
+            // We want refresh to proceed; do not set isPopupOpen here
             window.__skipNextMarkerRefresh = false;
 
-            // Compute a target point slightly above the marker so popup has room near borders
+            // Compute a target slightly above the marker so the popup has room near borders
             const size = map.getSize();
             const targetPoint = map.project(latlng).subtract([0, Math.round(size.y * 0.25)]);
             const targetLatLng = map.unproject(targetPoint);
@@ -4773,7 +4774,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             map.on('moveend', onMoveEnd);
             map.panTo(targetLatLng, { animate: true });
         };
-        marker.on('click touchend', handleMarkerTap);
+        marker.on('mousedown touchstart', handleMarkerTap);
         marker.on('popupopen', async function () {
             try {
                 parkActivations = await fetchParkActivations(reference);
@@ -5429,10 +5430,6 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
         // Defer instead of clearing layers mid-autopan
         scheduleDeferredRefresh('fetchAndDisplaySpotsInCurrentBounds');
         return 'deferred';
-    }
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        scheduleDeferredRefresh('fetchAndDisplaySpots');
-        return;
     }
     try {
         const response = await fetch(SPOT_API_URL);
