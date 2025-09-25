@@ -4549,10 +4549,17 @@ function initializeMap(lat, lng) {
 
     // Attach dynamic spot fetching to map movement
     let skipNextSpotFetch = false;
-    const debouncedSpotFetch = debounce(() => {
+    const debouncedSpotFetch = debounce(async () => {
+        if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+            scheduleDeferredRefresh('debouncedSpotFetch');
+            return;
+        }
         console.log("Map moved or zoomed. Updating spots...");
-        fetchAndDisplaySpotsInCurrentBounds(mapInstance)
-            .then(() => applyActivationToggleState());
+        const result = await fetchAndDisplaySpotsInCurrentBounds(mapInstance);
+        // Only re-render if the fetch did not defer due to an open popup
+        if (result !== 'deferred') {
+            applyActivationToggleState();
+        }
     }, 300);
     mapInstance.on("popupopen", () => {
         skipNextSpotFetch = true;
@@ -4714,11 +4721,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             // Guard BEFORE any autopan/move begins
             window.__skipNextMarkerRefresh = true;
             window.isPopupOpen = true; // “opening” intent, prevents clears on moveend path
-            // optionally: window.__suppressNextMoveFetch = true;  // if you want a dedicated flag
             marker.closeTooltip();
             openPopupWithAutoPan(marker);
-            // allow a short settle window; moveend will fire soon
-            setTimeout(() => { /* we’ll release this in moveend/popupclose */ }, 0);
+            setTimeout(() => { /* settle */ }, 0);
         };
         marker.on('click touchend', handleMarkerTap);
         marker.on('popupopen', async function () {
@@ -5375,6 +5380,10 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
     if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
         // Defer instead of clearing layers mid-autopan
         scheduleDeferredRefresh('fetchAndDisplaySpotsInCurrentBounds');
+        return 'deferred';
+    }
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+        scheduleDeferredRefresh('fetchAndDisplaySpots');
         return;
     }
     try {
@@ -5425,10 +5434,21 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
  * Initializes the recurring fetch for POTA spots.
  */
 function initializeSpotFetching() {
-    fetchAndDisplaySpots(); // Initial
-    // in initializeSpotFetching()
+    // Initial
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+        scheduleDeferredRefresh('initializeSpotFetching.initial');
+    } else {
+        fetchAndDisplaySpots();
+    }
+    // Periodic updates (mobile only)
     if (!isDesktopMode) {
-        setInterval(fetchAndDisplaySpots, 5 * 60 * 1000);
+        setInterval(() => {
+            if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+                scheduleDeferredRefresh('initializeSpotFetching.interval');
+                return;
+            }
+            fetchAndDisplaySpots();
+        }, 5 * 60 * 1000);
     }
 }
 
