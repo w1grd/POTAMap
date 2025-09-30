@@ -159,6 +159,20 @@ window.openParkPopupByRef = function (reference, attempts) {
     });
 };
 
+/**
+ * Opens a marker's popup and lets Leaflet auto-pan the map so the popup
+ * remains fully visible. Skips the next marker refresh so the popup isn't
+ * closed by the resulting map move.
+ * @param {L.Marker} marker - Leaflet marker with a bound popup
+ */
+function openPopupWithAutoPan(marker) {
+    // Stabilize: avoid refresh-induced popup closes while the map pans
+    lockPopupRefresh(900);
+    if (!map || !marker) return;
+    __skipNextMarkerRefresh = true;
+    marker.openPopup();
+}
+
 //POTAmap (c) POTA News & Reviews https://pota.review
 //261
 //
