@@ -1,35 +1,57 @@
 /** Run a callback once the Leaflet map exists and is fully ready. */
+/** Run a callback once the Leaflet map exists and is fully ready. */
 function whenMapReady(cb) {
     if (typeof cb !== 'function') return;
-    const go = function () {
-        try {
-            cb();
-        } catch (e) {
-        }
+
+    const go = () => {
+        try { cb(); }
+        catch (_){ }
     };
+
+    // If window.map is not yet defined, poll until it is
     if (typeof window === 'undefined' || !window.map) {
-        // Poll briefly until map is created
         let tries = 40;
-        const t = setInterval(function () {
+        const timer = setInterval(() => {
             if (window.map) {
-                clearInterval(t);
+                clearInterval(timer);
                 whenMapReady(cb);
             } else if (--tries <= 0) {
-                clearInterval(t);
+                clearInterval(timer);
                 console.warn("whenMapReady: map not initialized");
             }
         }, 50);
         return;
     }
-    if (typeof map.whenReady === 'function') {
-        map.whenReady(go);
-    } else if (map._loaded) {
+
+    // At this point window.map exists, guard access to its methods
+    if (window.map && typeof window.map.whenReady === 'function') {
+        window.map.whenReady(go);
+    }
+    else if (window.map && window.map._loaded) {
         go();
-    } else {
-        map.once && map.once('load', go);
+    }
+    else if (window.map && typeof window.map.once === 'function') {
+        window.map.once('load', go);
     }
 }
 
+// === Enhanced popup stability lock system ===
+let __popupLockUntil = 0;
+let __popupStabilityMode = false;
+
+function lockPopupRefresh(ms = 900) {
+    __popupLockUntil = Date.now() + ms;
+    __popupStabilityMode = true;
+}
+
+function shouldDeferRefresh() {
+    return Date.now() < __popupLockUntil || __popupStabilityMode;
+}
+
+function clearPopupLock() {
+    __popupStabilityMode = false;
+    __popupLockUntil = 0;
+}
 
 // === Marker registry shim: auto-register markers created with options.reference/ref ===
 (function () {
@@ -245,10 +267,6 @@ let __canvasRenderer = null; // initialized after map setup
 let __panInProgress = false; // suppress redraws while panning
 let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
 
-// === Popup stability lock: defer refresh while a popup auto-pans ===
-let __popupLockUntil = 0;
-function lockPopupRefresh(ms = 900) { __popupLockUntil = Date.now() + ms; }
-function shouldDeferRefresh() { return Date.now() < __popupLockUntil; }
 
 /**
  * Opens a marker's popup and lets Leaflet auto-pan the map so the popup
@@ -574,7 +592,115 @@ function wireCenterOnMyLocationButton() {
     });
 }
 
+/**
+ * Displays parks on the map with proper popups that include activation information.
+ * @param {L.Map} map           Leaflet map instance
+ * @param {Array} parks         Array of park objects to display
+ * @param {Array|null} userActivatedReferences  Optional list of refs the user has activated
+ * @param {L.LayerGroup} layerGroup  Leaflet layer group to draw into (defaults to map.activationsLayer)
+ */
+async function displayParksOnMap(map, parks, userActivatedReferences = null, layerGroup = map.activationsLayer) {
+    console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
 
+    // Ensure we have a layerGroup
+    if (!layerGroup) {
+        map.activationsLayer = L.layerGroup().addTo(map);
+        layerGroup = map.activationsLayer;
+    }
+    // Clear existing markers
+    layerGroup.clearLayers();
+
+    // Build an index of current spots by reference for “currently on air”
+    const spotByRef = {};
+    for (const s of spots) {
+        if (s && s.reference) spotByRef[s.reference] = s;
+    }
+
+    for (const park of parks) {
+        const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+        if (!latitude || !longitude) continue;
+
+        // Determine state flags
+        const isUserActivated = Array.isArray(userActivatedReferences) && userActivatedReferences.includes(reference);
+        const createdTime = created ? (typeof created === 'number' ? created : new Date(created).getTime()) : null;
+        const isNew = window.__RECENT_ADDS?.has(reference) ||
+            (createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000));
+        const currentActivation = spotByRef[reference];
+        const isActive = !!currentActivation;
+        const mode = currentActivation?.mode?.toUpperCase() || '';
+
+        // Filter by user toggles
+        if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) continue;
+        if (!shouldDisplayByMode(isActive, isNew, mode)) continue;
+
+        // Determine marker style
+        const markerClasses = [];
+        if (isNew) markerClasses.push('pulse-marker');
+        if (isActive) {
+            markerClasses.push('active-pulse-marker');
+            if (mode === 'CW') markerClasses.push('mode-cw');
+            else if (mode === 'SSB') markerClasses.push('mode-ssb');
+            else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
+        }
+        const usingDivIcon = markerClasses.length > 0;
+        let marker;
+        if (usingDivIcon) {
+            marker = L.marker([latitude, longitude], {
+                icon: L.divIcon({
+                    className: `leaflet-div-icon ${markerClasses.join(' ')}`.trim(),
+                    iconSize: [20, 20],
+                })
+            });
+        } else {
+            const fillColor = isNew ? "#800080" : getMarkerColorConfigured(parkActivationCount, isUserActivated);
+            marker = L.circleMarker([latitude, longitude], {
+                renderer: __canvasRenderer,
+                radius: 6,
+                fillColor,
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.9,
+            });
+        }
+
+        // Tooltip text
+        const tooltipText = isActive
+            ? `${reference}: ${name} <br>${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})`
+            : `${reference}: ${name} (${parkActivationCount} activations)`;
+
+        // Add to map
+        marker
+            .addTo(layerGroup)
+            .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
+            .bindPopup("<b>Loading park info...</b>", { maxWidth: 280, keepInView: true, autoPan: true, autoPanPadding: [30, 40] })
+            .on('click touchend', function () { this.closeTooltip(); });
+
+        // When popup opens, fetch full content and fold sections
+        marker.on('popupopen', async function () {
+            lockPopupRefresh(900);
+            try {
+                const parkActivations = await fetchParkActivations(reference);
+                await saveParkActivationsToIndexedDB(reference, parkActivations);
+
+                // Merge reviewURL if needed
+                if (!park.reviewURL && window.__REVIEW_URLS instanceof Map) {
+                    const u = window.__REVIEW_URLS.get(reference);
+                    if (u) park.reviewURL = u;
+                }
+
+                let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                popupContent = foldPopupSections(popupContent);
+                this.setPopupContent(popupContent);
+            } catch (err) {
+                console.error(err);
+                this.setPopupContent("<b>Error loading park info.</b>");
+            }
+        });
+    }
+
+    console.log("All parks displayed with appropriate highlights.");
+}
 // --- PQL display filter helpers (highlight-only; keep base parks visible) --------
 function ensurePqlPulseCss() {
     if (document.getElementById('pql-pulse-css')) return;
@@ -1728,7 +1854,12 @@ async function redrawMarkersWithFilters() {
 
             marker
                 .addTo(map.activationsLayer)
-                .bindPopup("<b>Loading park info...</b>", {keepInView: true, autoPan: true, autoPanPadding: [30, 40], autoClose: false})
+                .bindPopup("<b>Loading park info...</b>", {
+                    maxWidth: 280,
+                    keepInView: true,
+                    autoPan: true,
+                    autoPanPadding: [30, 40]
+                })
                 .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
                 .on('click touchend', function () {
                     this.closeTooltip();
@@ -4475,81 +4606,87 @@ async function updateActivationsFromScrape() {
  * @param {number} lng - Longitude for the map center.
  * @returns {L.Map} The initialized Leaflet map instance.
  */
+// ===== Popup-safe redraw guards =====
+window.isPopupOpen = window.isPopupOpen || false;
+window.__skipNextMarkerRefresh = window.__skipNextMarkerRefresh || false;
+window.__pendingMarkerRefresh = window.__pendingMarkerRefresh || false;
+
+function scheduleDeferredRefresh(reason = '') {
+    try { console.log('[defer] marker refresh scheduled', reason); } catch {}
+    window.__pendingMarkerRefresh = true;
+}
+
+function runDeferredRefresh() {
+    if (!window.__pendingMarkerRefresh) return;
+    window.__pendingMarkerRefresh = false;
+    try {
+        if (typeof applyActivationToggleState === 'function') {
+            applyActivationToggleState();
+        } else if (typeof refreshMapActivations === 'function') {
+            refreshMapActivations();
+        }
+    } catch (e) { console.warn('Deferred refresh failed:', e); }
+}
+
 function initializeMap(lat, lng) {
     // Determine if the device is mobile based on screen width
     const isMobile = window.innerWidth <= 600;
 
     // Check for saved map center and zoom in localStorage
-    let savedCenter = localStorage.getItem("mapCenter");
-    let savedZoom = localStorage.getItem("mapZoom");
-
-    if (savedCenter) {
-        try {
-            savedCenter = JSON.parse(savedCenter);
-        } catch (e) {
-            savedCenter = null;
-        }
-    }
-
-    if (savedZoom) {
-        savedZoom = parseInt(savedZoom, 10);
-    }
+    let savedCenter = null, savedZoom = null;
+    try {
+        savedCenter = JSON.parse(localStorage.getItem("mapCenter") || 'null');
+        savedZoom   = parseInt(localStorage.getItem("mapZoom"), 10) || undefined;
+    } catch (_) {}
 
     const mapInstance = L.map("map", {
         center: savedCenter || [lat, lng],
-        zoom: savedZoom || (isMobile ? 12 : 10),
+        zoom:   savedZoom   || (isMobile ? 12 : 10),
         zoomControl: !isMobile,
         attributionControl: true,
     });
-
-    console.log("Initialized map at:", mapInstance.getCenter(), "zoom:", mapInstance.getZoom());
 
     // Add OpenStreetMap tiles
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; OpenStreetMap contributors',
     }).addTo(mapInstance);
 
-    console.log("Added OpenStreetMap tiles.");
-
-
-    // Save center and zoom to localStorage whenever map is moved or zoomed
+    // Save center/zoom on moveend/zoomend
     mapInstance.on("moveend zoomend", () => {
-        const center = mapInstance.getCenter();
-        localStorage.setItem("mapCenter", JSON.stringify([center.lat, center.lng]));
+        const c = mapInstance.getCenter();
+        localStorage.setItem("mapCenter", JSON.stringify([c.lat, c.lng]));
         localStorage.setItem("mapZoom", mapInstance.getZoom());
-        localStorage.setItem("mapSavedAt", Date.now().toString());
     });
 
-    // Attach dynamic spot fetching to map movement
-    let skipNextSpotFetch = false;
-    const debouncedSpotFetch = debounce(() => {
-        console.log("Map moved or zoomed. Updating spots...");
-        fetchAndDisplaySpotsInCurrentBounds(mapInstance)
-            .then(() => applyActivationToggleState());
-    }, 300);
-    mapInstance.on("popupopen", () => {
-        skipNextSpotFetch = true;
+    // Popup‐safety: listen on the instance, not on undefined global `map`
+    mapInstance.on('popupopen', ev => {
+        lockPopupRefresh(900);
         isPopupOpen = true;
-        __skipNextMarkerRefresh = true;
+        // fold popup sections if needed...
     });
-    mapInstance.on("popupclose", () => {
+    mapInstance.on('popupclose', ev => {
         isPopupOpen = false;
-        skipNextSpotFetch = false;
-        __skipNextMarkerRefresh = false;
+        clearPopupLock();
+        setTimeout(runDeferredRefresh, 100);
     });
-    if (!isDesktopMode) {
-        mapInstance.on("moveend", () => {
-            if (skipNextSpotFetch) {
-                skipNextSpotFetch = false;
-                return;
-            }
-            debouncedSpotFetch();
-        });
-    }
 
     return mapInstance;
 }
 
+
+// Find the current marker for a park reference in a LayerGroup
+function findMarkerByReference(ref, layerGroup) {
+    if (!layerGroup || typeof layerGroup.eachLayer !== 'function') return null;
+    let found = null;
+    layerGroup.eachLayer((l) => {
+        if (found) return;
+        const m = l;
+        if (m && m.park && m.park.reference === ref) {
+            found = m;
+        }
+    });
+    return found;
+}
 
 /**
  * Displays parks on the map.
@@ -4557,166 +4694,53 @@ function initializeMap(lat, lng) {
 /**
  * Displays parks on the map with proper popups that include activation information.
  */
-async function displayParksOnMap(map, parks, userActivatedReferences = null, layerGroup = map.activationsLayer) {
-    console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
-
-    if (!layerGroup) {
-        map.activationsLayer = L.layerGroup().addTo(map);
-
-
-        // let userLocationMarker = null;
-        // function setUserLocationMarker(lat, lng) {
-        //     if (!map) return;
-        //     if (userLocationMarker) {
-        //         userLocationMarker.setLatLng([lat, lng]);
-        //     } else {
-        //         userLocationMarker = L.marker([lat, lng], {
-        //             icon: L.icon({
-        //                 iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-        //                 iconSize: [30, 30],
-        //                 iconAnchor: [15, 30],
-        //                 popupAnchor: [0, -30],
-        //             }),
-        //         }).addTo(map);
-        //     }
-        // }
-
-        layerGroup = map.activationsLayer;
-        console.log("Created a new activations layer.");
-    } else {
-        console.log("Using existing activations layer.");
+// --- Custom marker tap handler ---
+function handleMarkerTap(e) {
+    // prevent default Leaflet open-on-click during pan
+    if (e && e.originalEvent) {
+        e.originalEvent.preventDefault();
+        e.originalEvent.stopPropagation();
     }
+    L.DomEvent.stop(e);
 
-    layerGroup.clearLayers(); // Clear existing markers before adding new ones
+    // close any existing popups
+    map.closePopup();
 
-    parks.forEach((park) => {
-        const {reference, name, latitude, longitude, activations: parkActivationCount, created} = park;
-        const isUserActivated = userActivatedReferences.includes(reference);
-        let createdTime = null;
-        if (created) {
-            createdTime = typeof created === 'number'
-                ? created
-                : new Date(created).getTime();
-        }
-        const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
-        const isNew = RECENT.has(reference) || (createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000));
-        const currentActivation = spots?.find(spot => spot.reference === reference);
-        const isActive = !!currentActivation;
-        const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
+    const ref = this.park.reference;
+    const latlng = this.getLatLng();
 
-        // Show pulsing div icons for active or newly added parks
-        const useDivIcon = isNew || isActive;
+    lockPopupRefresh(1200);
 
-        // Apply Filters (OR semantics)
-        if (!shouldDisplayParkFlags({isUserActivated, isActive, isNew})) return;
-        if (!shouldDisplayByMode(isActive, isNew, mode)) return;
+    // compute a pan target so popup has room
+    const size = map.getSize();
+    const targetPoint = map.project(latlng).subtract([0, Math.round(size.y * 0.25)]);
+    const targetLatLng = map.unproject(targetPoint);
 
-        // Debugging
-        // if (isNew) {
-        //     const delta = Date.now() - new Date(created).getTime();
-        //     console.log(`Park ${reference} created: ${created}, delta: ${delta}, isNew: true`);
-        // }
+    let done = false;
+    const onMoveEnd = async () => {
+        if (done) return;
+        done = true;
+        map.off('moveend', onMoveEnd);
 
-        // Determine marker class for animated divIcon
-        const markerClasses = [];
-        if (isNew) markerClasses.push('pulse-marker');
-        if (isActive) {
-            markerClasses.push('active-pulse-marker');
-            if (mode === 'CW') markerClasses.push('mode-cw');
-            else if (mode === 'SSB') markerClasses.push('mode-ssb');
-            else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
-        }
-        const markerClassName = markerClasses.join(' ');
-
-        // Does this park have a PN&R review URL?
-        let hasReview = !!park.reviewURL;
-        if (!hasReview && window.__REVIEW_URLS instanceof Map) {
-            const urlFromCache = window.__REVIEW_URLS.get(reference);
-            if (urlFromCache) {
-                park.reviewURL = urlFromCache;
-                hasReview = true;
+        // small delay to let pan finish
+        setTimeout(async () => {
+            await fetchAndDisplaySpotsInCurrentBounds(map);
+            if (!shouldDeferRefresh()) {
+                applyActivationToggleState();
             }
-        }
 
-        const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated, created);
-        const marker = useDivIcon
-            ? L.marker([latitude, longitude], {
-                icon: L.divIcon({
-                    className: `leaflet-div-icon ${markerClassName}`.trim(),
-                    iconSize: [20, 20],
-                })
-            })
-            : L.circleMarker([latitude, longitude], {
-                radius: 6,
-                fillColor: baseColor,
-                color: "#000",
-                weight: 1,
-                opacity: 1,
-                fillOpacity: 0.9,
-            });
-
-        if (hasReview) decorateReviewHalo(marker, park);
-
-        marker.park = park;
-        marker.currentActivation = currentActivation;
-        //Set up data block
-        //
-        const tooltipText = currentActivation
-            ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
-            : `${reference}: ${name} (${parkActivationCount} activations)`;
-
-        marker
-            .addTo(layerGroup)
-            .bindPopup("<b>Loading park info...</b>", {
-                // cap its width on small screens
-                maxWidth: 280,
-                keepInView: true,
-                autoPan: true,
-                autoPanPadding: [30, 40],
-                keepInView: false
-            })
-
-            .bindTooltip(tooltipText, {
-                direction: "top",
-                opacity: 0.9,
-                sticky: false,
-                className: "custom-tooltip",
-            });
-
-        const handleMarkerTap = (e) => {
-            if (e) L.DomEvent.stop(e);
-            marker.closeTooltip();
-            openPopupWithAutoPan(marker);
-        };
-        marker.on('click touchend', handleMarkerTap);
-        marker.on('touchend', handleMarkerTap);
-
-        marker.on('popupopen', async function () {
-            try {
-                parkActivations = await fetchParkActivations(reference);
-                await saveParkActivationsToIndexedDB(reference, parkActivations);
-
-                let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
-                // Ensure the popup uses collapsible panels for activation sections
-                popupContent = foldPopupSections(popupContent);
-
-                if (park.change) {
-                    popupContent += `
-                        <div style="font-size: 0.85em; font-style: italic; margin-top: 0.5em;">
-                            <b>Recent change:</b> ${park.change}
-                        </div>
-                    `;
-                }
-
-                this.setPopupContent(popupContent);
-            } catch (error) {
-                console.error(`Error fetching activations for park ${reference}:`, error);
-                this.setPopupContent("<b>Error loading park info.</b>");
+            // find the re-rendered marker and open its popup
+            const fresh = findMarkerByReference(ref, map.activationsLayer);
+            if (fresh) {
+                fresh.openPopup();
             }
-        });
-    });
+            // clear the lock once popup is open
+            clearPopupLock();
+        }, 100);
+    };
 
-    console.log("All parks displayed with appropriate highlights.");
+    map.on('moveend', onMoveEnd);
+    map.panTo(targetLatLng, { animate: true });
 }
 
 // ---- helper: extract 2-letter US state/territory codes from locationDesc ----
@@ -5251,45 +5275,39 @@ async function getOrPromptUserCallsign() {
 }
 
 function applyActivationToggleState() {
-    const toggleButton = document.getElementById('toggleActivations');
-    const userActivatedReferences = activations.map((act) => act.reference);
+    if (shouldDeferRefresh()) {
+        scheduleDeferredRefresh('applyActivationToggleState');
+        return;
+    }
 
+    const toggleButton = document.getElementById('toggleActivations');
+    const userActivatedReferences = activations.map(act => act.reference);
     const buttonTexts = [
         "Show My Activations",
         "Hide My Activations",
         "Show Currently On Air",
         "Show All Spots",
     ];
+    if (toggleButton) toggleButton.innerText = buttonTexts[activationToggleState];
 
-    if (toggleButton) {
-        toggleButton.innerText = buttonTexts[activationToggleState];
-    }
-
-    let parksInBounds = getParksInBounds(parks);
+    const parksInBounds = getParksInBounds(parks);
     let parksToDisplay = [];
-
     switch (activationToggleState) {
-        case 0: // Show all parks in bounds
+        case 0:
             parksToDisplay = parksInBounds;
             break;
-
-        case 1: // Show just user's activations in bounds
+        case 1:
             parksToDisplay = parksInBounds.filter(p => userActivatedReferences.includes(p.reference));
             break;
-
-        case 2: // Show parks not activated by user
+        case 2:
             parksToDisplay = parksInBounds.filter(p => !userActivatedReferences.includes(p.reference));
             break;
-
-        case 3: // Show only currently active parks (on air)
+        case 3:
             const onAirRefs = spots.map(s => s.reference);
             parksToDisplay = parksInBounds.filter(p => onAirRefs.includes(p.reference));
             break;
-
         default:
-            console.warn(`Unknown activationToggleState: ${activationToggleState}`);
             parksToDisplay = parksInBounds;
-            break;
     }
 
     displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
@@ -5341,47 +5359,28 @@ async function fetchAndDisplaySpots() {
  */
 async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
     const SPOT_API_URL = "https://api.pota.app/v1/spots";
-    try {
-        const response = await fetch(SPOT_API_URL);
-        if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
-        const spots = await response.json();
-
-        console.log("Fetched spots data:", spots);
-
-        if (!mapInstance.spotsLayer) {
-            console.log("Initializing spots layer...");
-            mapInstance.spotsLayer = L.layerGroup().addTo(mapInstance);
-        } else {
-            console.log("Clearing existing spots layer...");
-            mapInstance.spotsLayer.clearLayers();
-        }
-
-        const bounds = mapInstance.getBounds();
-        console.log("Current map bounds:", bounds);
-
-        const spotsInBounds = spots.filter(({latitude, longitude}) => {
-            if (!latitude || !longitude) {
-                console.warn("Invalid coordinates:", {latitude, longitude});
-                return false;
-            }
-            return bounds.contains([latitude, longitude]);
-        });
-
-        console.log(`Displaying ${spotsInBounds.length} spots in current bounds.`);
-
-        if (!mapInstance.activationsLayer) {
-            mapInstance.activationsLayer = L.layerGroup().addTo(mapInstance);
-        } else {
-            mapInstance.activationsLayer.clearLayers();
-        }
-
-        const activatedReferences = activations.map(act => act.reference);
-        //displayParksOnMap(mapInstance, parks, activatedReferences, mapInstance.activationsLayer);
-        applyActivationToggleState();
-
-    } catch (error) {
-        console.error("Error fetching or displaying POTA spots:", error);
+    if (shouldDeferRefresh()) {
+        scheduleDeferredRefresh('fetchAndDisplaySpotsInCurrentBounds');
+        return 'deferred';
     }
+
+    const response = await fetch(SPOT_API_URL);
+    if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
+    const spots = await response.json();
+
+    if (!mapInstance.spotsLayer) {
+        mapInstance.spotsLayer = L.layerGroup().addTo(mapInstance);
+    } else {
+        mapInstance.spotsLayer.clearLayers();
+    }
+
+    const bounds = mapInstance.getBounds();
+    const spotsInBounds = spots.filter(s =>
+        s.latitude && s.longitude && bounds.contains([s.latitude, s.longitude])
+    );
+
+    // redraw activations layer (it, in turn, defers if needed)
+    applyActivationToggleState();
 }
 
 
@@ -5389,10 +5388,21 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
  * Initializes the recurring fetch for POTA spots.
  */
 function initializeSpotFetching() {
-    fetchAndDisplaySpots(); // Initial
-    // in initializeSpotFetching()
+    // Initial
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+        scheduleDeferredRefresh('initializeSpotFetching.initial');
+    } else {
+        fetchAndDisplaySpots();
+    }
+    // Periodic updates (mobile only)
     if (!isDesktopMode) {
-        setInterval(fetchAndDisplaySpots, 5 * 60 * 1000);
+        setInterval(() => {
+            if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
+                scheduleDeferredRefresh('initializeSpotFetching.interval');
+                return;
+            }
+            fetchAndDisplaySpots();
+        }, 5 * 60 * 1000);
     }
 }
 
@@ -5497,7 +5507,8 @@ optimizeLeafletControlsAndPopups();
  * Refreshes the map activations based on the current state.
  */
 function refreshMapActivations() {
-    // Clear existing markers or layers if necessary
+    if (window.isPopupOpen || window.__skipNextMarkerRefresh) { scheduleDeferredRefresh('refreshMapActivations'); return; }
+// Clear existing markers or layers if necessary
     if (map.activationsLayer) {
         if (!window.__nonDestructiveRedraw) {
             map.activationsLayer.clearLayers();
@@ -5985,3 +5996,19 @@ function initializeFilterChips() {
         }
     });
 })();
+
+
+if (typeof window !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.map && typeof window.map.on === 'function') {
+            map.on('movestart', () => {
+                if (window.isPopupOpen) window.__skipNextMarkerRefresh = true;
+            });
+            map.on('moveend', () => {
+                if (window.isPopupOpen) {
+                    setTimeout(() => { window.__skipNextMarkerRefresh = false; runDeferredRefresh(); }, 120);
+                }
+            });
+        }
+    });
+}
