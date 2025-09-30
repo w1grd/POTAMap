@@ -592,7 +592,115 @@ function wireCenterOnMyLocationButton() {
     });
 }
 
+/**
+ * Displays parks on the map with proper popups that include activation information.
+ * @param {L.Map} map           Leaflet map instance
+ * @param {Array} parks         Array of park objects to display
+ * @param {Array|null} userActivatedReferences  Optional list of refs the user has activated
+ * @param {L.LayerGroup} layerGroup  Leaflet layer group to draw into (defaults to map.activationsLayer)
+ */
+async function displayParksOnMap(map, parks, userActivatedReferences = null, layerGroup = map.activationsLayer) {
+    console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
 
+    // Ensure we have a layerGroup
+    if (!layerGroup) {
+        map.activationsLayer = L.layerGroup().addTo(map);
+        layerGroup = map.activationsLayer;
+    }
+    // Clear existing markers
+    layerGroup.clearLayers();
+
+    // Build an index of current spots by reference for “currently on air”
+    const spotByRef = {};
+    for (const s of spots) {
+        if (s && s.reference) spotByRef[s.reference] = s;
+    }
+
+    for (const park of parks) {
+        const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
+        if (!latitude || !longitude) continue;
+
+        // Determine state flags
+        const isUserActivated = Array.isArray(userActivatedReferences) && userActivatedReferences.includes(reference);
+        const createdTime = created ? (typeof created === 'number' ? created : new Date(created).getTime()) : null;
+        const isNew = window.__RECENT_ADDS?.has(reference) ||
+            (createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000));
+        const currentActivation = spotByRef[reference];
+        const isActive = !!currentActivation;
+        const mode = currentActivation?.mode?.toUpperCase() || '';
+
+        // Filter by user toggles
+        if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) continue;
+        if (!shouldDisplayByMode(isActive, isNew, mode)) continue;
+
+        // Determine marker style
+        const markerClasses = [];
+        if (isNew) markerClasses.push('pulse-marker');
+        if (isActive) {
+            markerClasses.push('active-pulse-marker');
+            if (mode === 'CW') markerClasses.push('mode-cw');
+            else if (mode === 'SSB') markerClasses.push('mode-ssb');
+            else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
+        }
+        const usingDivIcon = markerClasses.length > 0;
+        let marker;
+        if (usingDivIcon) {
+            marker = L.marker([latitude, longitude], {
+                icon: L.divIcon({
+                    className: `leaflet-div-icon ${markerClasses.join(' ')}`.trim(),
+                    iconSize: [20, 20],
+                })
+            });
+        } else {
+            const fillColor = isNew ? "#800080" : getMarkerColorConfigured(parkActivationCount, isUserActivated);
+            marker = L.circleMarker([latitude, longitude], {
+                renderer: __canvasRenderer,
+                radius: 6,
+                fillColor,
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.9,
+            });
+        }
+
+        // Tooltip text
+        const tooltipText = isActive
+            ? `${reference}: ${name} <br>${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})`
+            : `${reference}: ${name} (${parkActivationCount} activations)`;
+
+        // Add to map
+        marker
+            .addTo(layerGroup)
+            .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
+            .bindPopup("<b>Loading park info...</b>", { maxWidth: 280, keepInView: true, autoPan: true, autoPanPadding: [30, 40] })
+            .on('click touchend', function () { this.closeTooltip(); });
+
+        // When popup opens, fetch full content and fold sections
+        marker.on('popupopen', async function () {
+            lockPopupRefresh(900);
+            try {
+                const parkActivations = await fetchParkActivations(reference);
+                await saveParkActivationsToIndexedDB(reference, parkActivations);
+
+                // Merge reviewURL if needed
+                if (!park.reviewURL && window.__REVIEW_URLS instanceof Map) {
+                    const u = window.__REVIEW_URLS.get(reference);
+                    if (u) park.reviewURL = u;
+                }
+
+                let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
+                popupContent = foldPopupSections(popupContent);
+                this.setPopupContent(popupContent);
+            } catch (err) {
+                console.error(err);
+                this.setPopupContent("<b>Error loading park info.</b>");
+            }
+        });
+    }
+
+    console.log("All parks displayed with appropriate highlights.");
+}
 // --- PQL display filter helpers (highlight-only; keep base parks visible) --------
 function ensurePqlPulseCss() {
     if (document.getElementById('pql-pulse-css')) return;
