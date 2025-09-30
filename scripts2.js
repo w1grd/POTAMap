@@ -48,7 +48,6 @@ function clearPopupLock() {
     __popupLockUntil = 0;
 }
 
-
 // === Marker registry shim: auto-register markers created with options.reference/ref ===
 (function () {
     if (typeof L === 'undefined' || !L.marker) return;
@@ -263,10 +262,6 @@ let __canvasRenderer = null; // initialized after map setup
 let __panInProgress = false; // suppress redraws while panning
 let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
 
-// === Popup stability lock: defer refresh while a popup auto-pans ===
-let __popupLockUntil = 0;
-function lockPopupRefresh(ms = 900) { __popupLockUntil = Date.now() + ms; }
-function shouldDeferRefresh() { return Date.now() < __popupLockUntil; }
 
 /**
  * Opens a marker's popup and lets Leaflet auto-pan the map so the popup
@@ -4579,16 +4574,15 @@ function initializeMap(lat, lng) {
             applyActivationToggleState();
         }
     }, 300);
-    mapInstance.on("popupopen", () => {
-        skipNextSpotFetch = true;
-        window.isPopupOpen = true;
-        window.__skipNextMarkerRefresh = true;
+    map.on('popupopen', ev => {
+        lockPopupRefresh(900);
+        isPopupOpen = true;
+        // fold sections if needed (existing code)
     });
-    mapInstance.on("popupclose", () => {
-        window.isPopupOpen = false;
-        skipNextSpotFetch = false;
-        window.__skipNextMarkerRefresh = false;
-        setTimeout(runDeferredRefresh, 60);
+    map.on('popupclose', ev => {
+        isPopupOpen = false;
+        clearPopupLock();
+        setTimeout(runDeferredRefresh, 100);
     });
     if (!isDesktopMode) {
         mapInstance.on("moveend", () => {
@@ -4641,25 +4635,23 @@ function findMarkerByReference(ref, layerGroup) {
  * Displays parks on the map with proper popups that include activation information.
  */
 // --- Custom marker tap handler ---
-const handleMarkerTap = (e) => {
-    // Suppress default click-to-open behaviour so the popup does NOT open during the pan
+function handleMarkerTap(e) {
+    // prevent default Leaflet open-on-click during pan
     if (e && e.originalEvent) {
         e.originalEvent.preventDefault();
         e.originalEvent.stopPropagation();
     }
-    if (e) L.DomEvent.stop(e);
+    L.DomEvent.stop(e);
 
-    // Close any existing popups and tooltips
-    marker.closeTooltip();
-    marker.closePopup();
+    // close any existing popups
+    map.closePopup();
 
-    const ref = reference;
-    const latlng = L.latLng(latitude, longitude);
+    const ref = this.park.reference;
+    const latlng = this.getLatLng();
 
-    // Lock popup refreshes to prevent premature closure
-    lockPopupRefresh(1200); // Longer lock for border clicks
+    lockPopupRefresh(1200);
 
-    // Compute a target slightly above the marker so the popup has room near borders
+    // compute a pan target so popup has room
     const size = map.getSize();
     const targetPoint = map.project(latlng).subtract([0, Math.round(size.y * 0.25)]);
     const targetLatLng = map.unproject(targetPoint);
@@ -4670,41 +4662,26 @@ const handleMarkerTap = (e) => {
         done = true;
         map.off('moveend', onMoveEnd);
 
-        // Small delay to ensure pan is completely finished
+        // small delay to let pan finish
         setTimeout(async () => {
-            try {
-                // Refresh spots but respect popup lock
-                const result = await fetchAndDisplaySpotsInCurrentBounds(map);
-                if (result !== 'deferred') {
-                    // Only refresh if not deferred due to popup lock
-                    if (!shouldDeferRefresh()) {
-                        applyActivationToggleState();
-                    }
-                }
-            } catch (err) {
-                console.warn('Refresh after pan failed:', err);
+            await fetchAndDisplaySpotsInCurrentBounds(map);
+            if (!shouldDeferRefresh()) {
+                applyActivationToggleState();
             }
 
-            // Find the freshly re-rendered marker and open its popup
+            // find the re-rendered marker and open its popup
             const fresh = findMarkerByReference(ref, map.activationsLayer);
-            if (fresh && typeof fresh.openPopup === 'function') {
-                window.isPopupOpen = true;
+            if (fresh) {
                 fresh.openPopup();
-
-                // Clear the lock after popup is successfully opened
-                setTimeout(() => {
-                    clearPopupLock();
-                }, 300);
-            } else {
-                console.warn('Marker not found after refresh for', ref);
-                clearPopupLock();
             }
+            // clear the lock once popup is open
+            clearPopupLock();
         }, 100);
     };
 
     map.on('moveend', onMoveEnd);
     map.panTo(targetLatLng, { animate: true });
-};
+}
 
 // ---- helper: extract 2-letter US state/territory codes from locationDesc ----
 // ---- helpers ----
@@ -5238,51 +5215,39 @@ async function getOrPromptUserCallsign() {
 }
 
 function applyActivationToggleState() {
-    // Respect popup stability - don't clear layers while popup is stabilizing
     if (shouldDeferRefresh()) {
         scheduleDeferredRefresh('applyActivationToggleState');
         return;
     }
 
     const toggleButton = document.getElementById('toggleActivations');
-    const userActivatedReferences = activations.map((act) => act.reference);
-
+    const userActivatedReferences = activations.map(act => act.reference);
     const buttonTexts = [
         "Show My Activations",
         "Hide My Activations",
         "Show Currently On Air",
         "Show All Spots",
     ];
+    if (toggleButton) toggleButton.innerText = buttonTexts[activationToggleState];
 
-    if (toggleButton) {
-        toggleButton.innerText = buttonTexts[activationToggleState];
-    }
-
-    let parksInBounds = getParksInBounds(parks);
+    const parksInBounds = getParksInBounds(parks);
     let parksToDisplay = [];
-
     switch (activationToggleState) {
-        case 0: // Show all parks in bounds
+        case 0:
             parksToDisplay = parksInBounds;
             break;
-
-        case 1: // Show just user's activations in bounds
+        case 1:
             parksToDisplay = parksInBounds.filter(p => userActivatedReferences.includes(p.reference));
             break;
-
-        case 2: // Show parks not activated by user
+        case 2:
             parksToDisplay = parksInBounds.filter(p => !userActivatedReferences.includes(p.reference));
             break;
-
-        case 3: // Show only currently active parks (on air)
+        case 3:
             const onAirRefs = spots.map(s => s.reference);
             parksToDisplay = parksInBounds.filter(p => onAirRefs.includes(p.reference));
             break;
-
         default:
-            console.warn(`Unknown activationToggleState: ${activationToggleState}`);
             parksToDisplay = parksInBounds;
-            break;
     }
 
     displayParksOnMap(map, parksToDisplay, userActivatedReferences, map.activationsLayer);
@@ -5334,53 +5299,28 @@ async function fetchAndDisplaySpots() {
  */
 async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
     const SPOT_API_URL = "https://api.pota.app/v1/spots";
-
-    // Don't refresh spots if popup is stabilizing
     if (shouldDeferRefresh()) {
         scheduleDeferredRefresh('fetchAndDisplaySpotsInCurrentBounds');
         return 'deferred';
     }
 
-    try {
-        const response = await fetch(SPOT_API_URL);
-        if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
-        const spots = await response.json();
+    const response = await fetch(SPOT_API_URL);
+    if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
+    const spots = await response.json();
 
-        console.log("Fetched spots data:", spots);
-
-        if (!mapInstance.spotsLayer) {
-            console.log("Initializing spots layer...");
-            mapInstance.spotsLayer = L.layerGroup().addTo(mapInstance);
-        } else {
-            console.log("Clearing existing spots layer...");
-            mapInstance.spotsLayer.clearLayers();
-        }
-
-        const bounds = mapInstance.getBounds();
-        console.log("Current map bounds:", bounds);
-
-        const spotsInBounds = spots.filter(({latitude, longitude}) => {
-            if (!latitude || !longitude) {
-                console.warn("Invalid coordinates:", {latitude, longitude});
-                return false;
-            }
-            return bounds.contains([latitude, longitude]);
-        });
-
-        console.log(`Displaying ${spotsInBounds.length} spots in current bounds.`);
-
-        if (!mapInstance.activationsLayer) {
-            mapInstance.activationsLayer = L.layerGroup().addTo(mapInstance);
-        } else {
-            mapInstance.activationsLayer.clearLayers();
-        }
-
-        const activatedReferences = activations.map(act => act.reference);
-        applyActivationToggleState();
-
-    } catch (error) {
-        console.error("Error fetching or displaying POTA spots:", error);
+    if (!mapInstance.spotsLayer) {
+        mapInstance.spotsLayer = L.layerGroup().addTo(mapInstance);
+    } else {
+        mapInstance.spotsLayer.clearLayers();
     }
+
+    const bounds = mapInstance.getBounds();
+    const spotsInBounds = spots.filter(s =>
+        s.latitude && s.longitude && bounds.contains([s.latitude, s.longitude])
+    );
+
+    // redraw activations layer (it, in turn, defers if needed)
+    applyActivationToggleState();
 }
 
 
