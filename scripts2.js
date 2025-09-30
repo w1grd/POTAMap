@@ -159,35 +159,6 @@ window.openParkPopupByRef = function (reference, attempts) {
     });
 };
 
-window.openParkPopupByRef = function (reference, attempts) {
-    attempts = (typeof attempts === 'number') ? attempts : 14;
-    if (!window.map || !reference) return;
-    var marker = (typeof window.__findMarkerByRef === 'function') ? window.__findMarkerByRef(reference) : null;
-    if (marker) {
-        try {
-            if (typeof marker.fire === 'function') {
-                marker.fire('click');
-            } else if (typeof marker.openPopup === 'function') {
-                marker.openPopup();
-            }
-        } catch (e) {
-            console.warn("openParkPopupByRef failed", e);
-        }
-        return;
-    }
-    if (attempts > 0) {
-        try {
-            if (typeof window.refreshMarkers === 'function') window.refreshMarkers();
-        } catch (e) {
-        }
-        setTimeout(function () {
-            window.openParkPopupByRef(reference, attempts - 1);
-        }, 110);
-    } else {
-        console.warn("openParkPopupByRef: marker not found for", reference);
-    }
-};
-
 //POTAmap (c) POTA News & Reviews https://pota.review
 //261
 //
@@ -262,25 +233,6 @@ let previousMapState = {
 let __canvasRenderer = null; // initialized after map setup
 let __panInProgress = false; // suppress redraws while panning
 let __skipNextMarkerRefresh = false; // skip refresh after programmatic pan
-
-// === Popup stability lock: defer refresh while a popup auto-pans ===
-let __popupLockUntil = 0;
-function lockPopupRefresh(ms = 900) { __popupLockUntil = Date.now() + ms; }
-function shouldDeferRefresh() { return Date.now() < __popupLockUntil; }
-
-/**
- * Opens a marker's popup and lets Leaflet auto-pan the map so the popup
- * remains fully visible. Skips the next marker refresh so the popup isn't
- * closed by the resulting map move.
- * @param {L.Marker} marker - Leaflet marker with a bound popup
- */
-function openPopupWithAutoPan(marker) {
-// Stabilize: avoid refresh-induced popup closes while the map pans
-    lockPopupRefresh(900);
-    if (!map || !marker) return;
-    __skipNextMarkerRefresh = true;
-    marker.openPopup();
-}
 
 // Ensure popup-collapsible styles are present (runtime injector as a safety net)
 function ensurePopupCollapsibleCss() {
@@ -1245,54 +1197,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         await nextFrame();
         await setupPOTAMap();
 
-
-        // Map-level safety: fold popup sections even for pre-existing markers/popups.
-        if (map && typeof map.on === 'function') {
-            map.on('popupopen', function (ev) {
-                lockPopupRefresh(900);
-                try {
-                    const popup = ev && ev.popup;
-                    if (!popup || typeof popup.getContent !== 'function') return;
-                    const cur = popup.getContent();
-
-                    // Helper to test for headings
-                    const hasTargets = (s) => /(Recent Activations:|Current Activation:)/i.test(s || '');
-
-                    if (typeof cur === 'string') {
-                        if (hasTargets(cur)) {
-                            const folded = foldPopupSections(cur);
-                            if (folded && folded !== cur) popup.setContent(folded);
-                        }
-                        return;
-                    }
-
-                    // If Leaflet gave us a DOM node (Element), mutate in place
-                    if (cur && cur.nodeType === 1) { // ELEMENT_NODE
-                        // Skip if already folded
-                        if (cur.querySelector && cur.querySelector('details.popup-collapsible')) return;
-
-                        const html = cur.innerHTML || '';
-                        if (!hasTargets(html)) return;
-
-                        const folded = foldPopupSections(html);
-                        if (folded && folded !== html) {
-                            cur.innerHTML = folded; // update in place to preserve the node
-                        }
-                        return;
-                    }
-
-                    // Fallback: convert anything else to string and try
-                    const asText = String(cur || '');
-                    if (hasTargets(asText)) {
-                        const folded = foldPopupSections(asText);
-                        if (folded && folded !== asText) popup.setContent(folded);
-                    }
-                } catch (e) {
-                    console.warn('map-level foldPopupSections failed:', e);
-                }
-            });
-        }
-
         // Defer common refreshers during popup stability window
         (function () {
             function wrapIfNeeded(obj, key) {
@@ -1831,95 +1735,6 @@ function refreshMarkers() {
         return;
     }
 
-
-    /** Robustly find a park's marker by reference, searching common layer groups. */
-    function __findMarkerByRef(reference) {
-        if (!map || !reference) return null;
-
-        // 1) Explicit registry if you attach markers here elsewhere:
-        if (window.markerByRef && window.markerByRef[reference]) {
-            return window.markerByRef[reference];
-        }
-
-        // 2) Scan known groups first
-        var groups = [];
-        if (map.activationsLayer) groups.push(map.activationsLayer);
-        if (map.spotsLayer) groups.push(map.spotsLayer);
-        if (map.reviewLayer) groups.push(map.reviewLayer);
-
-        function scanGroup(g) {
-            var found = null;
-            if (!g) return null;
-            if (g.eachLayer) {
-                g.eachLayer(function (layer) {
-                    if (found) return;
-                    if (layer && layer instanceof L.Marker) {
-                        var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
-                        if (ref === reference) {
-                            found = layer;
-                        }
-                    } else if (layer && layer.eachLayer) {
-                        var inner = scanGroup(layer);
-                        if (inner) found = inner;
-                    }
-                });
-            }
-            return found;
-        }
-
-        for (var i = 0; i < groups.length; i++) {
-            var m = scanGroup(groups[i]);
-            if (m) return m;
-        }
-
-        // 3) Full map scan as last resort
-        var result = null;
-        map.eachLayer(function (layer) {
-            if (result) return;
-            if (layer && layer instanceof L.Marker) {
-                var ref = (layer._parkRef || (layer.options && (layer.options.reference || layer.options.ref)));
-                if (ref === reference) {
-                    result = layer;
-                }
-            } else if (layer && layer.eachLayer) {
-                var inner = scanGroup(layer);
-                if (inner) result = inner;
-            }
-        });
-        return result;
-    }
-
-    /** Open a park's popup by its reference with retries; prefers firing 'click' to trigger async content loaders. */
-    function openParkPopupByRef(reference, attempts) {
-        attempts = (typeof attempts === 'number') ? attempts : 14;
-        if (!map || !reference) return;
-        var marker = __findMarkerByRef(reference);
-        if (marker) {
-            try {
-                // Prefer click to ensure any bound 'click' handlers run (async content, analytics, etc.)
-                if (typeof marker.fire === 'function') {
-                    marker.fire('click');
-                } else if (typeof marker.openPopup === 'function') {
-                    marker.openPopup();
-                }
-            } catch (e) {
-                console.warn("openParkPopupByRef failed to open", e);
-            }
-            return;
-        }
-        if (attempts > 0) {
-            // If the layer may not exist yet, nudge a refresh, then retry
-            try {
-                if (typeof refreshMarkers === 'function') refreshMarkers();
-            } catch (e) {
-            }
-            setTimeout(function () {
-                openParkPopupByRef(reference, attempts - 1);
-            }, 110);
-        } else {
-            console.warn("openParkPopupByRef: marker not found for", reference);
-        }
-    }
     if (MODE_CHANGES_AVAILABLE && typeof updateVisibleModeCounts === 'function') {
         updateVisibleModeCounts();
     }
@@ -4579,15 +4394,58 @@ function initializeMap(lat, lng) {
             applyActivationToggleState();
         }
     }, 300);
-    mapInstance.on("popupopen", () => {
+    mapInstance.on("popupopen", (ev) => {
         skipNextSpotFetch = true;
         window.isPopupOpen = true;
         window.__skipNextMarkerRefresh = true;
+        lockPopupRefresh(900);
+        // Fold popup sections for pre-existing markers/popups
+        try {
+            const popup = ev && ev.popup;
+            if (!popup || typeof popup.getContent !== 'function') return;
+            const cur = popup.getContent();
+
+            // Helper to test for headings
+            const hasTargets = (s) => /(Recent Activations:|Current Activation:)/i.test(s || '');
+
+            if (typeof cur === 'string') {
+                if (hasTargets(cur)) {
+                    const folded = foldPopupSections(cur);
+                    if (folded && folded !== cur) popup.setContent(folded);
+                }
+                return;
+            }
+
+            // If Leaflet gave us a DOM node (Element), mutate in place
+            if (cur && cur.nodeType === 1) { // ELEMENT_NODE
+                // Skip if already folded
+                if (cur.querySelector && cur.querySelector('details.popup-collapsible')) return;
+
+                const html = cur.innerHTML || '';
+                if (!hasTargets(html)) return;
+
+                const folded = foldPopupSections(html);
+                if (folded && folded !== html) {
+                    cur.innerHTML = folded; // update in place to preserve the node
+                }
+                return;
+            }
+
+            // Fallback: convert anything else to string and try
+            const asText = String(cur || '');
+            if (hasTargets(asText)) {
+                const folded = foldPopupSections(asText);
+                if (folded && folded !== asText) popup.setContent(folded);
+            }
+        } catch (e) {
+            console.warn('map-level foldPopupSections failed:', e);
+        }
     });
     mapInstance.on("popupclose", () => {
         window.isPopupOpen = false;
         skipNextSpotFetch = false;
         window.__skipNextMarkerRefresh = false;
+        clearPopupLock();
         setTimeout(runDeferredRefresh, 60);
     });
     if (!isDesktopMode) {
@@ -4597,23 +4455,6 @@ function initializeMap(lat, lng) {
                 return;
             }
             debouncedSpotFetch();
-        });
-    }
-// Map-level safety: fold popup sections even for pre-existing markers/popups.
-    if (map && typeof map.on === 'function') {
-        map.on('popupopen', function (ev) {
-            lockPopupRefresh(900);
-            window.isPopupOpen = true;
-            // ... existing popup content folding code ...
-        });
-
-        map.on('popupclose', function (ev) {
-            window.isPopupOpen = false;
-            clearPopupLock();
-            // Run any deferred refreshes after popup closes
-            setTimeout(() => {
-                runDeferredRefresh();
-            }, 100);
         });
     }
     return mapInstance;
