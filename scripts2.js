@@ -1,32 +1,37 @@
 /** Run a callback once the Leaflet map exists and is fully ready. */
+/** Run a callback once the Leaflet map exists and is fully ready. */
 function whenMapReady(cb) {
     if (typeof cb !== 'function') return;
-    const go = function () {
-        try {
-            cb();
-        } catch (e) {
-        }
+
+    const go = () => {
+        try { cb(); }
+        catch (_){ }
     };
+
+    // If window.map is not yet defined, poll until it is
     if (typeof window === 'undefined' || !window.map) {
-        // Poll briefly until map is created
         let tries = 40;
-        const t = setInterval(function () {
+        const timer = setInterval(() => {
             if (window.map) {
-                clearInterval(t);
+                clearInterval(timer);
                 whenMapReady(cb);
             } else if (--tries <= 0) {
-                clearInterval(t);
+                clearInterval(timer);
                 console.warn("whenMapReady: map not initialized");
             }
         }, 50);
         return;
     }
-    if (typeof map.whenReady === 'function') {
-        map.whenReady(go);
-    } else if (map._loaded) {
+
+    // At this point window.map exists, guard access to its methods
+    if (window.map && typeof window.map.whenReady === 'function') {
+        window.map.whenReady(go);
+    }
+    else if (window.map && window.map._loaded) {
         go();
-    } else {
-        map.once && map.once('load', go);
+    }
+    else if (window.map && typeof window.map.once === 'function') {
+        window.map.once('load', go);
     }
 }
 
@@ -4520,96 +4525,43 @@ function initializeMap(lat, lng) {
     const isMobile = window.innerWidth <= 600;
 
     // Check for saved map center and zoom in localStorage
-    let savedCenter = localStorage.getItem("mapCenter");
-    let savedZoom = localStorage.getItem("mapZoom");
-
-    if (savedCenter) {
-        try {
-            savedCenter = JSON.parse(savedCenter);
-        } catch (e) {
-            savedCenter = null;
-        }
-    }
-
-    if (savedZoom) {
-        savedZoom = parseInt(savedZoom, 10);
-    }
+    let savedCenter = null, savedZoom = null;
+    try {
+        savedCenter = JSON.parse(localStorage.getItem("mapCenter") || 'null');
+        savedZoom   = parseInt(localStorage.getItem("mapZoom"), 10) || undefined;
+    } catch (_) {}
 
     const mapInstance = L.map("map", {
         center: savedCenter || [lat, lng],
-        zoom: savedZoom || (isMobile ? 12 : 10),
+        zoom:   savedZoom   || (isMobile ? 12 : 10),
         zoomControl: !isMobile,
         attributionControl: true,
     });
-
-    console.log("Initialized map at:", mapInstance.getCenter(), "zoom:", mapInstance.getZoom());
 
     // Add OpenStreetMap tiles
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; OpenStreetMap contributors',
     }).addTo(mapInstance);
 
-    console.log("Added OpenStreetMap tiles.");
-
-
-    // Save center and zoom to localStorage whenever map is moved or zoomed
+    // Save center/zoom on moveend/zoomend
     mapInstance.on("moveend zoomend", () => {
-        const center = mapInstance.getCenter();
-        localStorage.setItem("mapCenter", JSON.stringify([center.lat, center.lng]));
+        const c = mapInstance.getCenter();
+        localStorage.setItem("mapCenter", JSON.stringify([c.lat, c.lng]));
         localStorage.setItem("mapZoom", mapInstance.getZoom());
-        localStorage.setItem("mapSavedAt", Date.now().toString());
     });
 
-    // Attach dynamic spot fetching to map movement
-    let skipNextSpotFetch = false;
-    const debouncedSpotFetch = debounce(async () => {
-        if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-            scheduleDeferredRefresh('debouncedSpotFetch');
-            return;
-        }
-        console.log("Map moved or zoomed. Updating spots...");
-        const result = await fetchAndDisplaySpotsInCurrentBounds(mapInstance);
-        // Only re-render if the fetch did not defer due to an open popup
-        if (result !== 'deferred') {
-            applyActivationToggleState();
-        }
-    }, 300);
-    map.on('popupopen', ev => {
+    // Popup‐safety: listen on the instance, not on undefined global `map`
+    mapInstance.on('popupopen', ev => {
         lockPopupRefresh(900);
         isPopupOpen = true;
-        // fold sections if needed (existing code)
+        // fold popup sections if needed...
     });
-    map.on('popupclose', ev => {
+    mapInstance.on('popupclose', ev => {
         isPopupOpen = false;
         clearPopupLock();
         setTimeout(runDeferredRefresh, 100);
     });
-    if (!isDesktopMode) {
-        mapInstance.on("moveend", () => {
-            if (skipNextSpotFetch) {
-                skipNextSpotFetch = false;
-                return;
-            }
-            debouncedSpotFetch();
-        });
-    }
-// Map-level safety: fold popup sections even for pre-existing markers/popups.
-    if (map && typeof map.on === 'function') {
-        map.on('popupopen', function (ev) {
-            lockPopupRefresh(900);
-            window.isPopupOpen = true;
-            // ... existing popup content folding code ...
-        });
 
-        map.on('popupclose', function (ev) {
-            window.isPopupOpen = false;
-            clearPopupLock();
-            // Run any deferred refreshes after popup closes
-            setTimeout(() => {
-                runDeferredRefresh();
-            }, 100);
-        });
-    }
     return mapInstance;
 }
 
