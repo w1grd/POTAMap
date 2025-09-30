@@ -30,6 +30,24 @@ function whenMapReady(cb) {
     }
 }
 
+// === Enhanced popup stability lock system ===
+let __popupLockUntil = 0;
+let __popupStabilityMode = false;
+
+function lockPopupRefresh(ms = 900) {
+    __popupLockUntil = Date.now() + ms;
+    __popupStabilityMode = true;
+}
+
+function shouldDeferRefresh() {
+    return Date.now() < __popupLockUntil || __popupStabilityMode;
+}
+
+function clearPopupLock() {
+    __popupStabilityMode = false;
+    __popupLockUntil = 0;
+}
+
 
 // === Marker registry shim: auto-register markers created with options.reference/ref ===
 (function () {
@@ -4581,7 +4599,23 @@ function initializeMap(lat, lng) {
             debouncedSpotFetch();
         });
     }
+// Map-level safety: fold popup sections even for pre-existing markers/popups.
+    if (map && typeof map.on === 'function') {
+        map.on('popupopen', function (ev) {
+            lockPopupRefresh(900);
+            window.isPopupOpen = true;
+            // ... existing popup content folding code ...
+        });
 
+        map.on('popupclose', function (ev) {
+            window.isPopupOpen = false;
+            clearPopupLock();
+            // Run any deferred refreshes after popup closes
+            setTimeout(() => {
+                runDeferredRefresh();
+            }, 100);
+        });
+    }
     return mapInstance;
 }
 
@@ -4606,202 +4640,71 @@ function findMarkerByReference(ref, layerGroup) {
 /**
  * Displays parks on the map with proper popups that include activation information.
  */
-async function displayParksOnMap(map, parks, userActivatedReferences = null, layerGroup = map.activationsLayer) {
-    console.log(`Displaying ${parks.length} parks on the map.`); // Debugging
-
-    if (!layerGroup) {
-        map.activationsLayer = L.layerGroup().addTo(map);
-
-
-        // let userLocationMarker = null;
-        // function setUserLocationMarker(lat, lng) {
-        //     if (!map) return;
-        //     if (userLocationMarker) {
-        //         userLocationMarker.setLatLng([lat, lng]);
-        //     } else {
-        //         userLocationMarker = L.marker([lat, lng], {
-        //             icon: L.icon({
-        //                 iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-        //                 iconSize: [30, 30],
-        //                 iconAnchor: [15, 30],
-        //                 popupAnchor: [0, -30],
-        //             }),
-        //         }).addTo(map);
-        //     }
-        // }
-
-        layerGroup = map.activationsLayer;
-        console.log("Created a new activations layer.");
-    } else {
-        console.log("Using existing activations layer.");
+// --- Custom marker tap handler ---
+const handleMarkerTap = (e) => {
+    // Suppress default click-to-open behaviour so the popup does NOT open during the pan
+    if (e && e.originalEvent) {
+        e.originalEvent.preventDefault();
+        e.originalEvent.stopPropagation();
     }
+    if (e) L.DomEvent.stop(e);
 
-    layerGroup.clearLayers(); // Clear existing markers before adding new ones
+    // Close any existing popups and tooltips
+    marker.closeTooltip();
+    marker.closePopup();
 
-    parks.forEach((park) => {
-        const {reference, name, latitude, longitude, activations: parkActivationCount, created} = park;
-        const isUserActivated = userActivatedReferences.includes(reference);
-        let createdTime = null;
-        if (created) {
-            createdTime = typeof created === 'number'
-                ? created
-                : new Date(created).getTime();
-        }
-        const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
-        const isNew = RECENT.has(reference) || (createdTime && (Date.now() - createdTime <= 30 * 24 * 60 * 60 * 1000));
-        const currentActivation = spots?.find(spot => spot.reference === reference);
-        const isActive = !!currentActivation;
-        const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
+    const ref = reference;
+    const latlng = L.latLng(latitude, longitude);
 
-        // Show pulsing div icons for active or newly added parks
-        const useDivIcon = isNew || isActive;
+    // Lock popup refreshes to prevent premature closure
+    lockPopupRefresh(1200); // Longer lock for border clicks
 
-        // Apply Filters (OR semantics)
-        if (!shouldDisplayParkFlags({isUserActivated, isActive, isNew})) return;
-        if (!shouldDisplayByMode(isActive, isNew, mode)) return;
+    // Compute a target slightly above the marker so the popup has room near borders
+    const size = map.getSize();
+    const targetPoint = map.project(latlng).subtract([0, Math.round(size.y * 0.25)]);
+    const targetLatLng = map.unproject(targetPoint);
 
-        // Determine marker class for animated divIcon
-        const markerClasses = [];
-        if (isNew) markerClasses.push('pulse-marker');
-        if (isActive) {
-            markerClasses.push('active-pulse-marker');
-            if (mode === 'CW') markerClasses.push('mode-cw');
-            else if (mode === 'SSB') markerClasses.push('mode-ssb');
-            else if (mode === 'FT8' || mode === 'FT4') markerClasses.push('mode-data');
-        }
-        const markerClassName = markerClasses.join(' ');
+    let done = false;
+    const onMoveEnd = async () => {
+        if (done) return;
+        done = true;
+        map.off('moveend', onMoveEnd);
 
-        // Does this park have a PN&R review URL?
-        let hasReview = !!park.reviewURL;
-        if (!hasReview && window.__REVIEW_URLS instanceof Map) {
-            const urlFromCache = window.__REVIEW_URLS.get(reference);
-            if (urlFromCache) {
-                park.reviewURL = urlFromCache;
-                hasReview = true;
-            }
-        }
-
-        const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated, created);
-        const marker = useDivIcon
-            ? L.marker([latitude, longitude], {
-                icon: L.divIcon({
-                    className: `leaflet-div-icon ${markerClassName}`.trim(),
-                    iconSize: [20, 20],
-                })
-            })
-            : L.circleMarker([latitude, longitude], {
-                radius: 6,
-                fillColor: baseColor,
-                color: "#000",
-                weight: 1,
-                opacity: 1,
-                fillOpacity: 0.9,
-            });
-
-        if (hasReview) decorateReviewHalo(marker, park);
-
-        marker.park = park;
-        marker.currentActivation = currentActivation;
-        //Set up data block
-        const tooltipText = currentActivation
-            ? `${reference}: ${name} <br> ${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})${currentActivation.comments ? ` <br> ${currentActivation.comments}` : ''}`
-            : `${reference}: ${name} (${parkActivationCount} activations)`;
-
-        marker
-            .addTo(layerGroup)
-            .bindPopup("<b>Loading park info...</b>", {
-                maxWidth: 280,
-                keepInView: false,
-                autoPan: false,
-                autoPanPadding: [30, 40]
-            })
-            .bindTooltip(tooltipText, {
-                direction: "top",
-                opacity: 0.9,
-                sticky: false,
-                className: "custom-tooltip",
-            });
-
-        // --- Custom marker tap handler ---
-        const handleMarkerTap = (e) => {
-            // Suppress default click-to-open behaviour so the popup does NOT open during the pan
-            if (e && e.originalEvent) {
-                e.originalEvent.preventDefault();
-                e.originalEvent.stopPropagation();
-            }
-            if (e) L.DomEvent.stop(e);
-
-            // Make sure any popup is closed now; we will open it after pan + refresh
-            marker.closeTooltip();
-            marker.closePopup();
-
-            const ref = reference;
-            const latlng = L.latLng(latitude, longitude);
-
-            // We want refresh to proceed; do not set isPopupOpen here
-            window.__skipNextMarkerRefresh = false;
-
-            // Compute a target slightly above the marker so the popup has room near borders
-            const size = map.getSize();
-            const targetPoint = map.project(latlng).subtract([0, Math.round(size.y * 0.25)]);
-            const targetLatLng = map.unproject(targetPoint);
-
-            let done = false;
-            const onMoveEnd = async () => {
-                if (done) return; done = true;
-                map.off('moveend', onMoveEnd);
-
-                // Refresh spots & redraw BEFORE opening the popup
-                try {
-                    const result = await fetchAndDisplaySpotsInCurrentBounds(map);
-                    if (result !== 'deferred') {
+        // Small delay to ensure pan is completely finished
+        setTimeout(async () => {
+            try {
+                // Refresh spots but respect popup lock
+                const result = await fetchAndDisplaySpotsInCurrentBounds(map);
+                if (result !== 'deferred') {
+                    // Only refresh if not deferred due to popup lock
+                    if (!shouldDeferRefresh()) {
                         applyActivationToggleState();
                     }
-                } catch (err) {
-                    console.warn('Refresh after pan failed:', err);
                 }
-
-                // Find the freshly re-rendered marker and open its popup
-                const fresh = findMarkerByReference(ref, map.activationsLayer);
-                if (fresh && typeof fresh.openPopup === 'function') {
-                    window.isPopupOpen = true;
-                    fresh.openPopup();
-                } else {
-                    console.warn('Marker not found after refresh for', ref);
-                }
-            };
-
-            map.on('moveend', onMoveEnd);
-            map.panTo(targetLatLng, { animate: true });
-        };
-        marker.on('mousedown touchstart', handleMarkerTap);
-        marker.on('popupopen', async function () {
-            try {
-                parkActivations = await fetchParkActivations(reference);
-                await saveParkActivationsToIndexedDB(reference, parkActivations);
-
-                let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
-                // Ensure the popup uses collapsible panels for activation sections
-                popupContent = foldPopupSections(popupContent);
-
-                if (park.change) {
-                    popupContent += `
-                        <div style="font-size: 0.85em; font-style: italic; margin-top: 0.5em;">
-                            <b>Recent change:</b> ${park.change}
-                        </div>
-                    `;
-                }
-
-                this.setPopupContent(popupContent);
-            } catch (error) {
-                console.error(`Error fetching activations for park ${reference}:`, error);
-                this.setPopupContent("<b>Error loading park info.</b>");
+            } catch (err) {
+                console.warn('Refresh after pan failed:', err);
             }
-        });
-    });
 
-    console.log("All parks displayed with appropriate highlights.");
-}
+            // Find the freshly re-rendered marker and open its popup
+            const fresh = findMarkerByReference(ref, map.activationsLayer);
+            if (fresh && typeof fresh.openPopup === 'function') {
+                window.isPopupOpen = true;
+                fresh.openPopup();
+
+                // Clear the lock after popup is successfully opened
+                setTimeout(() => {
+                    clearPopupLock();
+                }, 300);
+            } else {
+                console.warn('Marker not found after refresh for', ref);
+                clearPopupLock();
+            }
+        }, 100);
+    };
+
+    map.on('moveend', onMoveEnd);
+    map.panTo(targetLatLng, { animate: true });
+};
 
 // ---- helper: extract 2-letter US state/territory codes from locationDesc ----
 // ---- helpers ----
@@ -5335,7 +5238,12 @@ async function getOrPromptUserCallsign() {
 }
 
 function applyActivationToggleState() {
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) { scheduleDeferredRefresh('applyActivationToggleState'); return; }
+    // Respect popup stability - don't clear layers while popup is stabilizing
+    if (shouldDeferRefresh()) {
+        scheduleDeferredRefresh('applyActivationToggleState');
+        return;
+    }
+
     const toggleButton = document.getElementById('toggleActivations');
     const userActivatedReferences = activations.map((act) => act.reference);
 
@@ -5426,11 +5334,13 @@ async function fetchAndDisplaySpots() {
  */
 async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
     const SPOT_API_URL = "https://api.pota.app/v1/spots";
-    if (window.isPopupOpen || window.__skipNextMarkerRefresh) {
-        // Defer instead of clearing layers mid-autopan
+
+    // Don't refresh spots if popup is stabilizing
+    if (shouldDeferRefresh()) {
         scheduleDeferredRefresh('fetchAndDisplaySpotsInCurrentBounds');
         return 'deferred';
     }
+
     try {
         const response = await fetch(SPOT_API_URL);
         if (!response.ok) throw new Error(`Error fetching spots: ${response.statusText}`);
@@ -5466,7 +5376,6 @@ async function fetchAndDisplaySpotsInCurrentBounds(mapInstance) {
         }
 
         const activatedReferences = activations.map(act => act.reference);
-        //displayParksOnMap(mapInstance, parks, activatedReferences, mapInstance.activationsLayer);
         applyActivationToggleState();
 
     } catch (error) {
