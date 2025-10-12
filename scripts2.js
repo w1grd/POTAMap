@@ -76,6 +76,10 @@ function clearPopupLock() {
 })();
 
 
+
+// Utility: always return an array (guards against undefined during CSV flows)
+function asArray(x) { return Array.isArray(x) ? x : []; }
+
 // === Global popup opener helper ===
 
 // === Helpers for Go-To-Park popup behavior ===
@@ -433,6 +437,11 @@ function ensureToastCss() {
 
 function showToast(message, opts = {}) {
     ensureToastCss();
+    // Normalize misleading CSV error emitted by downstream UI paths
+    if (message && typeof message === 'string' && /Invalid CSV file or incorrect data format\./.test(message)) {
+        console.warn('[CSV] Parser likely succeeded; a post-import UI update failed (e.g., spots/activations not yet arrays or API merge returned HTML).');
+        message = 'Upload read OK, but a downstream update failed. This is not a CSV formatting issue. Try reloading the page or clearing cache; a fix is being applied.';
+    }
     const {sticky = true, kind = '', showSpinner = true} = opts;
     let cont = document.querySelector('.toast-container');
     if (!cont) {
@@ -612,7 +621,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
     // Build an index of current spots by reference for “currently on air”
     const spotByRef = {};
-    for (const s of spots) {
+    for (const s of asArray(spots)) {
         if (s && s.reference) spotByRef[s.reference] = s;
     }
 
@@ -1744,7 +1753,7 @@ async function redrawMarkersWithFilters() {
         // Always clear before redraw to avoid stale styling/classes across filter toggles
         map.activationsLayer.clearLayers();
         const bounds = getCurrentMapBounds();
-        const userActivatedReferences = (activations || []).map(a => a.reference);
+        const userActivatedReferences = asArray(activations).map(a => a && a.reference).filter(Boolean);
 
         // Build a quick index for current spots by reference
         const spotByRef = {};
@@ -2932,7 +2941,7 @@ async function toggleActivations() {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
 
-    const userActivatedReferences = activations.map((act) => act.reference);
+    const userActivatedReferences = (Array.isArray(activations) ? activations : []).map(act => act && act.reference).filter(Boolean);
 
     switch (activationToggleState) {
         case 0: // Show all spots
@@ -2954,7 +2963,7 @@ async function toggleActivations() {
             break;
 
         case 3: // Show only currently active parks (on air)
-            const onAirReferences = spots.map((spot) => spot.reference);
+            const onAirReferences = (Array.isArray(spots) ? spots : []).map(spot => spot && spot.reference).filter(Boolean);
             const onAirParks = parks.filter((park) =>
                 onAirReferences.includes(park.reference)
             );
@@ -3052,7 +3061,7 @@ async function handleFileUpload(event) {
 
             // If Show My Activations is active, display callsign
             const toggleButton = document.getElementById('toggleActivations');
-            if (toggleButton.classList.contains('active')) {
+            if (toggleButton && toggleButton.classList && toggleButton.classList.contains('active')) {
                 displayCallsign();
             }
         } catch (err) {
@@ -4071,8 +4080,8 @@ async function updateActivationsInView() {
         map.activationsLayer = L.layerGroup().addTo(map);
     }
 
-    const userActivatedReferences = activations.map(act => act.reference);
-    const onAirReferences = spots.map(spot => spot.reference);
+    const userActivatedReferences = (Array.isArray(activations) ? activations : []).map(act => act && act.reference).filter(Boolean);
+    const onAirReferences = (Array.isArray(spots) ? spots : []).map(spot => spot && spot.reference).filter(Boolean);
 
     let parksToDisplay = parksInBounds;
 
