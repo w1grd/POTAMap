@@ -563,6 +563,28 @@
     background: #0056b3;
 }
 
+#hamburgerMenu #menu #resetUserDataButton {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    margin-top: 10px;
+    color: #7a1f1f;
+    background: #fbe2e2;
+    border: 1px solid #f5b5b5;
+    border-radius: 4px;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+#hamburgerMenu #menu #resetUserDataButton:hover {
+    background: #f6caca;
+    transform: scale(1.01);
+}
+
+#hamburgerMenu #menu #resetUserDataButton:active {
+    transform: scale(0.99);
+}
+
 #hamburgerMenu #menu #activationsFileInput {
     display: none;
 }
@@ -587,6 +609,13 @@
 #hamburgerMenu.mobile #menu button {
     padding: 8px 10px;
     font-size: 14px;
+}
+
+#versionInfo .activation-count {
+    display: block;
+    margin-top: 0.5em;
+    color: #555;
+    font-weight: 500;
 }
 
 

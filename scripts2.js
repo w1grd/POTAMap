@@ -2102,6 +2102,7 @@ function initializeMenu() {
                             <div id="callsignDisplay" style="text-align: center; font-weight: bold; padding: 0.5em; font-size: 0.75em; background: #f0f0f0; margin-top: 0.5em;">
                                 Callsign: <span id="callsignText">please set</span>
                             </div>
+                            <button id="resetUserDataButton" type="button">Reset User Data</button>
                             <div id="versionInfo" style="font-size: 0.75em; color: #888; margin-top: 1em;"></div>
                         </div>
                     </details>
@@ -2121,6 +2122,13 @@ function initializeMenu() {
     if (uploadBtn && fileInput) {
         uploadBtn.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', handleFileUpload);
+    }
+
+    const resetButton = document.getElementById('resetUserDataButton');
+    if (resetButton) {
+        resetButton.addEventListener('click', () => {
+            handleUserDataReset();
+        });
     }
 
     buildFiltersPanel(document.getElementById('filtersPanelContent'));
@@ -2169,7 +2177,9 @@ async function displayVersionInfo() {
         console.warn("Could not fetch changes.json HEAD:", e);
     }
 
-    const versionString = `<center>App-${appDate}<br/>Parks-${parksDate}<br/>Delta-${changesDate}</center>`;
+    const activationCount = getActivatedParkCount();
+    const activationLabel = activationCount === 1 ? '1 park' : `${activationCount} parks`;
+    const versionString = `<center>App-${appDate}<br/>Parks-${parksDate}<br/>Delta-${changesDate}<br/><span class="activation-count">My Activations: ${activationLabel}</span></center>`;
     document.getElementById("versionInfo").innerHTML = versionString;
 }
 
@@ -2178,6 +2188,46 @@ function formatAsYYYYMMDD(date) {
     const m = (date.getMonth() + 1).toString().padStart(2, '0');
     const d = date.getDate().toString().padStart(2, '0');
     return `${y}${m}${d}`;
+}
+
+function getActivatedParkCount() {
+    if (!Array.isArray(activations) || activations.length === 0) return 0;
+    const uniqueRefs = new Set();
+    for (const activation of activations) {
+        if (activation && activation.reference) {
+            uniqueRefs.add(String(activation.reference).trim());
+        }
+    }
+    return uniqueRefs.size;
+}
+
+async function handleUserDataReset() {
+    const confirmed = window.confirm('Resetting will remove all saved activations from this device. Continue?');
+    if (!confirmed) return;
+
+    try {
+        await clearIndexedDBActivations();
+        activations = [];
+
+        try {
+            localStorage.setItem('activationToggleState', '0');
+        } catch (_) {}
+        activationToggleState = 0;
+
+        const toggleButton = document.getElementById('toggleActivations');
+        if (toggleButton && toggleButton.classList) {
+            toggleButton.classList.remove('active');
+        }
+
+        displayCallsign();
+        await displayVersionInfo();
+        applyActivationToggleState();
+
+        alert('Your saved activations have been removed from this device.');
+    } catch (error) {
+        console.error('Failed to reset user data:', error);
+        alert('Something went wrong while resetting your data. Please try again.');
+    }
 }
 
 function enhancePOTAMenuStyles() {
@@ -2772,6 +2822,32 @@ async function saveParkActivationsToIndexedDB(reference, activations) {
     });
 }
 
+async function clearIndexedDBActivations() {
+    const db = await getDatabase();
+    const storeNames = ['activations', 'parkActivations'].filter(name => db.objectStoreNames.contains(name));
+    if (!storeNames.length) return;
+
+    const transaction = db.transaction(storeNames, 'readwrite');
+
+    return new Promise((resolve, reject) => {
+        storeNames.forEach(name => {
+            try {
+                const store = transaction.objectStore(name);
+                store.clear();
+            } catch (err) {
+                console.warn(`Unable to clear IndexedDB store ${name}:`, err);
+            }
+        });
+
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = (event) => reject(event.target.error);
+        transaction.onabort = (event) => {
+            const err = (event && event.target && event.target.error) || new Error('IndexedDB transaction aborted while clearing activations.');
+            reject(err);
+        };
+    });
+}
+
 /**
  * Fetches *all* activations for a specific park from the POTA API,
  * with *no* caching in IndexedDB.
@@ -3053,6 +3129,8 @@ async function handleFileUpload(event) {
             activations = Array.from(activationMap.values());
             await saveActivationsToIndexedDB(activations);
             console.log("Activations After Upload:", activations); // Debugging
+
+            await displayVersionInfo();
 
             alert(`Activations appended successfully!\nAppended: ${appendedCount}\nDuplicates: ${duplicateCount}\nInvalid: ${invalidCount}`);
 
@@ -4383,6 +4461,8 @@ async function initializeActivationsDisplay() {
         } else {
             console.log("No activations found in IndexedDB. Starting with default view.");
         }
+
+        await displayVersionInfo();
     } catch (error) {
         console.error('Error initializing activations display:', error);
     }
@@ -4459,6 +4539,7 @@ async function updateUserActivationsFromAPI() {
         activations = Array.from(activationMap.values());
         await saveActivationsToIndexedDB(activations);
         console.log("Successfully merged API activations into local store.");
+        await displayVersionInfo();
     } catch (error) {
         console.error("Error fetching or merging user activations from API:", error);
     }
@@ -4603,6 +4684,7 @@ async function updateActivationsFromScrape() {
         await saveActivationsToIndexedDB(activations);
         console.log("Successfully saved merged scraped activations.");
         updateActivationsInView();
+        await displayVersionInfo();
 
     } catch (error) {
         console.error("Error updating activations from scrape:", error);
@@ -4946,6 +5028,7 @@ async function fetchAndApplyUserActivations(callsign = null) {
 
         updateActivationsInView();
         displayCallsign();
+        await displayVersionInfo();
 
     } catch (error) {
         console.error("Error fetching or processing user activations:", error);
