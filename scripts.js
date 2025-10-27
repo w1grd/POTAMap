@@ -2179,7 +2179,8 @@ async function displayVersionInfo() {
 
     const activationCount = getActivatedParkCount();
     const activationLabel = activationCount === 1 ? '1 park' : `${activationCount} parks`;
-    const versionString = `<center>App-${appDate}<br/>Parks-${parksDate}<br/>Delta-${changesDate}<br/><span class="activation-count">My Activations: ${activationLabel}</span></center>`;
+    const versionString = `<center>App-${appDate}<br/>Parks-${parksDate}<br/>Delta-${changesDate}<br/>
+        <span class="activation-count">Unique: ${activationLabel}</span></center>`;
     document.getElementById("versionInfo").innerHTML = versionString;
 }
 
