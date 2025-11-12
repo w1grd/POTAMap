@@ -4073,10 +4073,10 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         hint.textContent = 'Notes stay on this device and are not shared.';
         notesContainer.appendChild(hint);
 
-        const noteDisplay = document.createElement('div');
-        noteDisplay.className = 'park-popup-notes-display';
-        noteDisplay.hidden = true;
-        notesContainer.appendChild(noteDisplay);
+        const noteDisplayEl = document.createElement('div');
+        noteDisplayEl.className = 'park-popup-notes-display';
+        noteDisplayEl.hidden = true;
+        notesContainer.appendChild(noteDisplayEl);
 
         const status = document.createElement('div');
         status.className = 'park-popup-note-status';
@@ -4091,14 +4091,14 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         const normalize = (value) => (typeof value === 'string' ? value.trim() : '');
 
         const updateNoteDisplay = (rawValue) => {
-            if (!noteDisplay) return;
+            if (!noteDisplayEl) return;
             const normalized = normalize(rawValue);
             if (normalized) {
-                noteDisplay.innerHTML = linkifyText(normalized);
-                noteDisplay.hidden = false;
+                noteDisplayEl.innerHTML = linkifyText(normalized);
+                noteDisplayEl.hidden = false;
             } else {
-                noteDisplay.innerHTML = '';
-                noteDisplay.hidden = true;
+                noteDisplayEl.innerHTML = '';
+                noteDisplayEl.hidden = true;
             }
         };
         let lastSavedNormalized = normalize(existingText);
