@@ -536,23 +536,26 @@
     flex-direction: column;
     gap: 6px;
 }
-
+/* Reserve space so the title never sits under the dog-ear */
+.park-popup-front-body {
+    padding-right: 44px;  /* room for the corner toggle */
+}
 .park-popup-face.park-popup-back {
     transform: rotateY(180deg);
 }
 
 .park-popup-corner-toggle {
     position: absolute;
-    top: -10px;
-    right: -10px;
-    width: 32px;
-    height: 32px;
+    top: -14px;
+    right: -14px;
+    width: 28px;                 /* was 32px */
+    height: 28px;
     border: none;
-    border-radius: 10px;
-    background: linear-gradient(135deg, rgba(37, 99, 235, 0.9), rgba(59, 130, 246, 0.92));
+    border-radius: 9px;
+    background: linear-gradient(135deg, rgba(37,99,235,0.9), rgba(59,130,246,0.92));
     color: #fff;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22);
+    box-shadow: 0 4px 12px rgba(15,23,42,0.22);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -560,7 +563,14 @@
     transition: box-shadow 0.2s ease, transform 0.2s ease;
     z-index: 2;
 }
-
+/* Compact dog-ear for narrow popups */
+.compact-note .park-popup-corner-toggle {
+    top: -12px;
+    right: -12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+}
 .park-popup-corner-toggle > span {
     transform: rotate(-45deg);
     font-size: 14px;

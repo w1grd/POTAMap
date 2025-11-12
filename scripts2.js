@@ -5357,10 +5357,22 @@ function initializeMap(lat, lng) {
         lockPopupRefresh(900);
         isPopupOpen = true;
         // fold popup sections if needed...
+        // Shrink the note dog-ear on narrow popups so it won't crowd titles
+        try {
+            const popupEl = ev && ev.popup ? ev.popup.getElement() : null;
+            if (popupEl) {
+                const isNarrow = popupEl.offsetWidth && popupEl.offsetWidth < 360; // heuristic
+                popupEl.classList.toggle('compact-note', !!isNarrow);
+            }
+        } catch (_) {}
     });
     mapInstance.on('popupclose', ev => {
         isPopupOpen = false;
         clearPopupLock();
+        try {
+            const popupEl = ev && ev.popup ? ev.popup.getElement() : null;
+            if (popupEl) popupEl.classList.remove('compact-note');
+        } catch (_) {}
         setTimeout(runDeferredRefresh, 100);
     });
 
