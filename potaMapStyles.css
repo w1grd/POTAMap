@@ -534,8 +534,9 @@
 .park-popup-back-body {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding-left: 40px; /* keep controls clear of the corner badge */
+    align-items: center;
+    width: 100%;
+    padding: 4px 16px 12px;
 }
 /* Reserve space so the title never sits under the dog-ear */
 .park-popup-front-body {
@@ -547,111 +548,158 @@
 
 .park-popup-corner-toggle {
     position: absolute;
-    top: -14px;                /* stick up a bit */
-    left: -14px;               /* stick left a bit */
+    top: -18px;
+    left: -18px;
     right: auto;
-    width: 28px;               /* slightly larger */
-    height: 28px;
-    border: 2px solid #ffffff;
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
-    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.92), rgba(255,255,255,0.78)),
-                linear-gradient(135deg, rgba(59,130,246,1), rgba(96,165,250,1));
-    color: #fff;
+    border: 2px solid rgba(15, 23, 42, 0.7);
+    background: rgba(255, 255, 255, 0.98);
+    color: #0f172a;
     cursor: pointer;
-    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.28);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.22);
     display: flex;
     align-items: center;
     justify-content: center;
-    transform: none;
-    transition: transform 0.15s ease, box-shadow 0.2s ease;
-    z-index: 2;
+    transition: transform 0.16s ease, box-shadow 0.24s ease, background-color 0.24s ease;
+    z-index: 3;
+    padding: 0;
+    overflow: visible;
+}
+
+.park-popup-corner-toggle .park-popup-corner-icon {
+    width: 20px;
+    height: 20px;
     background-repeat: no-repeat;
     background-position: center;
-    background-size: 18px 18px;   /* arrow size */
-    overflow: visible;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7.5 4.25h7.25a5.75 5.75 0 1 1-4.06 9.81' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M7.5 4.25l3.25 3.25-3.25 3.25' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-}
-/* Compact dog-ear for narrow popups */
-.compact-note .park-popup-corner-toggle {
-    top: -12px;
-    left: -12px;
-    right: auto;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border-width: 2px;
-}
-/* Compact scaling override for the arrow on the button background */
-.compact-note .park-popup-corner-toggle { background-size: 16px 16px; }
-/* Hide any textual glyphs (like the old emoji) inside the badge */
-.park-popup-corner-toggle > * {
-    opacity: 0 !important;
-    font-size: 0 !important;
-    line-height: 0 !important;
+    background-size: contain;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%23111827' stroke-linecap='round' stroke-linejoin='round' stroke-width='3'%3E%3Cpath d='M8.5 10.2a9.5 9.5 0 0118.3 3.1v.3a9.5 9.5 0 01-9.5 9.4h-4.6'/%3E%3Cpath d='M14.8 6.5L8.5 10l3.9 6.1'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 .park-popup-corner-toggle:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 10px 18px rgba(15, 23, 42, 0.35);
+    transform: translateY(-2px);
+    box-shadow: 0 14px 26px rgba(15, 23, 42, 0.32);
 }
 
 .park-popup-corner-toggle:hover,
 .park-popup-corner-toggle:focus-visible {
-    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.35);
+    background: #ffffff;
 }
 
 .park-popup-corner-toggle:focus-visible {
     outline: 2px solid #facc15;
-    outline-offset: 4px;
+    outline-offset: 3px;
 }
 
-.park-popup-corner-toggle.back {
-    background: linear-gradient(135deg, #334155, #1f2937);
+.park-popup-corner-toggle.back .park-popup-corner-icon {
+    transform: scaleX(-1);
 }
 
 .park-popup-card.has-note .park-popup-corner-toggle.front {
-    background: linear-gradient(135deg, #047857, #059669);
+    border-color: rgba(4, 120, 87, 0.7);
+    box-shadow: 0 12px 24px rgba(4, 120, 87, 0.28);
+}
+
+.park-popup-corner-text {
+    position: absolute;
+    bottom: -18px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 2px 8px 3px;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 23, 42, 0.18);
+    background: rgba(255, 255, 255, 0.95);
+    color: #0f172a;
+    font-size: 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    pointer-events: none;
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18);
+}
+
+.park-popup-corner-text::selection {
+    background: transparent;
+}
+
+/* Compact dog-ear for narrow popups */
+.compact-note .park-popup-corner-toggle {
+    top: -14px;
+    left: -14px;
+    width: 36px;
+    height: 36px;
+}
+
+.compact-note .park-popup-corner-toggle .park-popup-corner-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.compact-note .park-popup-corner-text {
+    font-size: 0.5rem;
+    padding: 2px 6px;
+    bottom: -16px;
+}
+
+.park-popup-notes-container {
+    width: 100%;
+    max-width: 360px;
+    margin: 4px auto 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
 }
 
 .park-popup-notes-label {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
     font-weight: 600;
+    font-size: 0.95rem;
+    text-align: center;
+    color: #0f172a;
+}
+
+.park-popup-notes-editor {
+    width: 100%;
+    display: flex;
+    justify-content: center;
 }
 
 .park-popup-notes-textarea {
-    width: 100%;
-    min-height: 120px;
+    width: min(100%, 340px);
+    min-height: 128px;
     max-height: 260px;
-    margin-top: 2px;
-    padding: 10px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 8px;
+    padding: 14px 16px;
+    border: 1px solid #cbd5f5;
+    border-radius: 12px;
     resize: vertical;
     font-family: inherit;
     font-size: 0.95rem;
-    line-height: 1.4;
-    box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.08);
+    line-height: 1.45;
+    text-align: left;
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.08);
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
 }
 
 .park-popup-notes-textarea:focus {
     border-color: #2563eb;
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
     outline: none;
 }
 
 .park-popup-note-hint {
-    margin-top: 6px;
-    font-size: 0.75rem;
+    margin-top: 2px;
+    font-size: 0.78rem;
     color: #4b5563;
+    text-align: center;
 }
 
 .park-popup-note-status {
-    margin-top: 4px;
-    font-size: 0.78rem;
+    margin-top: 2px;
+    font-size: 0.8rem;
     min-height: 1em;
     color: #2563eb;
+    text-align: center;
 }
 
 .park-popup-card.has-note .park-popup-note-status {
@@ -667,13 +715,19 @@
         top: -12px;
         left: -12px;
         right: auto;
-        width: 32px;
-        height: 32px;
-        border-width: 2px;
+        width: 34px;
+        height: 34px;
     }
-    .park-popup-corner-toggle { background-size: 20px 20px; }
+    .park-popup-corner-toggle .park-popup-corner-icon {
+        width: 18px;
+        height: 18px;
+    }
+    .park-popup-corner-text {
+        bottom: -14px;
+        font-size: 0.48rem;
+    }
     .park-popup-notes-textarea {
-        min-height: 64px;
+        min-height: 72px;
     }
 }
 
