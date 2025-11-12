@@ -39,6 +39,9 @@ function whenMapReady(cb) {
 let __popupLockUntil = 0;
 let __popupStabilityMode = false;
 
+let __parkNotesState = null;       // {map: Map<REF, {note, updated}>, set: Set<REF>}
+let __parkNotesStatePromise = null;
+
 function lockPopupRefresh(ms = 900) {
     __popupLockUntil = Date.now() + ms;
     __popupStabilityMode = true;
@@ -79,6 +82,62 @@ function clearPopupLock() {
 
 // Utility: always return an array (guards against undefined during CSV flows)
 function asArray(x) { return Array.isArray(x) ? x : []; }
+
+function escapeHtml(str) {
+    if (typeof str !== 'string' || !str) return '';
+    return str.replace(/[&<>"']/g, (char) => {
+        switch (char) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#39;';
+            default: return char;
+        }
+    });
+}
+
+function linkifyText(text) {
+    if (typeof text !== 'string' || !text) return '';
+
+    const schemeSource = '(?:https?|app|bear|obsidian|note|file):\\/\\/';
+    const urlBodySource = "[^\\s<>\"')]+";
+    const markdownSource = `\\[([^\\]]+)\\]\\((${schemeSource}${urlBodySource})\\)`;
+    const plainUrlSource = `\\b(${schemeSource}${urlBodySource})`;
+
+    const escapeSegment = (segment) => escapeHtml(segment).replace(/\n/g, '<br>');
+    const escapeAttribute = (value) => escapeHtml(value).replace(/`/g, '&#96;');
+
+    let result = '';
+    let lastIndex = 0;
+    let match;
+
+    const combinedRegex = new RegExp(`${markdownSource}|${plainUrlSource}`, 'gi');
+
+    while ((match = combinedRegex.exec(text)) !== null) {
+        const [fullMatch] = match;
+        const markdownLabel = match[1];
+        const markdownUrl = match[2];
+        const plainUrl = match[3];
+        const matchIndex = match.index;
+
+        result += escapeSegment(text.slice(lastIndex, matchIndex));
+
+        if (markdownUrl) {
+            const linkText = markdownLabel || '';
+            const safeURL = escapeAttribute(markdownUrl);
+            result += `<a href="${safeURL}" target="_blank" rel="noopener noreferrer">${escapeHtml(linkText)}</a>`;
+        } else if (plainUrl) {
+            const safeURL = escapeAttribute(plainUrl);
+            result += `<a href="${safeURL}" target="_blank" rel="noopener noreferrer">${escapeHtml(plainUrl)}</a>`;
+        }
+
+        lastIndex = matchIndex + fullMatch.length;
+    }
+
+    result += escapeSegment(text.slice(lastIndex));
+    return result;
+}
 
 // === Global popup opener helper ===
 
@@ -619,6 +678,9 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
     // Clear existing markers
     layerGroup.clearLayers();
 
+    const notesState = await ensureNotesCacheFromIndexedDB();
+    const notesRefs = notesState?.set || new Set();
+
     // Build an index of current spots by reference for “currently on air”
     const spotByRef = {};
     for (const s of asArray(spots)) {
@@ -629,6 +691,8 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const { reference, name, latitude, longitude, activations: parkActivationCount, created } = park;
         if (!latitude || !longitude) continue;
 
+        const refKey = normalizeNoteRef(reference);
+
         // Determine state flags
         const isUserActivated = Array.isArray(userActivatedReferences) && userActivatedReferences.includes(reference);
         const createdTime = created ? (typeof created === 'number' ? created : new Date(created).getTime()) : null;
@@ -637,6 +701,19 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const currentActivation = spotByRef[reference];
         const isActive = !!currentActivation;
         const mode = currentActivation?.mode?.toUpperCase() || '';
+        const hasNote = notesRefs.has(refKey);
+
+        let hasReview = !!park.reviewURL;
+        if (!hasReview && window.__REVIEW_URLS instanceof Map) {
+            const cachedUrl = window.__REVIEW_URLS.get(reference);
+            if (cachedUrl) {
+                park.reviewURL = cachedUrl;
+                hasReview = true;
+            }
+        }
+
+        if (hasNote) park.__hasNotes = true;
+        else if (park.__hasNotes) delete park.__hasNotes;
 
         // Filter by user toggles
         if (!shouldDisplayParkFlags({ isUserActivated, isActive, isNew })) continue;
@@ -656,7 +733,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         if (usingDivIcon) {
             marker = L.marker([latitude, longitude], {
                 icon: L.divIcon({
-                    className: `leaflet-div-icon ${markerClasses.join(' ')}`.trim(),
+                    className: `leaflet-div-icon park-spot-icon ${markerClasses.join(' ')}`.trim(),
                     iconSize: [20, 20],
                 })
             });
@@ -673,6 +750,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             });
         }
 
+        if (hasReview) {
+            decorateReviewHalo(marker, park);
+        }
+        if (hasNote) {
+            decorateNotesHalo(marker);
+        }
+
         // Tooltip text
         const tooltipText = isActive
             ? `${reference}: ${name} <br>${currentActivation.activator} on ${currentActivation.frequency} kHz (${currentActivation.mode})`
@@ -681,7 +765,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         // Add to map
         marker
             .addTo(layerGroup)
-            .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
+            .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: true, className: "custom-tooltip" })
             .bindPopup("<b>Loading park info...</b>", { maxWidth: 280, keepInView: true, autoPan: true, autoPanPadding: [30, 40] })
             .on('click touchend', function () { this.closeTooltip(); });
 
@@ -700,7 +784,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
 
                 let popupContent = await fetchFullPopupContent(park, currentActivation, parkActivations);
                 popupContent = foldPopupSections(popupContent);
-                this.setPopupContent(popupContent);
+                const card = await buildPopupWithNotes({
+                    reference,
+                    frontHtml: popupContent,
+                    marker: this,
+                    parkRecord: park
+                });
+                this.setPopupContent(card);
             } catch (err) {
                 console.error(err);
                 this.setPopupContent("<b>Error loading park info.</b>");
@@ -1238,6 +1328,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         ensureReviewHaloCss();
 
         await ensureReviewCacheFromIndexedDB();
+        await ensureNotesCacheFromIndexedDB();
         // Load true new-park refs from changes.json to avoid mass purple due to drifting 'created'
         try {
             await ensureRecentAddsFromChangesJSON();
@@ -1679,7 +1770,13 @@ function ensureReviewHaloCss() {
 
 // Add visual halo to a marker (two concentric rings) when a review exists
 function decorateReviewHalo(marker, park) {
-    if (!marker || !park || !park.reviewURL || marker.__reviewHalos) return;
+    if (!marker || !park || !park.reviewURL) return;
+
+    marker.__hasReview = true;
+    if (marker.__reviewHalos) {
+        if (marker.__notesHalos) decorateNotesHalo(marker);
+        return;
+    }
 
     if (!map.getPane('reviewHalos')) {
         map.createPane('reviewHalos');
@@ -1721,6 +1818,7 @@ function decorateReviewHalo(marker, park) {
     }).addTo(map.activationsLayer || map);
 
     marker.__reviewHalos = [haloBlack, haloGold];
+    if (marker.__notesHalos) decorateNotesHalo(marker);
     if (marker.on) {
         marker.on('remove', () => {
             if (marker.__reviewHalos) {
@@ -1729,8 +1827,334 @@ function decorateReviewHalo(marker, park) {
                     else map.removeLayer(h);
                 });
                 marker.__reviewHalos = null;
+                marker.__hasReview = false;
+                if (marker.__notesHalos) decorateNotesHalo(marker);
             }
         });
+    }
+}
+
+function normalizeNoteRef(reference) {
+    return String(reference || '').trim().toUpperCase();
+}
+
+async function ensureNotesCacheFromIndexedDB() {
+    if (__parkNotesState) return __parkNotesState;
+    if (__parkNotesStatePromise) return __parkNotesStatePromise;
+
+    __parkNotesStatePromise = (async () => {
+        const state = {map: new Map(), set: new Set()};
+
+        if (typeof indexedDB === 'undefined') {
+            __parkNotesState = state;
+            return state;
+        }
+
+        try {
+            const db = await getDatabase();
+            if (!db.objectStoreNames.contains('parkNotes')) {
+                __parkNotesState = state;
+                return state;
+            }
+
+            const records = await new Promise((resolve, reject) => {
+                try {
+                    const tx = db.transaction('parkNotes', 'readonly');
+                    const store = tx.objectStore('parkNotes');
+                    if (typeof store.getAll === 'function') {
+                        const req = store.getAll();
+                        req.onsuccess = () => resolve(req.result || []);
+                        req.onerror = (e) => reject(e.target.error);
+                    } else {
+                        const rows = [];
+                        const req = store.openCursor();
+                        req.onsuccess = (event) => {
+                            const cursor = event.target.result;
+                            if (cursor) {
+                                rows.push(cursor.value);
+                                cursor.continue();
+                            } else {
+                                resolve(rows);
+                            }
+                        };
+                        req.onerror = (e) => reject(e.target.error);
+                    }
+                } catch (err) {
+                    reject(err);
+                }
+            });
+
+            for (const row of records) {
+                if (!row || typeof row !== 'object') continue;
+                const ref = normalizeNoteRef(row.reference);
+                const noteRaw = row.note;
+                const note = typeof noteRaw === 'string' ? noteRaw : (noteRaw == null ? '' : String(noteRaw));
+                const trimmed = note.trim();
+                if (!ref || !trimmed) continue;
+                state.map.set(ref, {note: trimmed, updated: row.updated || 0});
+                state.set.add(ref);
+            }
+        } catch (e) {
+            console.warn('ensureNotesCacheFromIndexedDB failed:', e);
+        }
+
+        __parkNotesState = state;
+        return state;
+    })();
+
+    try {
+        return await __parkNotesStatePromise;
+    } finally {
+        __parkNotesStatePromise = null;
+    }
+}
+
+function getCachedNoteForRef(reference) {
+    if (!__parkNotesState) return '';
+    const ref = normalizeNoteRef(reference);
+    const rec = __parkNotesState.map.get(ref);
+    return rec ? (rec.note || '') : '';
+}
+
+async function loadNoteForReference(reference) {
+    const state = await ensureNotesCacheFromIndexedDB();
+    if (!state) return '';
+    const ref = normalizeNoteRef(reference);
+    const rec = state.map.get(ref);
+    return rec ? (rec.note || '') : '';
+}
+
+async function saveParkNoteToIndexedDB(reference, note) {
+    if (!reference) return false;
+    const ref = normalizeNoteRef(reference);
+    const normalized = typeof note === 'string' ? note.trim() : String(note || '').trim();
+
+    await ensureNotesCacheFromIndexedDB();
+
+    if (typeof indexedDB === 'undefined') {
+        updateNoteCacheEntry(ref, normalized);
+        return normalized.length > 0;
+    }
+
+    let openError = null;
+    const db = await getDatabase().catch((error) => {
+        console.warn('saveParkNoteToIndexedDB failed to open database:', error);
+        openError = error;
+        return null;
+    });
+
+    if (!db) {
+        throw openError || new Error('parkNotes database unavailable');
+    }
+
+    if (!db.objectStoreNames.contains('parkNotes')) {
+        updateNoteCacheEntry(ref, normalized);
+        return normalized.length > 0;
+    }
+
+    const updatedAt = normalized ? Date.now() : 0;
+    let writeError = null;
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction('parkNotes', 'readwrite');
+        const store = tx.objectStore('parkNotes');
+        const onSuccess = () => resolve();
+        const onError = (event) => reject((event && event.target && event.target.error) || event);
+        if (normalized) {
+            const req = store.put({reference: ref, note: normalized, updated: updatedAt});
+            req.onsuccess = onSuccess;
+            req.onerror = onError;
+        } else {
+            const req = store.delete(ref);
+            req.onsuccess = onSuccess;
+            req.onerror = onError;
+        }
+    }).catch((error) => {
+        writeError = error;
+    });
+
+    if (writeError) {
+        console.warn(`saveParkNoteToIndexedDB failed for ${ref}:`, writeError);
+        throw writeError;
+    }
+
+    updateNoteCacheEntry(ref, normalized, updatedAt);
+
+    return normalized.length > 0;
+}
+
+function updateNoteCacheEntry(ref, normalized, updatedAt) {
+    if (!__parkNotesState) __parkNotesState = {map: new Map(), set: new Set()};
+    if (normalized) {
+        __parkNotesState.map.set(ref, {note: normalized, updated: updatedAt || Date.now()});
+        __parkNotesState.set.add(ref);
+    } else {
+        __parkNotesState.map.delete(ref);
+        __parkNotesState.set.delete(ref);
+    }
+}
+
+function parkHasStoredNote(reference) {
+    if (!__parkNotesState) return false;
+    return __parkNotesState.set.has(normalizeNoteRef(reference));
+}
+
+function ensureNotesHaloPane() {
+    if (!map) return;
+    if (!map.getPane('notesHalos')) {
+        map.createPane('notesHalos');
+        const pane = map.getPane('notesHalos');
+        if (pane) pane.style.zIndex = 455;
+    }
+}
+
+function decorateNotesHalo(marker) {
+    if (!marker || !map) return;
+
+    ensureNotesHaloPane();
+
+    const latLng = marker.getLatLng && marker.getLatLng();
+    if (!latLng) return;
+
+    let baseR;
+    if (marker.getRadius) {
+        baseR = marker.options?.radius || marker.getRadius();
+    } else if (marker.options?.icon?.options?.iconSize) {
+        baseR = marker.options.icon.options.iconSize[0] / 2;
+    } else {
+        baseR = 6;
+    }
+
+    const hasReview = !!marker.__hasReview;
+    const layerTarget = map.activationsLayer || map;
+    const outerRadius = baseR + 6;
+    const innerRadius = hasReview ? outerRadius : baseR + 4.5;
+    const outerColor = '#9333ea';
+    const innerColor = hasReview ? '#f472b6' : '#4c1d95';
+    const outerWeight = hasReview ? 3 : 2;
+    const innerWeight = hasReview ? 3 : 2;
+
+    let halos = marker.__notesHalos;
+    if (!halos || !halos.outer || !halos.inner) {
+        if (halos) removeNotesHalo(marker);
+        const outer = L.circleMarker(latLng, {
+            pane: 'notesHalos',
+            radius: outerRadius,
+            color: outerColor,
+            weight: outerWeight,
+            fillOpacity: 0,
+            opacity: 0.95,
+            interactive: false,
+            lineCap: 'butt',
+            lineJoin: 'round'
+        }).addTo(layerTarget);
+
+        const inner = L.circleMarker(latLng, {
+            pane: 'notesHalos',
+            radius: innerRadius,
+            color: innerColor,
+            weight: innerWeight,
+            fillOpacity: 0,
+            opacity: 0.95,
+            interactive: false,
+            lineCap: 'butt',
+            lineJoin: 'round'
+        }).addTo(layerTarget);
+
+        halos = marker.__notesHalos = {outer, inner};
+        if (marker.on && !marker.__notesRemoveHandler) {
+            marker.__notesRemoveHandler = () => removeNotesHalo(marker);
+            marker.on('remove', marker.__notesRemoveHandler);
+        }
+    } else {
+        halos.outer.setLatLng(latLng);
+        halos.inner.setLatLng(latLng);
+    }
+
+    const applyStyle = (circle, radius, color, weight, dashArray, dashOffset) => {
+        if (!circle) return;
+        circle.setRadius(radius);
+        const style = {
+            color,
+            weight,
+            opacity: 0.95,
+            fillOpacity: 0,
+            lineCap: 'butt',
+            lineJoin: 'round'
+        };
+        if (dashArray) style.dashArray = dashArray;
+        if (typeof dashOffset === 'number') style.dashOffset = dashOffset;
+        circle.setStyle(style);
+        circle.options = circle.options || {};
+        circle.options.dashArray = dashArray || null;
+        if (typeof dashOffset === 'number') circle.options.dashOffset = dashOffset;
+        else delete circle.options.dashOffset;
+
+        if (!dashArray && circle._path) {
+            circle._path.removeAttribute('stroke-dasharray');
+        }
+        if (typeof dashOffset !== 'number' && circle._path) {
+            circle._path.removeAttribute('stroke-dashoffset');
+        } else if (typeof dashOffset === 'number' && circle._path) {
+            circle._path.setAttribute('stroke-dashoffset', dashOffset);
+        }
+    };
+
+    if (hasReview) {
+        const circumference = 2 * Math.PI * outerRadius;
+        const half = Number((circumference / 2).toFixed(2));
+        const dashPattern = `${half} ${half}`;
+        applyStyle(halos.outer, outerRadius, outerColor, outerWeight, dashPattern, 0);
+        applyStyle(halos.inner, outerRadius, innerColor, innerWeight, dashPattern, half);
+    } else {
+        applyStyle(halos.outer, outerRadius, outerColor, outerWeight, null, null);
+        applyStyle(halos.inner, innerRadius, innerColor, innerWeight, null, null);
+    }
+
+    marker.__notesHalos = halos;
+    marker.__hasNotes = true;
+}
+
+function removeNotesHalo(marker) {
+    if (!marker) return;
+    if (marker.__notesRemoveHandler && marker.off) {
+        marker.off('remove', marker.__notesRemoveHandler);
+        marker.__notesRemoveHandler = null;
+    }
+    if (!marker.__notesHalos) {
+        marker.__hasNotes = false;
+        return;
+    }
+    const halos = marker.__notesHalos;
+    marker.__notesHalos = null;
+    marker.__hasNotes = false;
+
+    const toRemove = [];
+    if (Array.isArray(halos)) {
+        toRemove.push(...halos);
+    } else if (halos) {
+        if (halos.outer) toRemove.push(halos.outer);
+        if (halos.inner) toRemove.push(halos.inner);
+    }
+
+    for (const halo of toRemove) {
+        try {
+            if (halo && typeof halo.remove === 'function') {
+                halo.remove();
+            } else if (map && map.removeLayer) {
+                map.removeLayer(halo);
+            }
+        } catch (_) {
+        }
+    }
+}
+
+function updateMarkerNotesVisual(marker, hasNote) {
+    if (!marker) return;
+    if (hasNote) {
+        marker.__hasNotes = true;
+        decorateNotesHalo(marker);
+    } else {
+        removeNotesHalo(marker);
     }
 }
 
@@ -1755,6 +2179,9 @@ async function redrawMarkersWithFilters() {
         const bounds = getCurrentMapBounds();
         const userActivatedReferences = asArray(activations).map(a => a && a.reference).filter(Boolean);
 
+        const notesState = await ensureNotesCacheFromIndexedDB();
+        const notesRefs = notesState?.set || new Set();
+
         // Build a quick index for current spots by reference
         const spotByRef = {};
         if (Array.isArray(spots)) {
@@ -1775,6 +2202,8 @@ async function redrawMarkersWithFilters() {
             const latLng = L.latLng(latitude, longitude);
             if (!bounds.contains(latLng)) return;
 
+            const refKey = normalizeNoteRef(reference);
+
             const isUserActivated = userActivatedReferences.includes(reference);
             const RECENT = (window.__RECENT_ADDS instanceof Set) ? window.__RECENT_ADDS : new Set();
             let createdTime = null;
@@ -1786,6 +2215,10 @@ async function redrawMarkersWithFilters() {
             const currentActivation = spotByRef[reference];
             const isActive = !!currentActivation;
             const mode = currentActivation?.mode ? currentActivation.mode.toUpperCase() : '';
+            const hasNote = notesRefs.has(refKey);
+
+            if (hasNote) park.__hasNotes = true;
+            else if (park.__hasNotes) delete park.__hasNotes;
 
             if (!shouldDisplayParkFlags({isUserActivated, isActive, isNew})) return;
             if (!shouldDisplayByMode(isActive, isNew, mode)) return;
@@ -1817,7 +2250,7 @@ async function redrawMarkersWithFilters() {
                 marker = L.marker([latitude, longitude], {
                     icon: L.divIcon({
                         // include Leaflet's default class for compatibility with Leaflet styles
-                        className: `leaflet-div-icon ${markerClassName}`.trim(),
+                        className: `leaflet-div-icon park-spot-icon ${markerClassName}`.trim(),
                         iconSize: [20, 20],
                     })
                 });
@@ -1829,6 +2262,9 @@ async function redrawMarkersWithFilters() {
                         park.reviewURL = u;
                         decorateReviewHalo(marker, park);
                     }
+                }
+                if (hasNote) {
+                    decorateNotesHalo(marker);
                 }
             } else {
                 const baseColor = getMarkerColorConfigured(parkActivationCount, isUserActivated);
@@ -1852,6 +2288,9 @@ async function redrawMarkersWithFilters() {
                         decorateReviewHalo(marker, park);
                     }
                 }
+                if (hasNote) {
+                    decorateNotesHalo(marker);
+                }
             }
 
             const tooltipText = currentActivation
@@ -1869,7 +2308,7 @@ async function redrawMarkersWithFilters() {
                     autoPan: true,
                     autoPanPadding: [30, 40]
                 })
-                .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
+                .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: true, className: "custom-tooltip"})
                 .on('click touchend', function () {
                     this.closeTooltip();
                 });
@@ -1925,7 +2364,13 @@ async function redrawMarkersWithFilters() {
                     let popupContent = await fetchFullPopupContent(displayPark, currentActivation, parkActivations);
                     // Wrap "Recent Activations" and "Current Activation" in collapsible panels (closed by default)
                     popupContent = foldPopupSections(popupContent);
-                    this.setPopupContent(popupContent);
+                    const card = await buildPopupWithNotes({
+                        reference,
+                        frontHtml: popupContent,
+                        marker: this,
+                        parkRecord: park
+                    });
+                    this.setPopupContent(card);
                 } catch (err) {
                     this.setPopupContent("<b>Error loading park info.</b>");
                     console.error(err);
@@ -2179,8 +2624,7 @@ async function displayVersionInfo() {
 
     const activationCount = getActivatedParkCount();
     const activationLabel = activationCount === 1 ? '1 park' : `${activationCount} parks`;
-    const versionString = `<center>App-${appDate}<br/>Parks-${parksDate}<br/>Delta-${changesDate}<br/>
-        <span class="activation-count">Unique: ${activationLabel}</span></center>`;
+    const versionString = `<center>App-${appDate}<br/>Parks-${parksDate}<br/>Delta-${changesDate}<br/><span class="activation-count">My Activations: ${activationLabel}</span></center>`;
     document.getElementById("versionInfo").innerHTML = versionString;
 }
 
@@ -2487,7 +2931,7 @@ function enhanceHamburgerMenuForMobile() {
  */
 async function getDatabase() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open('potaDatabase', 3); // Incremented version to add 'parkActivations' store
+        const request = indexedDB.open('potaDatabase', 4); // Incremented to add 'parkNotes' store
 
         request.onupgradeneeded = function (event) {
             const db = event.target.result;
@@ -2505,6 +2949,10 @@ async function getDatabase() {
             // Create object store for park activations if it doesn't exist
             if (!db.objectStoreNames.contains('parkActivations')) {
                 db.createObjectStore('parkActivations', {keyPath: 'reference'});
+            }
+
+            if (!db.objectStoreNames.contains('parkNotes')) {
+                db.createObjectStore('parkNotes', {keyPath: 'reference'});
             }
         };
 
@@ -3274,7 +3722,7 @@ function handleSearchInput(event) {
  * Handles the 'Enter' key press in the search box to zoom to the searched park(s).
  * @param {KeyboardEvent} event - The keyboard event triggered by key presses.
  */
-function handleSearchEnter(event) {
+async function handleSearchEnter(event) {
     if (event.key === 'Enter') {
         event.preventDefault(); // Prevent form submission or other default actions
         console.log("'Enter' key pressed in search box."); // Debugging
@@ -3311,7 +3759,9 @@ function handleSearchEnter(event) {
             const userActivatedRefs = (activations || []).map(a => a.reference);
             const now = Date.now();
             const nferByRef = buildNferByRef(parks);
-            const ctx = {bounds, spotByRef, spotByCall, userActivatedRefs, now, userLat, userLng, nferByRef};
+            const notesState = await ensureNotesCacheFromIndexedDB();
+            const notesRefs = notesState?.set || new Set();
+            const ctx = {bounds, spotByRef, spotByCall, userActivatedRefs, now, userLat, userLng, nferByRef, notesRefs};
 
             // Default scope: only parks inside current bounds
             const scoped = queryHasExplicitScope(parsed);
@@ -3554,6 +4004,301 @@ async function fetchFullPopupContent(park, currentActivation = null, parkActivat
     return popupContent.trim();
 }
 
+async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
+    const fallback = document.createElement('div');
+    fallback.innerHTML = frontHtml || '';
+
+    try {
+        const ref = normalizeNoteRef(reference);
+        const card = document.createElement('div');
+        card.className = 'park-popup-card';
+
+        const inner = document.createElement('div');
+        inner.className = 'park-popup-inner';
+        card.appendChild(inner);
+
+        const front = document.createElement('section');
+        front.className = 'park-popup-face park-popup-front';
+        inner.appendChild(front);
+
+        let frontHeight = null;
+        let frontHeightAttempts = 0;
+        const measureFrontHeight = () => {
+            if (!front) return;
+            if (!card.isConnected) {
+                if (frontHeightAttempts < 12) {
+                    frontHeightAttempts += 1;
+                    requestAnimationFrame(measureFrontHeight);
+                }
+                return;
+            }
+            const rect = front.getBoundingClientRect();
+            if (rect && rect.height) {
+                frontHeight = rect.height;
+                frontHeightAttempts = 0;
+                card.dataset.frontHeight = String(rect.height);
+                if (!card.classList.contains('is-flipped')) {
+                    lockToFrontHeight();
+                } else {
+                    card.style.minHeight = `${frontHeight}px`;
+                }
+            }
+        };
+
+        const lockToFrontHeight = () => {
+            if (frontHeight) {
+                card.style.height = `${frontHeight}px`;
+                card.style.minHeight = `${frontHeight}px`;
+            }
+        };
+
+        const releaseFrontHeight = () => {
+            card.style.height = '';
+            if (frontHeight) {
+                card.style.minHeight = `${frontHeight}px`;
+            } else {
+                card.style.minHeight = '';
+            }
+        };
+
+        requestAnimationFrame(measureFrontHeight);
+
+        const frontToggle = document.createElement('button');
+        frontToggle.type = 'button';
+        frontToggle.className = 'park-popup-corner-toggle front';
+        frontToggle.setAttribute('aria-label', 'Add personal notes');
+        frontToggle.title = 'Add personal notes';
+        card.appendChild(frontToggle);
+
+        const frontBody = document.createElement('div');
+        frontBody.className = 'park-popup-front-body';
+        frontBody.innerHTML = frontHtml || '';
+        front.appendChild(frontBody);
+
+        const noteDisplay = document.createElement('div');
+        noteDisplay.className = 'park-popup-notes-display';
+        noteDisplay.hidden = true;
+        front.appendChild(noteDisplay);
+
+        const back = document.createElement('section');
+        back.className = 'park-popup-face park-popup-back';
+        inner.appendChild(back);
+
+        const backToggle = document.createElement('button');
+        backToggle.type = 'button';
+        backToggle.className = 'park-popup-corner-toggle back';
+        backToggle.setAttribute('aria-label', 'Show park details');
+        backToggle.title = 'Show park details';
+        card.appendChild(backToggle);
+
+        const addCornerIcon = (toggle) => {
+            if (!toggle) return;
+            const icon = document.createElement('span');
+            icon.className = 'park-popup-corner-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = '←';
+            toggle.appendChild(icon);
+        };
+
+        addCornerIcon(frontToggle);
+        addCornerIcon(backToggle);
+
+        const backBody = document.createElement('div');
+        backBody.className = 'park-popup-back-body';
+        back.appendChild(backBody);
+
+        const notesContainer = document.createElement('div');
+        notesContainer.className = 'park-popup-notes-container';
+        backBody.appendChild(notesContainer);
+
+        const textareaId = `park-notes-${String(reference || '')}`
+            .replace(/[^a-z0-9_-]+/gi, '-');
+
+        const label = document.createElement('label');
+        label.className = 'park-popup-notes-label';
+        label.setAttribute('for', textareaId);
+        label.textContent = `Notes for ${reference}`;
+        notesContainer.appendChild(label);
+
+        const editor = document.createElement('div');
+        editor.className = 'park-popup-notes-editor';
+        notesContainer.appendChild(editor);
+
+        const textarea = document.createElement('textarea');
+        textarea.id = textareaId;
+        textarea.className = 'park-popup-notes-textarea';
+        textarea.placeholder = 'Write your personal notes here…';
+        textarea.rows = 3;
+        textarea.spellcheck = true;
+        editor.appendChild(textarea);
+
+        const hint = document.createElement('div');
+        hint.className = 'park-popup-note-hint';
+        hint.textContent = 'Notes stay on this device and are not shared.';
+        notesContainer.appendChild(hint);
+
+        const noteDisplayEl = document.createElement('div');
+        noteDisplayEl.className = 'park-popup-notes-display';
+        noteDisplayEl.hidden = true;
+        notesContainer.appendChild(noteDisplayEl);
+
+        const status = document.createElement('div');
+        status.className = 'park-popup-note-status';
+        status.setAttribute('aria-live', 'polite');
+        notesContainer.appendChild(status);
+
+        const state = await ensureNotesCacheFromIndexedDB();
+        const existing = state?.map?.get(ref);
+        const existingText = existing ? (existing.note || '') : '';
+        textarea.value = existingText;
+
+        const normalize = (value) => (typeof value === 'string' ? value.trim() : '');
+
+        const updateNoteDisplay = (rawValue) => {
+            if (!noteDisplayEl) return;
+            const normalized = normalize(rawValue);
+            if (normalized) {
+                noteDisplayEl.innerHTML = linkifyText(normalized);
+                noteDisplayEl.hidden = false;
+            } else {
+                noteDisplayEl.innerHTML = '';
+                noteDisplayEl.hidden = true;
+            }
+        };
+        let lastSavedNormalized = normalize(existingText);
+        if (lastSavedNormalized) {
+            card.classList.add('has-note');
+        }
+        updateNoteDisplay(existingText);
+        if (marker) updateMarkerNotesVisual(marker, !!lastSavedNormalized);
+        if (parkRecord) {
+            if (lastSavedNormalized) parkRecord.__hasNotes = true;
+            else if (parkRecord.__hasNotes) delete parkRecord.__hasNotes;
+        }
+
+        const setStatus = (msg, isError = false) => {
+            if (!status) return;
+            status.textContent = msg || '';
+            status.classList.toggle('error', !!isError);
+        };
+
+        let saveTimer = null;
+
+        const persist = async (rawValue) => {
+            const normalized = normalize(rawValue);
+            if (normalized === lastSavedNormalized) {
+                setStatus('');
+                if (!normalized && textarea.value && !textarea.value.trim()) {
+                    textarea.value = '';
+                }
+                return;
+            }
+
+            try {
+                setStatus('Saving…');
+                const hasNote = await saveParkNoteToIndexedDB(reference, rawValue);
+                if (hasNote) {
+                    const normalizedValue = normalize(textarea.value);
+                    textarea.value = normalizedValue;
+                    lastSavedNormalized = normalizedValue;
+                } else {
+                    textarea.value = '';
+                    lastSavedNormalized = '';
+                }
+                card.classList.toggle('has-note', hasNote);
+                if (parkRecord) {
+                    if (hasNote) parkRecord.__hasNotes = true;
+                    else delete parkRecord.__hasNotes;
+                }
+                updateNoteDisplay(textarea.value);
+                updateMarkerNotesVisual(marker, hasNote);
+                setStatus(hasNote ? 'Saved' : 'Note cleared');
+            } catch (e) {
+                console.warn('saveParkNoteToIndexedDB failed:', e);
+                setStatus('Could not save note', true);
+            }
+        };
+
+        const scheduleSave = (immediate = false) => {
+            if (saveTimer) {
+                clearTimeout(saveTimer);
+                saveTimer = null;
+            }
+            const normalized = normalize(textarea.value);
+            if (normalized === lastSavedNormalized) {
+                setStatus('');
+                if (!normalized && textarea.value && !textarea.value.trim()) {
+                    textarea.value = '';
+                }
+                return;
+            }
+            if (immediate) {
+                persist(textarea.value);
+                return;
+            }
+            setStatus('Saving…');
+            saveTimer = setTimeout(() => {
+                saveTimer = null;
+                persist(textarea.value);
+            }, 420);
+        };
+
+        textarea.addEventListener('input', () => scheduleSave(false));
+        textarea.addEventListener('change', () => scheduleSave(true));
+        textarea.addEventListener('focus', () => {
+            card.classList.add('notes-editing');
+            releaseFrontHeight();
+        });
+        textarea.addEventListener('blur', () => {
+            card.classList.remove('notes-editing');
+            scheduleSave(true);
+            if (!card.classList.contains('is-flipped')) {
+                measureFrontHeight();
+                lockToFrontHeight();
+            }
+        });
+        textarea.addEventListener('keydown', (event) => event.stopPropagation());
+
+        const flip = (toBack) => {
+            if (!frontHeight) {
+                measureFrontHeight();
+            }
+            card.classList.toggle('is-flipped', toBack);
+            if (toBack) {
+                releaseFrontHeight();
+                setTimeout(() => {
+                    try {
+                        textarea.focus({preventScroll: true});
+                    } catch (_) {
+                        try { textarea.focus(); } catch (_) {}
+                    }
+                }, 180);
+            } else {
+                card.classList.remove('notes-editing');
+                lockToFrontHeight();
+            }
+        };
+
+        frontToggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            flip(true);
+        });
+
+        backToggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            scheduleSave(true);
+            flip(false);
+        });
+
+        return card;
+    } catch (e) {
+        console.warn('buildPopupWithNotes failed:', e);
+        return fallback;
+    }
+}
+
 async function zoomToParkByReference(reference) {
     const allParks = await getAllParksFromIndexedDB();
     const targetPark = allParks.find(p => p.reference === reference);
@@ -3658,7 +4403,8 @@ function parseStructuredQuery(raw) {
         maxDist: null,
         nferWithRefs: [],
         hasNfer: null,         // ← NEW: boolean or null (no filter)
-        hasReview: null        // ← NEW: boolean or null (no filter)
+        hasReview: null,        // ← NEW: boolean or null (no filter)
+        hasNotes: null
     };
     if (!q) return result;
 
@@ -3739,6 +4485,11 @@ function parseStructuredQuery(raw) {
         } else if (key === 'REVIEW') {
             const v = value.toLowerCase();
             result.hasReview = (v === '1' || v === 'true');
+
+        } else if (key === 'NOTES') {
+            const v = value.toLowerCase();
+            if (v === '1' || v === 'true' || v === 'yes') result.hasNotes = true;
+            else if (v === '0' || v === 'false' || v === 'no') result.hasNotes = false;
 
         } else if (key === 'REF' || key === 'REFERENCE' || key === 'ID') {
             const arr = String(value).split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
@@ -3920,6 +4671,14 @@ function parkMatchesStructuredQuery(park, parsed, ctx) {
         const has = !!park.reviewURL;
         if (parsed.hasReview && !has) return false;
         if (parsed.hasReview === false && has) return false;
+    }
+
+    if (parsed.hasNotes !== null) {
+        const notesSet = ctx && ctx.notesRefs;
+        const ref = normalizeNoteRef(park.reference);
+        const has = notesSet instanceof Set ? notesSet.has(ref) : false;
+        if (parsed.hasNotes && !has) return false;
+        if (parsed.hasNotes === false && has) return false;
     }
 
     // 7) NEW
@@ -4311,6 +5070,8 @@ async function runPQL(raw, ctx = {}) {
         const userActivatedRefs = (activations || []).map(a => a.reference);
         const now = Date.now();
         const nferByRef = buildNferByRef(parks);
+        const notesState = await ensureNotesCacheFromIndexedDB();
+        const notesRefs = notesState?.set || new Set();
 
         const fullCtx = {
             bounds,
@@ -4321,6 +5082,7 @@ async function runPQL(raw, ctx = {}) {
             userLat,
             userLng,
             nferByRef,
+            notesRefs,
             ...ctx
         };
 
@@ -4755,10 +5517,22 @@ function initializeMap(lat, lng) {
         lockPopupRefresh(900);
         isPopupOpen = true;
         // fold popup sections if needed...
+        // Shrink the note dog-ear on narrow popups so it won't crowd titles
+        try {
+            const popupEl = ev && ev.popup ? ev.popup.getElement() : null;
+            if (popupEl) {
+                const isNarrow = popupEl.offsetWidth && popupEl.offsetWidth < 360; // heuristic
+                popupEl.classList.toggle('compact-note', !!isNarrow);
+            }
+        } catch (_) {}
     });
     mapInstance.on('popupclose', ev => {
         isPopupOpen = false;
         clearPopupLock();
+        try {
+            const popupEl = ev && ev.popup ? ev.popup.getElement() : null;
+            if (popupEl) popupEl.classList.remove('compact-note');
+        } catch (_) {}
         setTimeout(runDeferredRefresh, 100);
     });
 
