@@ -535,6 +535,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    padding-left: 40px; /* keep controls clear of the corner badge */
 }
 /* Reserve space so the title never sits under the dog-ear */
 .park-popup-front-body {
@@ -564,6 +565,11 @@
     transform: none;
     transition: transform 0.15s ease, box-shadow 0.2s ease;
     z-index: 2;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 18px 18px;   /* arrow size */
+    overflow: visible;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7.5 4.25h7.25a5.75 5.75 0 1 1-4.06 9.81' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M7.5 4.25l3.25 3.25-3.25 3.25' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 /* Compact dog-ear for narrow popups */
 .compact-note .park-popup-corner-toggle {
@@ -575,28 +581,13 @@
     border-radius: 50%;
     border-width: 2px;
 }
+/* Compact scaling override for the arrow on the button background */
+.compact-note .park-popup-corner-toggle { background-size: 16px 16px; }
 /* Hide any textual glyphs (like the old emoji) inside the badge */
 .park-popup-corner-toggle > * {
+    opacity: 0 !important;
     font-size: 0 !important;
-    color: transparent !important;
     line-height: 0 !important;
-}
-/* Draw the arrow as a background on a pseudo-element so it never conflicts with inner HTML */
-.park-popup-corner-toggle::before {
-    content: "";
-    width: 18px;
-    height: 18px;
-    display: block;
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: 100% 100%;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7.5 4.25h7.25a5.75 5.75 0 1 1-4.06 9.81' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M7.5 4.25l3.25 3.25-3.25 3.25' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-}
-
-/* Compact badge arrow sizing */
-.compact-note .park-popup-corner-toggle::before {
-    width: 16px;
-    height: 16px;
 }
 
 .park-popup-corner-toggle:hover {
@@ -631,11 +622,12 @@
 
 .park-popup-notes-textarea {
     width: 100%;
-    min-height: 52px;
-    max-height: 220px;
+    min-height: 120px;
+    max-height: 260px;
+    margin-top: 2px;
     padding: 10px 12px;
     border: 1px solid #d1d5db;
-    border-radius: 6px;
+    border-radius: 8px;
     resize: vertical;
     font-family: inherit;
     font-size: 0.95rem;
@@ -679,10 +671,9 @@
         height: 32px;
         border-width: 2px;
     }
-    .park-popup-corner-toggle::before { width: 20px; height: 20px; }
-
+    .park-popup-corner-toggle { background-size: 20px 20px; }
     .park-popup-notes-textarea {
-        min-height: 48px;
+        min-height: 64px;
     }
 }
 
