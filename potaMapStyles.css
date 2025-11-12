@@ -546,37 +546,44 @@
 
 .park-popup-corner-toggle {
     position: absolute;
-    top: -14px;
-    left: -14px;
+    top: -13px;                 /* slightly proud of the card */
+    left: -13px;
     right: auto;
-    width: 28px;                 /* was 32px */
-    height: 28px;
-    border: none;
-    border-radius: 9px;
-    background: linear-gradient(135deg, rgba(37,99,235,0.9), rgba(59,130,246,0.92));
+    width: 26px;
+    height: 26px;
+    border: 2px solid #ffffff;  /* crisp white ring */
+    border-radius: 50%;         /* round badge */
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.85), rgba(255,255,255,0.7)) ,
+                linear-gradient(135deg, rgba(37,99,235,0.95), rgba(59,130,246,0.95));
     color: #fff;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(15,23,42,0.22);
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.28);
     display: flex;
     align-items: center;
     justify-content: center;
-    transform: rotate(45deg);
-    transition: box-shadow 0.2s ease, transform 0.2s ease;
+    transform: none;            /* no diamond rotation */
+    transition: transform 0.15s ease, box-shadow 0.2s ease;
     z-index: 2;
 }
 /* Compact dog-ear for narrow popups */
 .compact-note .park-popup-corner-toggle {
-    top: -12px;
-    left: -12px;
+    top: -11px;
+    left: -11px;
     right: auto;
-    width: 24px;
-    height: 24px;
-    border-radius: 8px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border-width: 2px;
 }
 .park-popup-corner-toggle > span {
-    transform: rotate(-45deg);
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1;
+    transform: none;
+}
+
+.park-popup-corner-toggle:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 18px rgba(15, 23, 42, 0.35);
 }
 
 .park-popup-corner-toggle:hover,
@@ -647,11 +654,12 @@
 
 @media (max-width: 420px) {
     .park-popup-corner-toggle {
-        top: -12px;
-        left: -12px;
+        top: -10px;
+        left: -10px;
         right: auto;
-        width: 36px;
-        height: 36px;
+        width: 30px;
+        height: 30px;
+        border-width: 2px;
     }
 
     .park-popup-corner-toggle > span {
