@@ -647,6 +647,15 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         const mode = currentActivation?.mode?.toUpperCase() || '';
         const hasNote = notesRefs.has(refKey);
 
+        let hasReview = !!park.reviewURL;
+        if (!hasReview && window.__REVIEW_URLS instanceof Map) {
+            const cachedUrl = window.__REVIEW_URLS.get(reference);
+            if (cachedUrl) {
+                park.reviewURL = cachedUrl;
+                hasReview = true;
+            }
+        }
+
         if (hasNote) park.__hasNotes = true;
         else if (park.__hasNotes) delete park.__hasNotes;
 
@@ -689,6 +698,13 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
             if (hasNote) {
                 decorateNotesHalo(marker);
             }
+        }
+
+        if (hasReview) {
+            decorateReviewHalo(marker, park);
+        }
+        if (hasNote) {
+            decorateNotesHalo(marker);
         }
 
         // Tooltip text
@@ -1765,6 +1781,185 @@ function decorateReviewHalo(marker, park) {
                 if (marker.__notesHalos) decorateNotesHalo(marker);
             }
         });
+    } catch (e) {
+        console.warn(`saveParkNoteToIndexedDB failed for ${ref}:`, e);
+        throw e;
+    }
+
+    if (!__parkNotesState) __parkNotesState = {map: new Map(), set: new Set()};
+    if (normalized) {
+        __parkNotesState.map.set(ref, {note: normalized, updated: Date.now()});
+        __parkNotesState.set.add(ref);
+    } else {
+        __parkNotesState.map.delete(ref);
+        __parkNotesState.set.delete(ref);
+    }
+
+    return normalized.length > 0;
+}
+
+function parkHasStoredNote(reference) {
+    if (!__parkNotesState) return false;
+    return __parkNotesState.set.has(normalizeNoteRef(reference));
+}
+
+function ensureNotesHaloPane() {
+    if (!map) return;
+    if (!map.getPane('notesHalos')) {
+        map.createPane('notesHalos');
+        const pane = map.getPane('notesHalos');
+        if (pane) pane.style.zIndex = 455;
+    }
+}
+
+function decorateNotesHalo(marker) {
+    if (!marker || !map) return;
+
+    ensureNotesHaloPane();
+
+    const latLng = marker.getLatLng && marker.getLatLng();
+    if (!latLng) return;
+
+    let baseR;
+    if (marker.getRadius) {
+        baseR = marker.options?.radius || marker.getRadius();
+    } else if (marker.options?.icon?.options?.iconSize) {
+        baseR = marker.options.icon.options.iconSize[0] / 2;
+    } else {
+        baseR = 6;
+    }
+
+    const hasReview = !!marker.__hasReview;
+    const layerTarget = map.activationsLayer || map;
+    const outerRadius = baseR + 6;
+    const innerRadius = hasReview ? outerRadius : baseR + 4.5;
+    const outerColor = '#9333ea';
+    const innerColor = hasReview ? '#f472b6' : '#4c1d95';
+    const outerWeight = hasReview ? 3 : 2;
+    const innerWeight = hasReview ? 3 : 2;
+
+    let halos = marker.__notesHalos;
+    if (!halos || !halos.outer || !halos.inner) {
+        if (halos) removeNotesHalo(marker);
+        const outer = L.circleMarker(latLng, {
+            pane: 'notesHalos',
+            radius: outerRadius,
+            color: outerColor,
+            weight: outerWeight,
+            fillOpacity: 0,
+            opacity: 0.95,
+            interactive: false,
+            lineCap: 'butt',
+            lineJoin: 'round'
+        }).addTo(layerTarget);
+
+        const inner = L.circleMarker(latLng, {
+            pane: 'notesHalos',
+            radius: innerRadius,
+            color: innerColor,
+            weight: innerWeight,
+            fillOpacity: 0,
+            opacity: 0.95,
+            interactive: false,
+            lineCap: 'butt',
+            lineJoin: 'round'
+        }).addTo(layerTarget);
+
+        halos = marker.__notesHalos = {outer, inner};
+        if (marker.on && !marker.__notesRemoveHandler) {
+            marker.__notesRemoveHandler = () => removeNotesHalo(marker);
+            marker.on('remove', marker.__notesRemoveHandler);
+        }
+    } else {
+        halos.outer.setLatLng(latLng);
+        halos.inner.setLatLng(latLng);
+    }
+
+    const applyStyle = (circle, radius, color, weight, dashArray, dashOffset) => {
+        if (!circle) return;
+        circle.setRadius(radius);
+        const style = {
+            color,
+            weight,
+            opacity: 0.95,
+            fillOpacity: 0,
+            lineCap: 'butt',
+            lineJoin: 'round'
+        };
+        if (dashArray) style.dashArray = dashArray;
+        if (typeof dashOffset === 'number') style.dashOffset = dashOffset;
+        circle.setStyle(style);
+        circle.options = circle.options || {};
+        circle.options.dashArray = dashArray || null;
+        if (typeof dashOffset === 'number') circle.options.dashOffset = dashOffset;
+        else delete circle.options.dashOffset;
+
+        if (!dashArray && circle._path) {
+            circle._path.removeAttribute('stroke-dasharray');
+        }
+        if (typeof dashOffset !== 'number' && circle._path) {
+            circle._path.removeAttribute('stroke-dashoffset');
+        } else if (typeof dashOffset === 'number' && circle._path) {
+            circle._path.setAttribute('stroke-dashoffset', dashOffset);
+        }
+    };
+
+    if (hasReview) {
+        const circumference = 2 * Math.PI * outerRadius;
+        const half = Number((circumference / 2).toFixed(2));
+        const dashPattern = `${half} ${half}`;
+        applyStyle(halos.outer, outerRadius, outerColor, outerWeight, dashPattern, 0);
+        applyStyle(halos.inner, outerRadius, innerColor, innerWeight, dashPattern, half);
+    } else {
+        applyStyle(halos.outer, outerRadius, outerColor, outerWeight, null, null);
+        applyStyle(halos.inner, innerRadius, innerColor, innerWeight, null, null);
+    }
+
+    marker.__notesHalos = halos;
+    marker.__hasNotes = true;
+}
+
+function removeNotesHalo(marker) {
+    if (!marker) return;
+    if (marker.__notesRemoveHandler && marker.off) {
+        marker.off('remove', marker.__notesRemoveHandler);
+        marker.__notesRemoveHandler = null;
+    }
+    if (!marker.__notesHalos) {
+        marker.__hasNotes = false;
+        return;
+    }
+    const halos = marker.__notesHalos;
+    marker.__notesHalos = null;
+    marker.__hasNotes = false;
+
+    const toRemove = [];
+    if (Array.isArray(halos)) {
+        toRemove.push(...halos);
+    } else if (halos) {
+        if (halos.outer) toRemove.push(halos.outer);
+        if (halos.inner) toRemove.push(halos.inner);
+    }
+
+    for (const halo of toRemove) {
+        try {
+            if (halo && typeof halo.remove === 'function') {
+                halo.remove();
+            } else if (map && map.removeLayer) {
+                map.removeLayer(halo);
+            }
+        } catch (_) {
+        }
+    }
+}
+
+function updateMarkerNotesVisual(marker, hasNote) {
+    if (!marker) return;
+    if (hasNote) {
+        marker.__hasNotes = true;
+        decorateNotesHalo(marker);
+    } else {
+        removeNotesHalo(marker);
     }
 }
 
