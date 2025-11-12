@@ -4073,6 +4073,11 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         hint.textContent = 'Notes stay on this device and are not shared.';
         notesContainer.appendChild(hint);
 
+        const noteDisplay = document.createElement('div');
+        noteDisplay.className = 'park-popup-notes-display';
+        noteDisplay.hidden = true;
+        notesContainer.appendChild(noteDisplay);
+
         const status = document.createElement('div');
         status.className = 'park-popup-note-status';
         status.setAttribute('aria-live', 'polite');
