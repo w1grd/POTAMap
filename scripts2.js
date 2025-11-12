@@ -83,6 +83,40 @@ function clearPopupLock() {
 // Utility: always return an array (guards against undefined during CSV flows)
 function asArray(x) { return Array.isArray(x) ? x : []; }
 
+function escapeHtml(str) {
+    if (typeof str !== 'string' || !str) return '';
+    return str.replace(/[&<>"']/g, (char) => {
+        switch (char) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#39;';
+            default: return char;
+        }
+    });
+}
+
+function linkifyText(text) {
+    if (typeof text !== 'string' || !text) return '';
+
+    const urlRegex = /\b((?:https?|app|bear|obsidian|note|file):\/\/[^\s<>"')]+)/gi;
+    let result = '';
+    let lastIndex = 0;
+    let match;
+
+    while ((match = urlRegex.exec(text)) !== null) {
+        const url = match[0];
+        result += escapeHtml(text.slice(lastIndex, match.index));
+        const safeURL = url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        result += `<a href="${safeURL}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`;
+        lastIndex = match.index + url.length;
+    }
+
+    result += escapeHtml(text.slice(lastIndex));
+    return result.replace(/\n/g, '<br>');
+}
+
 // === Global popup opener helper ===
 
 // === Helpers for Go-To-Park popup behavior ===
@@ -4034,6 +4068,11 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         hint.textContent = 'Notes stay on this device and are not shared.';
         notesContainer.appendChild(hint);
 
+        const noteDisplayEl = document.createElement('div');
+        noteDisplayEl.className = 'park-popup-notes-display';
+        noteDisplayEl.hidden = true;
+        notesContainer.appendChild(noteDisplayEl);
+
         const status = document.createElement('div');
         status.className = 'park-popup-note-status';
         status.setAttribute('aria-live', 'polite');
@@ -4045,10 +4084,23 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         textarea.value = existingText;
 
         const normalize = (value) => (typeof value === 'string' ? value.trim() : '');
+
+        const updateNoteDisplay = (rawValue) => {
+            if (!noteDisplayEl) return;
+            const normalized = normalize(rawValue);
+            if (normalized) {
+                noteDisplayEl.innerHTML = linkifyText(normalized);
+                noteDisplayEl.hidden = false;
+            } else {
+                noteDisplayEl.innerHTML = '';
+                noteDisplayEl.hidden = true;
+            }
+        };
         let lastSavedNormalized = normalize(existingText);
         if (lastSavedNormalized) {
             card.classList.add('has-note');
         }
+        updateNoteDisplay(existingText);
         if (marker) updateMarkerNotesVisual(marker, !!lastSavedNormalized);
         if (parkRecord) {
             if (lastSavedNormalized) parkRecord.__hasNotes = true;
@@ -4089,6 +4141,7 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
                     if (hasNote) parkRecord.__hasNotes = true;
                     else delete parkRecord.__hasNotes;
                 }
+                updateNoteDisplay(textarea.value);
                 updateMarkerNotesVisual(marker, hasNote);
                 setStatus(hasNote ? 'Saved' : 'Note cleared');
             } catch (e) {
