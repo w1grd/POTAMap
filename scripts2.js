@@ -3970,7 +3970,7 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         frontToggle.className = 'park-popup-corner-toggle front';
         frontToggle.setAttribute('aria-label', 'Add personal notes');
         frontToggle.title = 'Add personal notes';
-        front.appendChild(frontToggle);
+        card.appendChild(frontToggle);
 
         const frontBody = document.createElement('div');
         frontBody.className = 'park-popup-front-body';
@@ -3986,20 +3986,15 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         backToggle.className = 'park-popup-corner-toggle back';
         backToggle.setAttribute('aria-label', 'Show park details');
         backToggle.title = 'Show park details';
-        back.appendChild(backToggle);
+        card.appendChild(backToggle);
 
         const addCornerIcon = (toggle) => {
             if (!toggle) return;
             const icon = document.createElement('span');
             icon.className = 'park-popup-corner-icon';
             icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = '←';
             toggle.appendChild(icon);
-
-            const text = document.createElement('span');
-            text.className = 'park-popup-corner-text';
-            text.textContent = 'turn me';
-            text.setAttribute('aria-hidden', 'true');
-            toggle.appendChild(text);
         };
 
         addCornerIcon(frontToggle);
