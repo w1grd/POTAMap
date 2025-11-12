@@ -575,16 +575,28 @@
     border-radius: 50%;
     border-width: 2px;
 }
-.park-popup-corner-toggle > span {
+/* Hide any textual glyphs (like the old emoji) inside the badge */
+.park-popup-corner-toggle > * {
+    font-size: 0 !important;
+    color: transparent !important;
+    line-height: 0 !important;
+}
+/* Draw the arrow as a background on a pseudo-element so it never conflicts with inner HTML */
+.park-popup-corner-toggle::before {
+    content: "";
     width: 18px;
     height: 18px;
-    line-height: 1;
     display: block;
     background-repeat: no-repeat;
     background-position: center;
     background-size: 100% 100%;
-    /* Bold turn-over arrow (front & back) */
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7.5 4.25h7.25a5.75 5.75 0 1 1-4.06 9.81' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M7.5 4.25l3.25 3.25-3.25 3.25' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+/* Compact badge arrow sizing */
+.compact-note .park-popup-corner-toggle::before {
+    width: 16px;
+    height: 16px;
 }
 
 .park-popup-corner-toggle:hover {
@@ -667,10 +679,7 @@
         height: 32px;
         border-width: 2px;
     }
-
-    .park-popup-corner-toggle > span {
-        font-size: 16px;
-    }
+    .park-popup-corner-toggle::before { width: 20px; height: 20px; }
 
     .park-popup-notes-textarea {
         min-height: 48px;
