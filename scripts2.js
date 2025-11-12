@@ -3970,7 +3970,6 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         frontToggle.className = 'park-popup-corner-toggle front';
         frontToggle.setAttribute('aria-label', 'Add personal notes');
         frontToggle.title = 'Add personal notes';
-        frontToggle.innerHTML = '<span aria-hidden="true">📝</span>';
         front.appendChild(frontToggle);
 
         const frontBody = document.createElement('div');
@@ -3987,16 +3986,30 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         backToggle.className = 'park-popup-corner-toggle back';
         backToggle.setAttribute('aria-label', 'Show park details');
         backToggle.title = 'Show park details';
-        backToggle.innerHTML = '<span aria-hidden="true">↩</span>';
         back.appendChild(backToggle);
+
+        const addCornerIcon = (toggle) => {
+            if (!toggle) return;
+            const icon = document.createElement('span');
+            icon.className = 'park-popup-corner-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            toggle.appendChild(icon);
+        };
+
+        addCornerIcon(frontToggle);
+        addCornerIcon(backToggle);
 
         const backBody = document.createElement('div');
         backBody.className = 'park-popup-back-body';
         back.appendChild(backBody);
 
+        const notesContainer = document.createElement('div');
+        notesContainer.className = 'park-popup-notes-container';
+        backBody.appendChild(notesContainer);
+
         const label = document.createElement('label');
         label.className = 'park-popup-notes-label';
-        backBody.appendChild(label);
+        notesContainer.appendChild(label);
 
         const labelText = document.createElement('span');
         labelText.textContent = `Notes for ${reference}`;
@@ -4012,12 +4025,12 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         const hint = document.createElement('div');
         hint.className = 'park-popup-note-hint';
         hint.textContent = 'Notes stay on this device and are not shared.';
-        backBody.appendChild(hint);
+        notesContainer.appendChild(hint);
 
         const status = document.createElement('div');
         status.className = 'park-popup-note-status';
         status.setAttribute('aria-live', 'polite');
-        backBody.appendChild(status);
+        notesContainer.appendChild(status);
 
         const state = await ensureNotesCacheFromIndexedDB();
         const existing = state?.map?.get(ref);
