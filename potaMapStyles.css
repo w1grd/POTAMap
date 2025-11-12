@@ -497,6 +497,149 @@
     overflow-wrap: break-word;
 }
 
+/* Flip card popup for personal park notes */
+.leaflet-popup-content .park-popup-card {
+    position: relative;
+    perspective: 1400px;
+    min-height: 140px;
+}
+
+.park-popup-inner {
+    position: relative;
+    width: 100%;
+    transition: transform 0.48s ease;
+    transform-style: preserve-3d;
+}
+
+.park-popup-card.is-flipped .park-popup-inner {
+    transform: rotateY(180deg);
+}
+
+.park-popup-face {
+    position: relative;
+    background: #fff;
+    backface-visibility: hidden;
+    min-height: 140px;
+    padding-top: 10px;
+}
+
+.park-popup-front-body,
+.park-popup-back-body {
+    padding: 0 4px 6px;
+}
+
+.park-popup-face.park-popup-back {
+    transform: rotateY(180deg);
+}
+
+.park-popup-corner-toggle {
+    position: absolute;
+    top: -14px;
+    right: -14px;
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.28);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: rotate(45deg);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+    z-index: 2;
+}
+
+.park-popup-corner-toggle > span {
+    transform: rotate(-45deg);
+    font-size: 18px;
+    line-height: 1;
+}
+
+.park-popup-corner-toggle:hover,
+.park-popup-corner-toggle:focus-visible {
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.35);
+}
+
+.park-popup-corner-toggle:focus-visible {
+    outline: 2px solid #facc15;
+    outline-offset: 4px;
+}
+
+.park-popup-corner-toggle.back {
+    background: linear-gradient(135deg, #334155, #1f2937);
+}
+
+.park-popup-card.has-note .park-popup-corner-toggle.front {
+    background: linear-gradient(135deg, #047857, #059669);
+}
+
+.park-popup-notes-label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.park-popup-notes-textarea {
+    width: 100%;
+    min-height: 100px;
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    resize: vertical;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.4;
+    box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.08);
+}
+
+.park-popup-notes-textarea:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+    outline: none;
+}
+
+.park-popup-note-hint {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    color: #4b5563;
+}
+
+.park-popup-note-status {
+    margin-top: 4px;
+    font-size: 0.78rem;
+    min-height: 1em;
+    color: #2563eb;
+}
+
+.park-popup-card.has-note .park-popup-note-status {
+    color: #047857;
+}
+
+.park-popup-note-status.error {
+    color: #b91c1c;
+}
+
+@media (max-width: 420px) {
+    .park-popup-corner-toggle {
+        top: -12px;
+        right: -12px;
+        width: 36px;
+        height: 36px;
+    }
+
+    .park-popup-corner-toggle > span {
+        font-size: 16px;
+    }
+
+    .park-popup-notes-textarea {
+        min-height: 90px;
+    }
+}
+
 #searchBoxContainer {
     position: relative;
     width: 100%;
