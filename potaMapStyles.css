@@ -503,113 +503,178 @@
     perspective: 1400px;
     min-height: 0;
 }
-/* --- keep the little badge visible outside the popup --- */
-.leaflet-popup-content-wrapper,
-.leaflet-popup-content { overflow: visible; }
 
-/* --- make the 3D card fill its container so the back can flex --- */
-.park-popup-inner { min-height: 260px; }
-.park-popup-face { min-height: 100%; }
+.park-popup-inner {
+    position: relative;
+    width: 100%;
+    display: grid;
+    transition: transform 0.48s ease;
+    transform-style: preserve-3d;
+}
 
-/* --- FRONT/BACK corner toggle (arrow button in the top-left) --- */
+.park-popup-card.is-flipped .park-popup-inner {
+    transform: rotateY(180deg);
+}
+
+.park-popup-face {
+    position: relative;
+    grid-area: 1 / 1 / 2 / 2;
+    background: #fff;
+    backface-visibility: hidden;
+    min-height: 0;
+    padding-top: 10px;
+}
+
+.park-popup-front-body,
+.park-popup-back-body {
+    padding: 0 4px 6px;
+    min-height: 0;
+}
+
+.park-popup-back-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-left: 40px; /* keep controls clear of the corner badge */
+}
+/* Reserve space so the title never sits under the dog-ear */
+.park-popup-front-body {
+    padding-left: 40px;
+}
+.park-popup-face.park-popup-back {
+    transform: rotateY(180deg);
+}
+
 .park-popup-corner-toggle {
     position: absolute;
-    top: -14px;                 /* sits just outside the corner */
-    left: -14px;
-    width: 28px;
+    top: -14px;                /* stick up a bit */
+    left: -14px;               /* stick left a bit */
+    right: auto;
+    width: 28px;               /* slightly larger */
     height: 28px;
     border: 2px solid #ffffff;
     border-radius: 50%;
-    background:
-            radial-gradient(circle at 30% 30%, rgba(255,255,255,.92), rgba(255,255,255,.78)),
-            linear-gradient(135deg, rgba(59,130,246,1), rgba(96,165,250,1));
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.92), rgba(255,255,255,0.78)),
+                linear-gradient(135deg, rgba(59,130,246,1), rgba(96,165,250,1));
     color: #fff;
     cursor: pointer;
-    box-shadow: 0 6px 14px rgba(15, 23, 42, .28);
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.28);
     display: flex;
     align-items: center;
     justify-content: center;
+    transform: none;
+    transition: transform 0.15s ease, box-shadow 0.2s ease;
+    z-index: 2;
     background-repeat: no-repeat;
     background-position: center;
-    background-size: 18px 18px;
-    transition: transform .15s ease, box-shadow .2s ease;
-    z-index: 2;
-    /* “turn me” arrow (front) */
-    background-image: url("data:image/svg+xml;utf8,\
-  <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>\
-  <path d='M7.5 4.25h7.25a5.75 5.75 0 1 1-4.06 9.81' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/>\
-  <path d='M7.5 4.25l3.25 3.25-3.25 3.25' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/>\
-  </svg>");
+    background-size: 18px 18px;   /* arrow size */
+    overflow: visible;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7.5 4.25h7.25a5.75 5.75 0 1 1-4.06 9.81' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M7.5 4.25l3.25 3.25-3.25 3.25' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+/* Compact dog-ear for narrow popups */
+.compact-note .park-popup-corner-toggle {
+    top: -12px;
+    left: -12px;
+    right: auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border-width: 2px;
+}
+/* Compact scaling override for the arrow on the button background */
+.compact-note .park-popup-corner-toggle { background-size: 16px 16px; }
+/* Hide any textual glyphs (like the old emoji) inside the badge */
+.park-popup-corner-toggle > * {
+    opacity: 0 !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
 }
 
-/* darker style on back face */
+.park-popup-corner-toggle:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 18px rgba(15, 23, 42, 0.35);
+}
+
+.park-popup-corner-toggle:hover,
+.park-popup-corner-toggle:focus-visible {
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.35);
+}
+
+.park-popup-corner-toggle:focus-visible {
+    outline: 2px solid #facc15;
+    outline-offset: 4px;
+}
+
 .park-popup-corner-toggle.back {
-    background:
-            radial-gradient(circle at 30% 30%, rgba(255,255,255,.86), rgba(255,255,255,.72)),
-            linear-gradient(135deg, #334155, #1f2937);
-}
-/* mirror the arrow on the back so it suggests “flip back” */
-.park-popup-corner-toggle.back::after {
-    content: "";
-    position: absolute; inset: 0;
-    background-repeat: no-repeat; background-position: center; background-size: 18px 18px;
-    transform: scaleX(-1);                 /* mirror */
-    background-image: inherit;             /* reuse same SVG */
-    opacity: 1;
-}
-/* hide any legacy glyph inside the button */
-.park-popup-corner-toggle > * { opacity: 0 !important; }
-
-/* hover/focus polish */
-.park-popup-corner-toggle:hover { transform: translateY(-1px); box-shadow: 0 10px 18px rgba(15,23,42,.35); }
-.park-popup-corner-toggle:focus-visible { outline: 2px solid #facc15; outline-offset: 4px; }
-
-/* compact variant for small popups */
-.compact-note .park-popup-corner-toggle { top: -12px; left: -12px; width: 24px; height: 24px; border-width: 2px; }
-.compact-note .park-popup-corner-toggle,
-.compact-note .park-popup-corner-toggle.back::after { background-size: 16px 16px; }
-
-/* reserve space on both faces so content never slides under the badge */
-.park-popup-front-body,
-.park-popup-back-body { padding-left: 40px; }
-
-/* --- BACK FACE LAYOUT: textarea that fits better --- */
-.park-popup-back-body {
-    display: flex; flex-direction: column;
-    gap: 6px;
-    min-height: 0;            /* allow flex children to shrink */
+    background: linear-gradient(135deg, #334155, #1f2937);
 }
 
-/* let the textarea grow to fill remaining height, but cap reasonably */
+.park-popup-card.has-note .park-popup-corner-toggle.front {
+    background: linear-gradient(135deg, #047857, #059669);
+}
+
+.park-popup-notes-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-weight: 600;
+}
+
 .park-popup-notes-textarea {
-    min-height: 96px;
-    max-height: min(45vh, 360px);
-    height: auto;
-    flex: 1 1 auto;           /* <- this makes it use leftover space */
+    width: 100%;
+    min-height: 120px;
+    max-height: 260px;
     margin-top: 2px;
     padding: 10px 12px;
     border: 1px solid #d1d5db;
     border-radius: 8px;
     resize: vertical;
-    font: inherit;
+    font-family: inherit;
+    font-size: 0.95rem;
     line-height: 1.4;
-    box-shadow: inset 0 1px 1px rgba(15, 23, 42, .08);
+    box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.08);
 }
 
-/* push the hint/status to the bottom if there’s room */
-.park-popup-note-hint { margin-top: auto; font-size: .75rem; color: #4b5563; }
-.park-popup-note-status { font-size: .78rem; min-height: 1em; color: #2563eb; }
-.park-popup-card.has-note .park-popup-note-status { color: #047857; }
-.park-popup-note-status.error { color: #b91c1c; }
+.park-popup-notes-textarea:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+    outline: none;
+}
 
-/* small screens */
+.park-popup-note-hint {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    color: #4b5563;
+}
 
+.park-popup-note-status {
+    margin-top: 4px;
+    font-size: 0.78rem;
+    min-height: 1em;
+    color: #2563eb;
+}
+
+.park-popup-card.has-note .park-popup-note-status {
+    color: #047857;
+}
+
+.park-popup-note-status.error {
+    color: #b91c1c;
+}
 
 @media (max-width: 420px) {
-    .park-popup-corner-toggle { top: -12px; left: -12px; width: 32px; height: 32px; border-width: 2px; }
-    .park-popup-corner-toggle,
-    .park-popup-corner-toggle.back::after { background-size: 20px 20px; }
-    .park-popup-notes-textarea { max-height: min(50vh, 280px); }
+    .park-popup-corner-toggle {
+        top: -12px;
+        left: -12px;
+        right: auto;
+        width: 32px;
+        height: 32px;
+        border-width: 2px;
+    }
+    .park-popup-corner-toggle { background-size: 20px 20px; }
+    .park-popup-notes-textarea {
+        min-height: 64px;
+    }
 }
 
 #searchBoxContainer {
