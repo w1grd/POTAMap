@@ -100,21 +100,43 @@ function escapeHtml(str) {
 function linkifyText(text) {
     if (typeof text !== 'string' || !text) return '';
 
-    const urlRegex = /\b((?:https?|app|bear|obsidian|note|file):\/\/[^\s<>"')]+)/gi;
+    const schemeSource = '(?:https?|app|bear|obsidian|note|file):\\/\\/';
+    const urlBodySource = "[^\\s<>\"')]+";
+    const markdownSource = `\\[([^\\]]+)\\]\\((${schemeSource}${urlBodySource})\\)`;
+    const plainUrlSource = `\\b(${schemeSource}${urlBodySource})`;
+
+    const escapeSegment = (segment) => escapeHtml(segment).replace(/\n/g, '<br>');
+    const escapeAttribute = (value) => escapeHtml(value).replace(/`/g, '&#96;');
+
     let result = '';
     let lastIndex = 0;
     let match;
 
-    while ((match = urlRegex.exec(text)) !== null) {
-        const url = match[0];
-        result += escapeHtml(text.slice(lastIndex, match.index));
-        const safeURL = url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-        result += `<a href="${safeURL}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`;
-        lastIndex = match.index + url.length;
+    const combinedRegex = new RegExp(`${markdownSource}|${plainUrlSource}`, 'gi');
+
+    while ((match = combinedRegex.exec(text)) !== null) {
+        const [fullMatch] = match;
+        const markdownLabel = match[1];
+        const markdownUrl = match[2];
+        const plainUrl = match[3];
+        const matchIndex = match.index;
+
+        result += escapeSegment(text.slice(lastIndex, matchIndex));
+
+        if (markdownUrl) {
+            const linkText = markdownLabel || '';
+            const safeURL = escapeAttribute(markdownUrl);
+            result += `<a href="${safeURL}" target="_blank" rel="noopener noreferrer">${escapeHtml(linkText)}</a>`;
+        } else if (plainUrl) {
+            const safeURL = escapeAttribute(plainUrl);
+            result += `<a href="${safeURL}" target="_blank" rel="noopener noreferrer">${escapeHtml(plainUrl)}</a>`;
+        }
+
+        lastIndex = matchIndex + fullMatch.length;
     }
 
-    result += escapeHtml(text.slice(lastIndex));
-    return result.replace(/\n/g, '<br>');
+    result += escapeSegment(text.slice(lastIndex));
+    return result;
 }
 
 // === Global popup opener helper ===
@@ -3999,6 +4021,48 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         front.className = 'park-popup-face park-popup-front';
         inner.appendChild(front);
 
+        let frontHeight = null;
+        let frontHeightAttempts = 0;
+        const measureFrontHeight = () => {
+            if (!front) return;
+            if (!card.isConnected) {
+                if (frontHeightAttempts < 12) {
+                    frontHeightAttempts += 1;
+                    requestAnimationFrame(measureFrontHeight);
+                }
+                return;
+            }
+            const rect = front.getBoundingClientRect();
+            if (rect && rect.height) {
+                frontHeight = rect.height;
+                frontHeightAttempts = 0;
+                card.dataset.frontHeight = String(rect.height);
+                if (!card.classList.contains('is-flipped')) {
+                    lockToFrontHeight();
+                } else {
+                    card.style.minHeight = `${frontHeight}px`;
+                }
+            }
+        };
+
+        const lockToFrontHeight = () => {
+            if (frontHeight) {
+                card.style.height = `${frontHeight}px`;
+                card.style.minHeight = `${frontHeight}px`;
+            }
+        };
+
+        const releaseFrontHeight = () => {
+            card.style.height = '';
+            if (frontHeight) {
+                card.style.minHeight = `${frontHeight}px`;
+            } else {
+                card.style.minHeight = '';
+            }
+        };
+
+        requestAnimationFrame(measureFrontHeight);
+
         const frontToggle = document.createElement('button');
         frontToggle.type = 'button';
         frontToggle.className = 'park-popup-corner-toggle front';
@@ -4064,7 +4128,7 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         textarea.id = textareaId;
         textarea.className = 'park-popup-notes-textarea';
         textarea.placeholder = 'Write your personal notes here…';
-        textarea.rows = 4;
+        textarea.rows = 3;
         textarea.spellcheck = true;
         editor.appendChild(textarea);
 
@@ -4181,12 +4245,27 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
 
         textarea.addEventListener('input', () => scheduleSave(false));
         textarea.addEventListener('change', () => scheduleSave(true));
-        textarea.addEventListener('blur', () => scheduleSave(true));
+        textarea.addEventListener('focus', () => {
+            card.classList.add('notes-editing');
+            releaseFrontHeight();
+        });
+        textarea.addEventListener('blur', () => {
+            card.classList.remove('notes-editing');
+            scheduleSave(true);
+            if (!card.classList.contains('is-flipped')) {
+                measureFrontHeight();
+                lockToFrontHeight();
+            }
+        });
         textarea.addEventListener('keydown', (event) => event.stopPropagation());
 
         const flip = (toBack) => {
+            if (!frontHeight) {
+                measureFrontHeight();
+            }
             card.classList.toggle('is-flipped', toBack);
             if (toBack) {
+                releaseFrontHeight();
                 setTimeout(() => {
                     try {
                         textarea.focus({preventScroll: true});
@@ -4194,6 +4273,9 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
                         try { textarea.focus(); } catch (_) {}
                     }
                 }, 180);
+            } else {
+                card.classList.remove('notes-editing');
+                lockToFrontHeight();
             }
         };
 
