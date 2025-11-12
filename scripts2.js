@@ -1704,7 +1704,13 @@ function ensureReviewHaloCss() {
 
 // Add visual halo to a marker (two concentric rings) when a review exists
 function decorateReviewHalo(marker, park) {
-    if (!marker || !park || !park.reviewURL || marker.__reviewHalos) return;
+    if (!marker || !park || !park.reviewURL) return;
+
+    marker.__hasReview = true;
+    if (marker.__reviewHalos) {
+        if (marker.__notesHalos) decorateNotesHalo(marker);
+        return;
+    }
 
     if (!map.getPane('reviewHalos')) {
         map.createPane('reviewHalos');
@@ -1746,6 +1752,7 @@ function decorateReviewHalo(marker, park) {
     }).addTo(map.activationsLayer || map);
 
     marker.__reviewHalos = [haloBlack, haloGold];
+    if (marker.__notesHalos) decorateNotesHalo(marker);
     if (marker.on) {
         marker.on('remove', () => {
             if (marker.__reviewHalos) {
@@ -1754,8 +1761,328 @@ function decorateReviewHalo(marker, park) {
                     else map.removeLayer(h);
                 });
                 marker.__reviewHalos = null;
+                marker.__hasReview = false;
+                if (marker.__notesHalos) decorateNotesHalo(marker);
             }
         });
+    }
+}
+
+function normalizeNoteRef(reference) {
+    return String(reference || '').trim().toUpperCase();
+}
+
+async function ensureNotesCacheFromIndexedDB() {
+    if (__parkNotesState) return __parkNotesState;
+    if (__parkNotesStatePromise) return __parkNotesStatePromise;
+
+    __parkNotesStatePromise = (async () => {
+        const state = {map: new Map(), set: new Set()};
+
+        if (typeof indexedDB === 'undefined') {
+            __parkNotesState = state;
+            return state;
+        }
+
+        try {
+            const db = await getDatabase();
+            if (!db.objectStoreNames.contains('parkNotes')) {
+                __parkNotesState = state;
+                return state;
+            }
+
+            const records = await new Promise((resolve, reject) => {
+                try {
+                    const tx = db.transaction('parkNotes', 'readonly');
+                    const store = tx.objectStore('parkNotes');
+                    if (typeof store.getAll === 'function') {
+                        const req = store.getAll();
+                        req.onsuccess = () => resolve(req.result || []);
+                        req.onerror = (e) => reject(e.target.error);
+                    } else {
+                        const rows = [];
+                        const req = store.openCursor();
+                        req.onsuccess = (event) => {
+                            const cursor = event.target.result;
+                            if (cursor) {
+                                rows.push(cursor.value);
+                                cursor.continue();
+                            } else {
+                                resolve(rows);
+                            }
+                        };
+                        req.onerror = (e) => reject(e.target.error);
+                    }
+                } catch (err) {
+                    reject(err);
+                }
+            });
+
+            for (const row of records) {
+                if (!row || typeof row !== 'object') continue;
+                const ref = normalizeNoteRef(row.reference);
+                const noteRaw = row.note;
+                const note = typeof noteRaw === 'string' ? noteRaw : (noteRaw == null ? '' : String(noteRaw));
+                const trimmed = note.trim();
+                if (!ref || !trimmed) continue;
+                state.map.set(ref, {note: trimmed, updated: row.updated || 0});
+                state.set.add(ref);
+            }
+        } catch (e) {
+            console.warn('ensureNotesCacheFromIndexedDB failed:', e);
+        }
+
+        __parkNotesState = state;
+        return state;
+    })();
+
+    try {
+        return await __parkNotesStatePromise;
+    } finally {
+        __parkNotesStatePromise = null;
+    }
+}
+
+function getCachedNoteForRef(reference) {
+    if (!__parkNotesState) return '';
+    const ref = normalizeNoteRef(reference);
+    const rec = __parkNotesState.map.get(ref);
+    return rec ? (rec.note || '') : '';
+}
+
+async function loadNoteForReference(reference) {
+    const state = await ensureNotesCacheFromIndexedDB();
+    if (!state) return '';
+    const ref = normalizeNoteRef(reference);
+    const rec = state.map.get(ref);
+    return rec ? (rec.note || '') : '';
+}
+
+async function saveParkNoteToIndexedDB(reference, note) {
+    if (!reference) return false;
+    const ref = normalizeNoteRef(reference);
+    const normalized = typeof note === 'string' ? note.trim() : String(note || '').trim();
+
+    await ensureNotesCacheFromIndexedDB();
+
+    if (typeof indexedDB === 'undefined') {
+        if (!__parkNotesState) __parkNotesState = {map: new Map(), set: new Set()};
+        if (normalized) {
+            __parkNotesState.map.set(ref, {note: normalized, updated: Date.now()});
+            __parkNotesState.set.add(ref);
+        } else {
+            __parkNotesState.map.delete(ref);
+            __parkNotesState.set.delete(ref);
+        }
+        return normalized.length > 0;
+    }
+
+    try {
+        const db = await getDatabase();
+        if (!db.objectStoreNames.contains('parkNotes')) {
+            if (!__parkNotesState) __parkNotesState = {map: new Map(), set: new Set()};
+            if (normalized) {
+                __parkNotesState.map.set(ref, {note: normalized, updated: Date.now()});
+                __parkNotesState.set.add(ref);
+            } else {
+                __parkNotesState.map.delete(ref);
+                __parkNotesState.set.delete(ref);
+            }
+            return normalized.length > 0;
+        }
+
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction('parkNotes', 'readwrite');
+            const store = tx.objectStore('parkNotes');
+            if (normalized) {
+                const req = store.put({reference: ref, note: normalized, updated: Date.now()});
+                req.onsuccess = () => resolve();
+                req.onerror = (e) => reject(e.target.error);
+            } else {
+                const req = store.delete(ref);
+                req.onsuccess = () => resolve();
+                req.onerror = (e) => reject(e.target.error);
+            }
+        });
+    } catch (e) {
+        console.warn(`saveParkNoteToIndexedDB failed for ${ref}:`, e);
+        throw e;
+    }
+
+    if (!__parkNotesState) __parkNotesState = {map: new Map(), set: new Set()};
+    if (normalized) {
+        __parkNotesState.map.set(ref, {note: normalized, updated: Date.now()});
+        __parkNotesState.set.add(ref);
+    } else {
+        __parkNotesState.map.delete(ref);
+        __parkNotesState.set.delete(ref);
+    }
+
+    return normalized.length > 0;
+}
+
+function parkHasStoredNote(reference) {
+    if (!__parkNotesState) return false;
+    return __parkNotesState.set.has(normalizeNoteRef(reference));
+}
+
+function ensureNotesHaloPane() {
+    if (!map) return;
+    if (!map.getPane('notesHalos')) {
+        map.createPane('notesHalos');
+        const pane = map.getPane('notesHalos');
+        if (pane) pane.style.zIndex = 455;
+    }
+}
+
+function decorateNotesHalo(marker) {
+    if (!marker || !map) return;
+
+    ensureNotesHaloPane();
+
+    const latLng = marker.getLatLng && marker.getLatLng();
+    if (!latLng) return;
+
+    let baseR;
+    if (marker.getRadius) {
+        baseR = marker.options?.radius || marker.getRadius();
+    } else if (marker.options?.icon?.options?.iconSize) {
+        baseR = marker.options.icon.options.iconSize[0] / 2;
+    } else {
+        baseR = 6;
+    }
+
+    const hasReview = !!marker.__hasReview;
+    const layerTarget = map.activationsLayer || map;
+    const outerRadius = baseR + 6;
+    const innerRadius = hasReview ? outerRadius : baseR + 4.5;
+    const outerColor = '#9333ea';
+    const innerColor = hasReview ? '#f472b6' : '#4c1d95';
+    const outerWeight = hasReview ? 3 : 2;
+    const innerWeight = hasReview ? 3 : 2;
+
+    let halos = marker.__notesHalos;
+    if (!halos || !halos.outer || !halos.inner) {
+        if (halos) removeNotesHalo(marker);
+        const outer = L.circleMarker(latLng, {
+            pane: 'notesHalos',
+            radius: outerRadius,
+            color: outerColor,
+            weight: outerWeight,
+            fillOpacity: 0,
+            opacity: 0.95,
+            interactive: false,
+            lineCap: 'butt',
+            lineJoin: 'round'
+        }).addTo(layerTarget);
+
+        const inner = L.circleMarker(latLng, {
+            pane: 'notesHalos',
+            radius: innerRadius,
+            color: innerColor,
+            weight: innerWeight,
+            fillOpacity: 0,
+            opacity: 0.95,
+            interactive: false,
+            lineCap: 'butt',
+            lineJoin: 'round'
+        }).addTo(layerTarget);
+
+        halos = marker.__notesHalos = {outer, inner};
+        if (marker.on && !marker.__notesRemoveHandler) {
+            marker.__notesRemoveHandler = () => removeNotesHalo(marker);
+            marker.on('remove', marker.__notesRemoveHandler);
+        }
+    } else {
+        halos.outer.setLatLng(latLng);
+        halos.inner.setLatLng(latLng);
+    }
+
+    const applyStyle = (circle, radius, color, weight, dashArray, dashOffset) => {
+        if (!circle) return;
+        circle.setRadius(radius);
+        const style = {
+            color,
+            weight,
+            opacity: 0.95,
+            fillOpacity: 0,
+            lineCap: 'butt',
+            lineJoin: 'round'
+        };
+        if (dashArray) style.dashArray = dashArray;
+        if (typeof dashOffset === 'number') style.dashOffset = dashOffset;
+        circle.setStyle(style);
+        circle.options = circle.options || {};
+        circle.options.dashArray = dashArray || null;
+        if (typeof dashOffset === 'number') circle.options.dashOffset = dashOffset;
+        else delete circle.options.dashOffset;
+
+        if (!dashArray && circle._path) {
+            circle._path.removeAttribute('stroke-dasharray');
+        }
+        if (typeof dashOffset !== 'number' && circle._path) {
+            circle._path.removeAttribute('stroke-dashoffset');
+        } else if (typeof dashOffset === 'number' && circle._path) {
+            circle._path.setAttribute('stroke-dashoffset', dashOffset);
+        }
+    };
+
+    if (hasReview) {
+        const circumference = 2 * Math.PI * outerRadius;
+        const half = Number((circumference / 2).toFixed(2));
+        const dashPattern = `${half} ${half}`;
+        applyStyle(halos.outer, outerRadius, outerColor, outerWeight, dashPattern, 0);
+        applyStyle(halos.inner, outerRadius, innerColor, innerWeight, dashPattern, half);
+    } else {
+        applyStyle(halos.outer, outerRadius, outerColor, outerWeight, null, null);
+        applyStyle(halos.inner, innerRadius, innerColor, innerWeight, null, null);
+    }
+
+    marker.__notesHalos = halos;
+    marker.__hasNotes = true;
+}
+
+function removeNotesHalo(marker) {
+    if (!marker) return;
+    if (marker.__notesRemoveHandler && marker.off) {
+        marker.off('remove', marker.__notesRemoveHandler);
+        marker.__notesRemoveHandler = null;
+    }
+    if (!marker.__notesHalos) {
+        marker.__hasNotes = false;
+        return;
+    }
+    const halos = marker.__notesHalos;
+    marker.__notesHalos = null;
+    marker.__hasNotes = false;
+
+    const toRemove = [];
+    if (Array.isArray(halos)) {
+        toRemove.push(...halos);
+    } else if (halos) {
+        if (halos.outer) toRemove.push(halos.outer);
+        if (halos.inner) toRemove.push(halos.inner);
+    }
+
+    for (const halo of toRemove) {
+        try {
+            if (halo && typeof halo.remove === 'function') {
+                halo.remove();
+            } else if (map && map.removeLayer) {
+                map.removeLayer(halo);
+            }
+        } catch (_) {
+        }
+    }
+}
+
+function updateMarkerNotesVisual(marker, hasNote) {
+    if (!marker) return;
+    if (hasNote) {
+        marker.__hasNotes = true;
+        decorateNotesHalo(marker);
+    } else {
+        removeNotesHalo(marker);
     }
 }
 
@@ -3898,7 +4225,7 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         const textarea = document.createElement('textarea');
         textarea.className = 'park-popup-notes-textarea';
         textarea.placeholder = 'Write your personal notes here…';
-        textarea.rows = 6;
+        textarea.rows = 4;
         textarea.spellcheck = true;
         label.appendChild(textarea);
 

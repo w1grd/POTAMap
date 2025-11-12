@@ -501,7 +501,7 @@
 .leaflet-popup-content .park-popup-card {
     position: relative;
     perspective: 1400px;
-    min-height: 140px;
+    min-height: 100px;
 }
 
 .park-popup-inner {
@@ -519,13 +519,20 @@
     position: relative;
     background: #fff;
     backface-visibility: hidden;
-    min-height: 140px;
+    min-height: 100px;
     padding-top: 10px;
 }
 
 .park-popup-front-body,
 .park-popup-back-body {
     padding: 0 4px 6px;
+    min-height: 0;
+}
+
+.park-popup-back-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .park-popup-face.park-popup-back {
@@ -579,13 +586,14 @@
 .park-popup-notes-label {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     font-weight: 600;
 }
 
 .park-popup-notes-textarea {
     width: 100%;
-    min-height: 100px;
+    min-height: 72px;
+    max-height: 220px;
     padding: 10px 12px;
     border: 1px solid #d1d5db;
     border-radius: 6px;
@@ -636,7 +644,7 @@
     }
 
     .park-popup-notes-textarea {
-        min-height: 90px;
+        min-height: 64px;
     }
 }
 
