@@ -538,7 +538,7 @@
 }
 /* Reserve space so the title never sits under the dog-ear */
 .park-popup-front-body {
-    padding-left: 36px;  /* badge moved inward; less padding needed */
+    padding-left: 40px;
 }
 .park-popup-face.park-popup-back {
     transform: rotateY(180deg);
@@ -546,15 +546,15 @@
 
 .park-popup-corner-toggle {
     position: absolute;
-    top: -10px;                 /* still a bit proud of the card */
-    left: -6px;                 /* pulled inward from the edge */
+    top: -14px;                /* stick up a bit */
+    left: -14px;               /* stick left a bit */
     right: auto;
-    width: 26px;
-    height: 26px;
-    border: 2px solid #ffffff;  /* crisp white ring */
-    border-radius: 50%;         /* round badge */
-    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.9), rgba(255,255,255,0.75)),
-    linear-gradient(135deg, rgba(59,130,246,0.98), rgba(96,165,250,0.98)); /* brighter blue */
+    width: 28px;               /* slightly larger */
+    height: 28px;
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.92), rgba(255,255,255,0.78)),
+                linear-gradient(135deg, rgba(59,130,246,1), rgba(96,165,250,1));
     color: #fff;
     cursor: pointer;
     box-shadow: 0 6px 14px rgba(15, 23, 42, 0.28);
@@ -567,24 +567,24 @@
 }
 /* Compact dog-ear for narrow popups */
 .compact-note .park-popup-corner-toggle {
-    top: -9px;
-    left: -5px;
+    top: -12px;
+    left: -12px;
     right: auto;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     border-width: 2px;
 }
 .park-popup-corner-toggle > span {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     line-height: 1;
     display: block;
     background-repeat: no-repeat;
     background-position: center;
     background-size: 100% 100%;
-    /* Turn-over arrow (matches the back-side icon) */
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M8 4h7a5 5 0 1 1-3.535 8.535' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/><path d='M8 4l3 3-3 3' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    /* Bold turn-over arrow (front & back) */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7.5 4.25h7.25a5.75 5.75 0 1 1-4.06 9.81' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M7.5 4.25l3.25 3.25-3.25 3.25' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
 .park-popup-corner-toggle:hover {
@@ -660,11 +660,11 @@
 
 @media (max-width: 420px) {
     .park-popup-corner-toggle {
-        top: -8px;
-        left: -4px;
+        top: -12px;
+        left: -12px;
         right: auto;
-        width: 30px;
-        height: 30px;
+        width: 32px;
+        height: 32px;
         border-width: 2px;
     }
 
