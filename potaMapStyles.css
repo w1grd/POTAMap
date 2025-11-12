@@ -538,7 +538,7 @@
 }
 /* Reserve space so the title never sits under the dog-ear */
 .park-popup-front-body {
-    padding-right: 44px;  /* room for the corner toggle */
+    padding-left: 44px;  /* room for the corner toggle on the left */
 }
 .park-popup-face.park-popup-back {
     transform: rotateY(180deg);
@@ -547,7 +547,8 @@
 .park-popup-corner-toggle {
     position: absolute;
     top: -14px;
-    right: -14px;
+    left: -14px;
+    right: auto;
     width: 28px;                 /* was 32px */
     height: 28px;
     border: none;
@@ -566,7 +567,8 @@
 /* Compact dog-ear for narrow popups */
 .compact-note .park-popup-corner-toggle {
     top: -12px;
-    right: -12px;
+    left: -12px;
+    right: auto;
     width: 24px;
     height: 24px;
     border-radius: 8px;
@@ -646,7 +648,8 @@
 @media (max-width: 420px) {
     .park-popup-corner-toggle {
         top: -12px;
-        right: -12px;
+        left: -12px;
+        right: auto;
         width: 36px;
         height: 36px;
     }
