@@ -4075,6 +4075,11 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         frontBody.innerHTML = frontHtml || '';
         front.appendChild(frontBody);
 
+        const noteDisplay = document.createElement('div');
+        noteDisplay.className = 'park-popup-notes-display';
+        noteDisplay.hidden = true;
+        front.appendChild(noteDisplay);
+
         const back = document.createElement('section');
         back.className = 'park-popup-face park-popup-back';
         inner.appendChild(back);
