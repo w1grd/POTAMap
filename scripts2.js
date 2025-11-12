@@ -83,6 +83,62 @@ function clearPopupLock() {
 // Utility: always return an array (guards against undefined during CSV flows)
 function asArray(x) { return Array.isArray(x) ? x : []; }
 
+function escapeHtml(str) {
+    if (typeof str !== 'string' || !str) return '';
+    return str.replace(/[&<>"']/g, (char) => {
+        switch (char) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#39;';
+            default: return char;
+        }
+    });
+}
+
+function linkifyText(text) {
+    if (typeof text !== 'string' || !text) return '';
+
+    const schemeSource = '(?:https?|app|bear|obsidian|note|file):\\/\\/';
+    const urlBodySource = "[^\\s<>\"')]+";
+    const markdownSource = `\\[([^\\]]+)\\]\\((${schemeSource}${urlBodySource})\\)`;
+    const plainUrlSource = `\\b(${schemeSource}${urlBodySource})`;
+
+    const escapeSegment = (segment) => escapeHtml(segment).replace(/\n/g, '<br>');
+    const escapeAttribute = (value) => escapeHtml(value).replace(/`/g, '&#96;');
+
+    let result = '';
+    let lastIndex = 0;
+    let match;
+
+    const combinedRegex = new RegExp(`${markdownSource}|${plainUrlSource}`, 'gi');
+
+    while ((match = combinedRegex.exec(text)) !== null) {
+        const [fullMatch] = match;
+        const markdownLabel = match[1];
+        const markdownUrl = match[2];
+        const plainUrl = match[3];
+        const matchIndex = match.index;
+
+        result += escapeSegment(text.slice(lastIndex, matchIndex));
+
+        if (markdownUrl) {
+            const linkText = markdownLabel || '';
+            const safeURL = escapeAttribute(markdownUrl);
+            result += `<a href="${safeURL}" target="_blank" rel="noopener noreferrer">${escapeHtml(linkText)}</a>`;
+        } else if (plainUrl) {
+            const safeURL = escapeAttribute(plainUrl);
+            result += `<a href="${safeURL}" target="_blank" rel="noopener noreferrer">${escapeHtml(plainUrl)}</a>`;
+        }
+
+        lastIndex = matchIndex + fullMatch.length;
+    }
+
+    result += escapeSegment(text.slice(lastIndex));
+    return result;
+}
+
 // === Global popup opener helper ===
 
 // === Helpers for Go-To-Park popup behavior ===
@@ -3965,6 +4021,48 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         front.className = 'park-popup-face park-popup-front';
         inner.appendChild(front);
 
+        let frontHeight = null;
+        let frontHeightAttempts = 0;
+        const measureFrontHeight = () => {
+            if (!front) return;
+            if (!card.isConnected) {
+                if (frontHeightAttempts < 12) {
+                    frontHeightAttempts += 1;
+                    requestAnimationFrame(measureFrontHeight);
+                }
+                return;
+            }
+            const rect = front.getBoundingClientRect();
+            if (rect && rect.height) {
+                frontHeight = rect.height;
+                frontHeightAttempts = 0;
+                card.dataset.frontHeight = String(rect.height);
+                if (!card.classList.contains('is-flipped')) {
+                    lockToFrontHeight();
+                } else {
+                    card.style.minHeight = `${frontHeight}px`;
+                }
+            }
+        };
+
+        const lockToFrontHeight = () => {
+            if (frontHeight) {
+                card.style.height = `${frontHeight}px`;
+                card.style.minHeight = `${frontHeight}px`;
+            }
+        };
+
+        const releaseFrontHeight = () => {
+            card.style.height = '';
+            if (frontHeight) {
+                card.style.minHeight = `${frontHeight}px`;
+            } else {
+                card.style.minHeight = '';
+            }
+        };
+
+        requestAnimationFrame(measureFrontHeight);
+
         const frontToggle = document.createElement('button');
         frontToggle.type = 'button';
         frontToggle.className = 'park-popup-corner-toggle front';
@@ -4025,7 +4123,7 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         textarea.id = textareaId;
         textarea.className = 'park-popup-notes-textarea';
         textarea.placeholder = 'Write your personal notes here…';
-        textarea.rows = 4;
+        textarea.rows = 3;
         textarea.spellcheck = true;
         editor.appendChild(textarea);
 
@@ -4033,6 +4131,11 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         hint.className = 'park-popup-note-hint';
         hint.textContent = 'Notes stay on this device and are not shared.';
         notesContainer.appendChild(hint);
+
+        const noteDisplayEl = document.createElement('div');
+        noteDisplayEl.className = 'park-popup-notes-display';
+        noteDisplayEl.hidden = true;
+        notesContainer.appendChild(noteDisplayEl);
 
         const status = document.createElement('div');
         status.className = 'park-popup-note-status';
@@ -4045,10 +4148,23 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         textarea.value = existingText;
 
         const normalize = (value) => (typeof value === 'string' ? value.trim() : '');
+
+        const updateNoteDisplay = (rawValue) => {
+            if (!noteDisplayEl) return;
+            const normalized = normalize(rawValue);
+            if (normalized) {
+                noteDisplayEl.innerHTML = linkifyText(normalized);
+                noteDisplayEl.hidden = false;
+            } else {
+                noteDisplayEl.innerHTML = '';
+                noteDisplayEl.hidden = true;
+            }
+        };
         let lastSavedNormalized = normalize(existingText);
         if (lastSavedNormalized) {
             card.classList.add('has-note');
         }
+        updateNoteDisplay(existingText);
         if (marker) updateMarkerNotesVisual(marker, !!lastSavedNormalized);
         if (parkRecord) {
             if (lastSavedNormalized) parkRecord.__hasNotes = true;
@@ -4089,6 +4205,7 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
                     if (hasNote) parkRecord.__hasNotes = true;
                     else delete parkRecord.__hasNotes;
                 }
+                updateNoteDisplay(textarea.value);
                 updateMarkerNotesVisual(marker, hasNote);
                 setStatus(hasNote ? 'Saved' : 'Note cleared');
             } catch (e) {
@@ -4123,12 +4240,27 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
 
         textarea.addEventListener('input', () => scheduleSave(false));
         textarea.addEventListener('change', () => scheduleSave(true));
-        textarea.addEventListener('blur', () => scheduleSave(true));
+        textarea.addEventListener('focus', () => {
+            card.classList.add('notes-editing');
+            releaseFrontHeight();
+        });
+        textarea.addEventListener('blur', () => {
+            card.classList.remove('notes-editing');
+            scheduleSave(true);
+            if (!card.classList.contains('is-flipped')) {
+                measureFrontHeight();
+                lockToFrontHeight();
+            }
+        });
         textarea.addEventListener('keydown', (event) => event.stopPropagation());
 
         const flip = (toBack) => {
+            if (!frontHeight) {
+                measureFrontHeight();
+            }
             card.classList.toggle('is-flipped', toBack);
             if (toBack) {
+                releaseFrontHeight();
                 setTimeout(() => {
                     try {
                         textarea.focus({preventScroll: true});
@@ -4136,6 +4268,9 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
                         try { textarea.focus(); } catch (_) {}
                     }
                 }, 180);
+            } else {
+                card.classList.remove('notes-editing');
+                lockToFrontHeight();
             }
         };
 
