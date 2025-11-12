@@ -534,8 +534,9 @@
 .park-popup-back-body {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding-left: 40px; /* keep controls clear of the corner badge */
+    align-items: center;
+    width: 100%;
+    padding: 4px 16px 12px;
 }
 /* Reserve space so the title never sits under the dog-ear */
 .park-popup-front-body {
@@ -554,9 +555,8 @@
     height: 28px;
     border: 2px solid #ffffff;
     border-radius: 50%;
-    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.92), rgba(255,255,255,0.78)),
-                linear-gradient(135deg, rgba(59,130,246,1), rgba(96,165,250,1));
-    color: #fff;
+    background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+    color: #0f172a;
     cursor: pointer;
     box-shadow: 0 6px 14px rgba(15, 23, 42, 0.28);
     display: flex;
@@ -565,11 +565,16 @@
     transform: none;
     transition: transform 0.15s ease, box-shadow 0.2s ease;
     z-index: 2;
+    overflow: visible;
+}
+.park-popup-corner-toggle::before {
+    content: '';
+    width: 18px;
+    height: 18px;
     background-repeat: no-repeat;
     background-position: center;
-    background-size: 18px 18px;   /* arrow size */
-    overflow: visible;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7.5 4.25h7.25a5.75 5.75 0 1 1-4.06 9.81' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M7.5 4.25l3.25 3.25-3.25 3.25' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-size: contain;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 4h8a6 6 0 1 1-4.24 10.24' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M7 4l3.5 3.5L7 11' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 /* Compact dog-ear for narrow popups */
 .compact-note .park-popup-corner-toggle {
@@ -581,13 +586,9 @@
     border-radius: 50%;
     border-width: 2px;
 }
-/* Compact scaling override for the arrow on the button background */
-.compact-note .park-popup-corner-toggle { background-size: 16px 16px; }
-/* Hide any textual glyphs (like the old emoji) inside the badge */
-.park-popup-corner-toggle > * {
-    opacity: 0 !important;
-    font-size: 0 !important;
-    line-height: 0 !important;
+.compact-note .park-popup-corner-toggle::before {
+    width: 16px;
+    height: 16px;
 }
 
 .park-popup-corner-toggle:hover {
@@ -606,32 +607,55 @@
 }
 
 .park-popup-corner-toggle.back {
-    background: linear-gradient(135deg, #334155, #1f2937);
+    background: linear-gradient(135deg, #1f2937, #0f172a);
+    color: #fff;
 }
 
 .park-popup-card.has-note .park-popup-corner-toggle.front {
     background: linear-gradient(135deg, #047857, #059669);
+    color: #fff;
+}
+
+.park-popup-corner-icon {
+    display: none;
+}
+
+.park-popup-notes-container {
+    width: 100%;
+    max-width: 320px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
 }
 
 .park-popup-notes-label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
     font-weight: 600;
+    text-align: center;
+    color: #0f172a;
+}
+
+.park-popup-notes-label > span {
+    font-size: 0.95rem;
 }
 
 .park-popup-notes-textarea {
     width: 100%;
-    min-height: 120px;
-    max-height: 260px;
-    margin-top: 2px;
-    padding: 10px 12px;
+    min-height: 140px;
+    max-height: 280px;
+    align-self: center;
+    padding: 12px 14px;
     border: 1px solid #d1d5db;
     border-radius: 8px;
     resize: vertical;
     font-family: inherit;
     font-size: 0.95rem;
-    line-height: 1.4;
+    line-height: 1.45;
+    text-align: left;
     box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.08);
 }
 
@@ -645,6 +669,7 @@
     margin-top: 6px;
     font-size: 0.75rem;
     color: #4b5563;
+    text-align: center;
 }
 
 .park-popup-note-status {
@@ -652,6 +677,7 @@
     font-size: 0.78rem;
     min-height: 1em;
     color: #2563eb;
+    text-align: center;
 }
 
 .park-popup-card.has-note .park-popup-note-status {
@@ -671,7 +697,10 @@
         height: 32px;
         border-width: 2px;
     }
-    .park-popup-corner-toggle { background-size: 20px 20px; }
+    .park-popup-corner-toggle::before {
+        width: 20px;
+        height: 20px;
+    }
     .park-popup-notes-textarea {
         min-height: 64px;
     }
