@@ -501,7 +501,7 @@
 .leaflet-popup-content .park-popup-card {
     position: relative;
     perspective: 1400px;
-    min-height: 180px;
+    min-height: 140px;
 }
 
 .park-popup-inner {
@@ -519,7 +519,7 @@
     position: relative;
     background: #fff;
     backface-visibility: hidden;
-    min-height: 180px;
+    min-height: 140px;
     padding-top: 10px;
 }
 
@@ -585,7 +585,7 @@
 
 .park-popup-notes-textarea {
     width: 100%;
-    min-height: 140px;
+    min-height: 100px;
     padding: 10px 12px;
     border: 1px solid #d1d5db;
     border-radius: 6px;
@@ -636,7 +636,7 @@
     }
 
     .park-popup-notes-textarea {
-        min-height: 120px;
+        min-height: 90px;
     }
 }
 

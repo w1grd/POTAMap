@@ -668,7 +668,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         if (usingDivIcon) {
             marker = L.marker([latitude, longitude], {
                 icon: L.divIcon({
-                    className: `leaflet-div-icon ${markerClasses.join(' ')}`.trim(),
+                    className: `leaflet-div-icon park-spot-icon ${markerClasses.join(' ')}`.trim(),
                     iconSize: [20, 20],
                 })
             });
@@ -699,7 +699,7 @@ async function displayParksOnMap(map, parks, userActivatedReferences = null, lay
         // Add to map
         marker
             .addTo(layerGroup)
-            .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip" })
+            .bindTooltip(tooltipText, { direction: "top", opacity: 0.9, sticky: true, className: "custom-tooltip" })
             .bindPopup("<b>Loading park info...</b>", { maxWidth: 280, keepInView: true, autoPan: true, autoPanPadding: [30, 40] })
             .on('click touchend', function () { this.closeTooltip(); });
 
@@ -2087,7 +2087,7 @@ async function redrawMarkersWithFilters() {
                 marker = L.marker([latitude, longitude], {
                     icon: L.divIcon({
                         // include Leaflet's default class for compatibility with Leaflet styles
-                        className: `leaflet-div-icon ${markerClassName}`.trim(),
+                        className: `leaflet-div-icon park-spot-icon ${markerClassName}`.trim(),
                         iconSize: [20, 20],
                     })
                 });
@@ -2145,7 +2145,7 @@ async function redrawMarkersWithFilters() {
                     autoPan: true,
                     autoPanPadding: [30, 40]
                 })
-                .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: false, className: "custom-tooltip"})
+                .bindTooltip(tooltipText, {direction: "top", opacity: 0.9, sticky: true, className: "custom-tooltip"})
                 .on('click touchend', function () {
                     this.closeTooltip();
                 });
