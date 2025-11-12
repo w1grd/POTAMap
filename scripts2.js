@@ -3994,6 +3994,12 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
             icon.className = 'park-popup-corner-icon';
             icon.setAttribute('aria-hidden', 'true');
             toggle.appendChild(icon);
+
+            const text = document.createElement('span');
+            text.className = 'park-popup-corner-text';
+            text.textContent = 'turn me';
+            text.setAttribute('aria-hidden', 'true');
+            toggle.appendChild(text);
         };
 
         addCornerIcon(frontToggle);
@@ -4007,20 +4013,26 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         notesContainer.className = 'park-popup-notes-container';
         backBody.appendChild(notesContainer);
 
+        const textareaId = `park-notes-${String(reference || '')}`
+            .replace(/[^a-z0-9_-]+/gi, '-');
+
         const label = document.createElement('label');
         label.className = 'park-popup-notes-label';
+        label.setAttribute('for', textareaId);
+        label.textContent = `Notes for ${reference}`;
         notesContainer.appendChild(label);
 
-        const labelText = document.createElement('span');
-        labelText.textContent = `Notes for ${reference}`;
-        label.appendChild(labelText);
+        const editor = document.createElement('div');
+        editor.className = 'park-popup-notes-editor';
+        notesContainer.appendChild(editor);
 
         const textarea = document.createElement('textarea');
+        textarea.id = textareaId;
         textarea.className = 'park-popup-notes-textarea';
         textarea.placeholder = 'Write your personal notes here…';
         textarea.rows = 4;
         textarea.spellcheck = true;
-        label.appendChild(textarea);
+        editor.appendChild(textarea);
 
         const hint = document.createElement('div');
         hint.className = 'park-popup-note-hint';
