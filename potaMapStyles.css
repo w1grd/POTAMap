@@ -538,7 +538,7 @@
 }
 /* Reserve space so the title never sits under the dog-ear */
 .park-popup-front-body {
-    padding-left: 44px;  /* room for the corner toggle on the left */
+    padding-left: 36px;  /* badge moved inward; less padding needed */
 }
 .park-popup-face.park-popup-back {
     transform: rotateY(180deg);
@@ -546,29 +546,29 @@
 
 .park-popup-corner-toggle {
     position: absolute;
-    top: -13px;                 /* slightly proud of the card */
-    left: -13px;
+    top: -10px;                 /* still a bit proud of the card */
+    left: -6px;                 /* pulled inward from the edge */
     right: auto;
     width: 26px;
     height: 26px;
     border: 2px solid #ffffff;  /* crisp white ring */
     border-radius: 50%;         /* round badge */
-    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.85), rgba(255,255,255,0.7)) ,
-                linear-gradient(135deg, rgba(37,99,235,0.95), rgba(59,130,246,0.95));
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.9), rgba(255,255,255,0.75)),
+    linear-gradient(135deg, rgba(59,130,246,0.98), rgba(96,165,250,0.98)); /* brighter blue */
     color: #fff;
     cursor: pointer;
     box-shadow: 0 6px 14px rgba(15, 23, 42, 0.28);
     display: flex;
     align-items: center;
     justify-content: center;
-    transform: none;            /* no diamond rotation */
+    transform: none;
     transition: transform 0.15s ease, box-shadow 0.2s ease;
     z-index: 2;
 }
 /* Compact dog-ear for narrow popups */
 .compact-note .park-popup-corner-toggle {
-    top: -11px;
-    left: -11px;
+    top: -9px;
+    left: -5px;
     right: auto;
     width: 22px;
     height: 22px;
@@ -576,9 +576,16 @@
     border-width: 2px;
 }
 .park-popup-corner-toggle > span {
-    font-size: 13px;
+    width: 16px;
+    height: 16px;
     line-height: 1;
-    transform: none;
+    display: block;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 100% 100%;
+    /* Bright pencil SVG (yellow body, pink eraser, silver band, dark tip) */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3 21l3-0.75 12-12-2.25-2.25-12 12L3 21z' fill='%23FFD34D'/><path d='M15.75 6l2.25 2.25 1.5-1.5-2.25-2.25-1.5 1.5z' fill='%23E5E7EB'/><path d='M3 21l1.75-1.75 2 2L3 21z' fill='%236B7280'/><rect x='17.25' y='3.75' width='3' height='3' transform='rotate(45 18.75 5.25)' fill='%23F87171'/></svg>");
+
 }
 
 .park-popup-corner-toggle:hover {
@@ -654,8 +661,8 @@
 
 @media (max-width: 420px) {
     .park-popup-corner-toggle {
-        top: -10px;
-        left: -10px;
+        top: -8px;
+        left: -4px;
         right: auto;
         width: 30px;
         height: 30px;
