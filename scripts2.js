@@ -4196,6 +4196,8 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
 
         addCornerIcon(frontToggle);
         addCornerIcon(backToggle);
+        frontToggle.hidden = false;
+        backToggle.hidden = true;
 
         const backBody = document.createElement('div');
         backBody.className = 'park-popup-back-body';
@@ -4361,6 +4363,8 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
             const showBack = !!toBack;
             front.setAttribute('aria-hidden', showBack ? 'true' : 'false');
             back.setAttribute('aria-hidden', showBack ? 'false' : 'true');
+            frontToggle.hidden = showBack;
+            backToggle.hidden = !showBack;
             if (!use3DFlip) {
                 front.hidden = showBack;
                 back.hidden = !showBack;
