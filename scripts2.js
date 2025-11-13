@@ -366,15 +366,28 @@ function ensurePopupCollapsibleCss() {
   font-weight: 600;
   outline: none;
   user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .leaflet-popup-content details.popup-collapsible > summary::-webkit-details-marker { display: none; }
-.leaflet-popup-content details.popup-collapsible > summary::before {
-  content: "▸";
-  display: inline-block;
-  margin-right: 6px;
-  transform: translateY(-1px);
+.leaflet-popup-content details.popup-collapsible > summary .popup-caret {
+  flex: 0 0 auto;
+  width: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  transition: transform 0.2s ease;
+  color: #0f172a;
 }
-.leaflet-popup-content details.popup-collapsible[open] > summary::before { content: "▾"; }
+.leaflet-popup-content details.popup-collapsible[open] > summary .popup-caret {
+  transform: rotate(90deg);
+}
+.leaflet-popup-content details.popup-collapsible > summary .popup-summary-label {
+  flex: 1;
+  min-width: 0;
+}
 .leaflet-popup-content .popup-collapsible-body {
   padding: 8px 10px 10px;
   border-top: 1px solid rgba(0,0,0,0.08);
@@ -417,7 +430,17 @@ function foldPopupSections(html) {
             }
 
             const summary = document.createElement('summary');
-            summary.textContent = titleText;
+            const caret = document.createElement('span');
+            caret.className = 'popup-caret';
+            caret.setAttribute('aria-hidden', 'true');
+            caret.textContent = '▸';
+
+            const label = document.createElement('span');
+            label.className = 'popup-summary-label';
+            label.textContent = titleText;
+
+            summary.appendChild(caret);
+            summary.appendChild(label);
             details.appendChild(summary);
 
             // Move following siblings (until next <b>...</b> heading or end) into the details body
