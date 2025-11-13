@@ -522,6 +522,7 @@
 .leaflet-popup-content .park-popup-card {
     position: relative;
     perspective: 1400px;
+    -webkit-perspective: 1400px;
     min-height: 0;
 }
 
@@ -531,10 +532,14 @@
     display: grid;
     transition: transform 0.48s ease;
     transform-style: preserve-3d;
+    -webkit-transform-style: preserve-3d;
+    transform: rotateY(0deg);
+    -webkit-transform: rotateY(0deg);
 }
 
 .park-popup-card.is-flipped .park-popup-inner {
     transform: rotateY(180deg);
+    -webkit-transform: rotateY(180deg);
 }
 
 .park-popup-face {
@@ -542,6 +547,7 @@
     grid-area: 1 / 1 / 2 / 2;
     background: #fff;
     backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
     min-height: 0;
     padding-top: 10px;
 }
@@ -565,6 +571,32 @@
 }
 .park-popup-face.park-popup-back {
     transform: rotateY(180deg);
+    -webkit-transform: rotateY(180deg);
+}
+
+.park-popup-card.no-3d .park-popup-inner {
+    display: block;
+    transform: none;
+    -webkit-transform: none;
+}
+
+.park-popup-card.no-3d .park-popup-face {
+    transform: none;
+    -webkit-transform: none;
+    backface-visibility: visible;
+    -webkit-backface-visibility: visible;
+}
+
+.park-popup-card.no-3d .park-popup-back {
+    display: none;
+}
+
+.park-popup-card.no-3d.is-flipped .park-popup-front {
+    display: none;
+}
+
+.park-popup-card.no-3d.is-flipped .park-popup-back {
+    display: block;
 }
 
 .park-popup-corner-toggle {
