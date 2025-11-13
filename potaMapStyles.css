@@ -491,16 +491,19 @@
 /* Ensure Leaflet popups fit and wrap on small screens */
 .leaflet-popup-content-wrapper{
     max-width: 280px;
+    overflow: visible;
 }
 
 .leaflet-popup-content{
     overflow-wrap: break-word;
+    overflow: visible;
 }
 
 /* Flip card popup for personal park notes */
 .leaflet-popup-content .park-popup-card {
     position: relative;
     perspective: 1400px;
+    transform-style: preserve-3d;
     min-height: 0;
 }
 
@@ -521,6 +524,7 @@
     grid-area: 1 / 1 / 2 / 2;
     background: #fff;
     backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
     min-height: 0;
     padding-top: 10px;
 }
