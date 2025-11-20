@@ -709,11 +709,39 @@
     color: #1e40af;
 }
 
+.park-popup-notes-empty {
+    color: #6b7280;
+    font-style: italic;
+}
+
 .park-popup-notes-label {
     font-weight: 600;
     font-size: 0.95rem;
     text-align: center;
     color: #0f172a;
+}
+
+.park-popup-note-actions {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.park-popup-edit-link {
+    background: none;
+    border: none;
+    color: #2563eb;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0;
+    text-decoration: underline;
+}
+
+.park-popup-edit-link:hover,
+.park-popup-edit-link:focus-visible {
+    color: #1e40af;
+    outline: none;
 }
 
 .park-popup-notes-editor {

@@ -4171,11 +4171,6 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         frontBody.innerHTML = frontHtml || '';
         front.appendChild(frontBody);
 
-        const noteDisplay = document.createElement('div');
-        noteDisplay.className = 'park-popup-notes-display';
-        noteDisplay.hidden = true;
-        front.appendChild(noteDisplay);
-
         const back = document.createElement('section');
         back.className = 'park-popup-face park-popup-back';
         inner.appendChild(back);
@@ -4218,8 +4213,25 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         label.textContent = `Notes for ${reference}`;
         notesContainer.appendChild(label);
 
+        const noteDisplayEl = document.createElement('div');
+        noteDisplayEl.className = 'park-popup-notes-display';
+        noteDisplayEl.hidden = true;
+        notesContainer.appendChild(noteDisplayEl);
+
+        const actions = document.createElement('div');
+        actions.className = 'park-popup-note-actions';
+        notesContainer.appendChild(actions);
+
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'park-popup-edit-link';
+        editButton.textContent = 'Add note';
+        editButton.setAttribute('aria-expanded', 'false');
+        actions.appendChild(editButton);
+
         const editor = document.createElement('div');
         editor.className = 'park-popup-notes-editor';
+        editor.hidden = true;
         notesContainer.appendChild(editor);
 
         const textarea = document.createElement('textarea');
@@ -4233,16 +4245,13 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         const hint = document.createElement('div');
         hint.className = 'park-popup-note-hint';
         hint.textContent = 'Notes stay on this device and are not shared.';
+        hint.hidden = true;
         notesContainer.appendChild(hint);
-
-        const noteDisplayEl = document.createElement('div');
-        noteDisplayEl.className = 'park-popup-notes-display';
-        noteDisplayEl.hidden = true;
-        notesContainer.appendChild(noteDisplayEl);
 
         const status = document.createElement('div');
         status.className = 'park-popup-note-status';
         status.setAttribute('aria-live', 'polite');
+        status.hidden = true;
         notesContainer.appendChild(status);
 
         const state = await ensureNotesCacheFromIndexedDB();
@@ -4252,16 +4261,36 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
 
         const normalize = (value) => (typeof value === 'string' ? value.trim() : '');
 
+        let isEditing = false;
+
+        const updateEditLabel = (hasNote) => {
+            const label = hasNote ? 'Edit note' : 'Add note';
+            editButton.textContent = isEditing ? 'Done' : label;
+            editButton.setAttribute('aria-expanded', isEditing ? 'true' : 'false');
+        };
+
         const updateNoteDisplay = (rawValue) => {
-            if (!noteDisplayEl) return;
             const normalized = normalize(rawValue);
-            if (normalized) {
-                noteDisplayEl.innerHTML = linkifyText(normalized);
-                noteDisplayEl.hidden = false;
-            } else {
-                noteDisplayEl.innerHTML = '';
-                noteDisplayEl.hidden = true;
-            }
+            const targets = [noteDisplayEl];
+            const hasContent = !!normalized;
+            targets.forEach((el) => {
+                if (!el) return;
+                if (hasContent) {
+                    el.innerHTML = linkifyText(normalized);
+                    el.hidden = false;
+                    el.classList.remove('empty');
+                } else {
+                    el.innerHTML = '';
+                    el.classList.toggle('empty', true);
+                    if (el === noteDisplayEl) {
+                        el.innerHTML = '<span class="park-popup-notes-empty">No personal notes yet.</span>';
+                        el.hidden = false;
+                    } else {
+                        el.hidden = true;
+                    }
+                }
+            });
+            updateEditLabel(hasContent);
         };
         let lastSavedNormalized = normalize(existingText);
         if (lastSavedNormalized) {
@@ -4278,6 +4307,7 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
             if (!status) return;
             status.textContent = msg || '';
             status.classList.toggle('error', !!isError);
+            status.hidden = !isEditing && !msg;
         };
 
         let saveTimer = null;
@@ -4341,21 +4371,55 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
             }, 420);
         };
 
-        textarea.addEventListener('input', () => scheduleSave(false));
-        textarea.addEventListener('change', () => scheduleSave(true));
-        textarea.addEventListener('focus', () => {
-            card.classList.add('notes-editing');
-            releaseFrontHeight();
-        });
-        textarea.addEventListener('blur', () => {
-            card.classList.remove('notes-editing');
-            scheduleSave(true);
-            if (!card.classList.contains('is-flipped')) {
+        const setEditing = (editing, {focusTextarea = true} = {}) => {
+            const nextState = !!editing;
+            isEditing = nextState;
+            card.classList.toggle('notes-editing', nextState);
+            editor.hidden = !nextState;
+            hint.hidden = !nextState;
+            status.hidden = !nextState && !status.textContent;
+            updateEditLabel(!!lastSavedNormalized);
+            if (nextState) {
+                releaseFrontHeight();
+                if (focusTextarea) {
+                    setTimeout(() => {
+                        try { textarea.focus({preventScroll: true}); }
+                        catch (_) { try { textarea.focus(); } catch (_) { } }
+                    }, 40);
+                }
+            } else if (!card.classList.contains('is-flipped')) {
                 measureFrontHeight();
                 lockToFrontHeight();
             }
+        };
+
+        textarea.addEventListener('input', () => scheduleSave(false));
+        textarea.addEventListener('change', () => scheduleSave(true));
+        textarea.addEventListener('focus', () => setEditing(true, {focusTextarea: false}));
+        textarea.addEventListener('blur', () => {
+            scheduleSave(true);
+            setTimeout(() => {
+                try {
+                    const active = document.activeElement;
+                    if (!editor.contains(active)) {
+                        setEditing(false, {focusTextarea: false});
+                    }
+                } catch (_) {
+                }
+            }, 120);
         });
         textarea.addEventListener('keydown', (event) => event.stopPropagation());
+        editButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (isEditing) {
+                setEditing(false, {focusTextarea: false});
+                textarea.blur();
+                scheduleSave(true);
+            } else {
+                setEditing(true);
+            }
+        });
 
         const flip = (toBack) => {
             if (!frontHeight) {
@@ -4376,15 +4440,9 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
             }
             if (toBack) {
                 releaseFrontHeight();
-                setTimeout(() => {
-                    try {
-                        textarea.focus({preventScroll: true});
-                    } catch (_) {
-                        try { textarea.focus(); } catch (_) {}
-                    }
-                }, 180);
+                setEditing(false, {focusTextarea: false});
             } else {
-                card.classList.remove('notes-editing');
+                setEditing(false, {focusTextarea: false});
                 lockToFrontHeight();
             }
         };
@@ -4408,6 +4466,8 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
             scheduleSave(true);
             flip(false);
         });
+
+        setEditing(false, {focusTextarea: false});
 
         return card;
     } catch (e) {
