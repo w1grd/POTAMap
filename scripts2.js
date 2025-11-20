@@ -4171,11 +4171,6 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         frontBody.innerHTML = frontHtml || '';
         front.appendChild(frontBody);
 
-        const noteDisplay = document.createElement('div');
-        noteDisplay.className = 'park-popup-notes-display';
-        noteDisplay.hidden = true;
-        front.appendChild(noteDisplay);
-
         const back = document.createElement('section');
         back.className = 'park-popup-face park-popup-back';
         inner.appendChild(back);
@@ -4230,7 +4225,7 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         const editButton = document.createElement('button');
         editButton.type = 'button';
         editButton.className = 'park-popup-edit-link';
-        editButton.textContent = 'Edit notes';
+        editButton.textContent = 'Add note';
         editButton.setAttribute('aria-expanded', 'false');
         actions.appendChild(editButton);
 
@@ -4269,14 +4264,14 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         let isEditing = false;
 
         const updateEditLabel = (hasNote) => {
-            const label = hasNote ? 'Edit notes' : 'Add notes';
+            const label = hasNote ? 'Edit note' : 'Add note';
             editButton.textContent = isEditing ? 'Done' : label;
             editButton.setAttribute('aria-expanded', isEditing ? 'true' : 'false');
         };
 
         const updateNoteDisplay = (rawValue) => {
             const normalized = normalize(rawValue);
-            const targets = [noteDisplayEl, noteDisplay];
+            const targets = [noteDisplayEl];
             const hasContent = !!normalized;
             targets.forEach((el) => {
                 if (!el) return;
