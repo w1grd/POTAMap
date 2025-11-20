@@ -4417,9 +4417,13 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         editButton.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
-            const next = !isEditing;
-            setEditing(next);
-            if (!next) scheduleSave(true);
+            if (isEditing) {
+                setEditing(false, {focusTextarea: false});
+                textarea.blur();
+                scheduleSave(true);
+            } else {
+                setEditing(true);
+            }
         });
 
         const flip = (toBack) => {
