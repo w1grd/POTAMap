@@ -139,6 +139,65 @@ function linkifyText(text) {
     return result;
 }
 
+let __popupFlip3DSupport = null;
+
+function supportsPopupFlip3D() {
+    if (__popupFlip3DSupport !== null) return __popupFlip3DSupport;
+
+    if (typeof window === 'undefined') {
+        __popupFlip3DSupport = false;
+        return __popupFlip3DSupport;
+    }
+
+    const test = (property, value) => {
+        try {
+            if (window.CSS && typeof window.CSS.supports === 'function') {
+                if (window.CSS.supports(property, value)) return true;
+            }
+        } catch (_) {
+        }
+        if (typeof document === 'undefined' || !document.createElement) return false;
+        const style = document.createElement('div').style;
+        if (!style) return false;
+        const camel = property.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+        const prefixed = property.replace(/^(-webkit-|-moz-|-ms-)/, '');
+        const camelPrefixed = prefixed.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+        const candidates = [property, camel, `Webkit${camelPrefixed.charAt(0).toUpperCase()}${camelPrefixed.slice(1)}`];
+        return candidates.some((prop) => {
+            if (!(prop in style)) return false;
+            try {
+                style[prop] = value;
+                return style[prop] === value;
+            } catch (_) {
+                return false;
+            }
+        });
+    };
+
+    const transformStyle = test('transform-style', 'preserve-3d') || test('-webkit-transform-style', 'preserve-3d');
+    const backface = test('backface-visibility', 'hidden') || test('-webkit-backface-visibility', 'hidden');
+    const perspective = test('perspective', '1px') || test('-webkit-perspective', '1px');
+
+    __popupFlip3DSupport = !!(transformStyle && backface && perspective);
+    return __popupFlip3DSupport;
+}
+
+function shouldForce2DPopupFlip() {
+    try {
+        if (!supportsPopupFlip3D()) return true;
+        if (typeof navigator === 'undefined') return false;
+        const ua = String(navigator.userAgent || '');
+        const platform = String(navigator.platform || '');
+        const maxTouchPoints = Number(navigator.maxTouchPoints || 0);
+        const isIOSDevice = /iPad|iPhone|iPod/.test(ua);
+        const isTouchMac = /Mac/.test(platform) && maxTouchPoints > 1;
+        const isSafari = /Safari/.test(ua) && !/(Chrome|CriOS|FxiOS|OPiOS|EdgiOS|Edge)/.test(ua);
+        if ((isIOSDevice || isTouchMac) && isSafari) return true;
+    } catch (_) {
+    }
+    return false;
+}
+
 // === Global popup opener helper ===
 
 // === Helpers for Go-To-Park popup behavior ===
@@ -366,15 +425,28 @@ function ensurePopupCollapsibleCss() {
   font-weight: 600;
   outline: none;
   user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .leaflet-popup-content details.popup-collapsible > summary::-webkit-details-marker { display: none; }
-.leaflet-popup-content details.popup-collapsible > summary::before {
-  content: "▸";
-  display: inline-block;
-  margin-right: 6px;
-  transform: translateY(-1px);
+.leaflet-popup-content details.popup-collapsible > summary .popup-caret {
+  flex: 0 0 auto;
+  width: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  transition: transform 0.2s ease;
+  color: #0f172a;
 }
-.leaflet-popup-content details.popup-collapsible[open] > summary::before { content: "▾"; }
+.leaflet-popup-content details.popup-collapsible[open] > summary .popup-caret {
+  transform: rotate(90deg);
+}
+.leaflet-popup-content details.popup-collapsible > summary .popup-summary-label {
+  flex: 1;
+  min-width: 0;
+}
 .leaflet-popup-content .popup-collapsible-body {
   padding: 8px 10px 10px;
   border-top: 1px solid rgba(0,0,0,0.08);
@@ -417,7 +489,17 @@ function foldPopupSections(html) {
             }
 
             const summary = document.createElement('summary');
-            summary.textContent = titleText;
+            const caret = document.createElement('span');
+            caret.className = 'popup-caret';
+            caret.setAttribute('aria-hidden', 'true');
+            caret.textContent = '▸';
+
+            const label = document.createElement('span');
+            label.className = 'popup-summary-label';
+            label.textContent = titleText;
+
+            summary.appendChild(caret);
+            summary.appendChild(label);
             details.appendChild(summary);
 
             // Move following siblings (until next <b>...</b> heading or end) into the details body
@@ -4012,6 +4094,8 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         const ref = normalizeNoteRef(reference);
         const card = document.createElement('div');
         card.className = 'park-popup-card';
+        const use3DFlip = !shouldForce2DPopupFlip();
+        if (!use3DFlip) card.classList.add('no-3d');
 
         const inner = document.createElement('div');
         inner.className = 'park-popup-inner';
@@ -4046,6 +4130,11 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         };
 
         const lockToFrontHeight = () => {
+            if (!use3DFlip) {
+                card.style.height = '';
+                card.style.minHeight = '';
+                return;
+            }
             if (frontHeight) {
                 card.style.height = `${frontHeight}px`;
                 card.style.minHeight = `${frontHeight}px`;
@@ -4053,6 +4142,11 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
         };
 
         const releaseFrontHeight = () => {
+            if (!use3DFlip) {
+                card.style.height = '';
+                card.style.minHeight = '';
+                return;
+            }
             card.style.height = '';
             if (frontHeight) {
                 card.style.minHeight = `${frontHeight}px`;
@@ -4102,6 +4196,8 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
 
         addCornerIcon(frontToggle);
         addCornerIcon(backToggle);
+        frontToggle.hidden = false;
+        backToggle.hidden = true;
 
         const backBody = document.createElement('div');
         backBody.className = 'park-popup-back-body';
@@ -4264,6 +4360,18 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
                 measureFrontHeight();
             }
             card.classList.toggle('is-flipped', toBack);
+            const showBack = !!toBack;
+            front.setAttribute('aria-hidden', showBack ? 'true' : 'false');
+            back.setAttribute('aria-hidden', showBack ? 'false' : 'true');
+            frontToggle.hidden = showBack;
+            backToggle.hidden = !showBack;
+            if (!use3DFlip) {
+                front.hidden = showBack;
+                back.hidden = !showBack;
+            } else {
+                front.hidden = false;
+                back.hidden = false;
+            }
             if (toBack) {
                 releaseFrontHeight();
                 setTimeout(() => {
@@ -4278,6 +4386,13 @@ async function buildPopupWithNotes({reference, frontHtml, marker, parkRecord}) {
                 lockToFrontHeight();
             }
         };
+
+        front.setAttribute('aria-hidden', 'false');
+        back.setAttribute('aria-hidden', 'true');
+        if (!use3DFlip) {
+            front.hidden = false;
+            back.hidden = true;
+        }
 
         frontToggle.addEventListener('click', (event) => {
             event.preventDefault();
